@@ -1299,6 +1299,8 @@ function deselectAll() {
 function syncIdle() {
   $('.panel').classList.toggle('idle', idle && mode !== 'stuff');
   $('#shape-bar').classList.toggle('idle', idle);
+  // the handles follow the same idle state, so they can't outlive the selection
+  updateSkeletonVisibility();
 }
 
 function updateSkeletonVisibility() {
@@ -3833,6 +3835,8 @@ function replaceWorld(next: World) {
   world = next;
   next.creatures.forEach((s, i) => (creatures[i] = makeCreature(s)));
   selected = '';
+  // a new world starts with nothing picked: set before activate draws the handles
+  idle = true;
   activate(world.active);
 }
 
@@ -3842,7 +3846,6 @@ function newCreation() {
   if (mode !== 'shape') setMode('shape');
   replaceWorld({ ...freshWorld(), workbench: world.workbench });
   beginCreation(null, false);
-  idle = true;
   commit();
   renderUI();
   frameCreature(true);
@@ -3861,7 +3864,6 @@ async function openCreation(id: string) {
   replaceWorld({ creatures: list, active: Math.min(Math.max(0, c.data.active ?? 0), list.length - 1), workbench: world.workbench, name: c.name });
   if (c.data.look) applyLook(c.data.look);
   beginCreation(c.id, true, c);
-  idle = true;
   commit();
   // opening it isn't a change
   opened.savedJson = JSON.stringify(creationData());
