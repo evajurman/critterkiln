@@ -4771,6 +4771,11 @@ function setMirror(on: boolean) {
   renderRigPanel();
   hint(rigLock ? 'Mirror on: both sides bend, stretch and grow together' : 'Mirror off: each side on its own', 2000);
 }
+$<HTMLInputElement>('#ik').onchange = (e) => {
+  const on = (e.target as HTMLInputElement).checked;
+  $('#ik-pill').classList.toggle('on', on);
+  hint(on ? 'Pull limbs on: dragging a hand bends the elbow and shoulder too' : 'Pull limbs off: dragging bends just that joint', 2000);
+};
 $<HTMLInputElement>('#rig-sym').onchange = (e) => setMirror((e.target as HTMLInputElement).checked);
 
 // ---- per-bone default-shape widths and bend, applied live ----

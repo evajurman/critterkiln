@@ -489,8 +489,8 @@ body.show-nums .slider input.num, body.show-nums .bar-slider input.num { display
 }
 /* Arrange, with Mirror under it; in Look mode only Arrange applies */
 .shape-pills { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
-.shape-bar.look .mirror-row, .shape-bar.look .legend { display: none; }
-.mirror-row { display: flex; gap: 6px; }
+.shape-bar.look .mirror-row, .shape-bar.look .legend, .shape-bar.look #ik-pill { display: none; }
+.mirror-row, .pill-row { display: flex; gap: 6px; }
 .shape-bar .pill-toggle[hidden], .eyes-card[hidden] { display: none; }
 .shape-bar button.pill-toggle { font-family: inherit; color: var(--ink); }
 .shape-bar button.pill-toggle:disabled { opacity: .45; cursor: var(--cursor); transform: none; }

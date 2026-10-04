@@ -102,7 +102,6 @@
             <button id="reset-pose" class="ghost" title="Straighten every joint back out"><i class="fa-regular fa-person" aria-hidden="true"></i> Stand up straight</button>
             <button id="drop-floor" class="ghost" title="Move the whole creature so its lowest point touches the floor"><i class="fa-slab fa-regular fa-arrow-down-to-line" aria-hidden="true"></i> Floor</button>
           </div>
-          <label class="check" title="Dragging a hand bends the elbow and shoulder too"><input id="ik" type="checkbox" checked /> Pull whole limbs</label>
           <label class="check" title="After you bend or resize something, the creature settles back onto the floor (if it was standing on it)"><input id="keep-floor" type="checkbox" checked /> Keep feet on the floor</label>
 
         </section>
@@ -202,7 +201,12 @@
         <div id="settle-badge" class="settle-badge" hidden>Smoothing joins…</div>
         <div id="shape-bar" class="shape-bar">
           <div class="shape-pills">
-            <button id="cr-place" class="pill-toggle" title="Move, turn or resize this creature anywhere in the scene"><i class="fa-regular fa-arrows-up-down-left-right" aria-hidden="true"></i> Arrange</button>
+            <div class="pill-row">
+              <button id="cr-place" class="pill-toggle" title="Move, turn or resize this creature anywhere in the scene"><i class="fa-regular fa-arrows-up-down-left-right" aria-hidden="true"></i> Arrange</button>
+              <label id="ik-pill" class="pill-toggle on" title="Dragging a hand bends the elbow and shoulder too">
+                <input id="ik" type="checkbox" checked /> <i class="fa-regular fa-hand-back-fist" aria-hidden="true"></i> Pull limbs
+              </label>
+            </div>
             <div class="mirror-row">
               <label id="mirror-pill" class="pill-toggle" title="Both sides change together: shaping and posing (M)">
                 <input id="rig-sym" type="checkbox" checked /> <i class="fa-slab fa-regular fa-arrow-right-arrow-left" aria-hidden="true"></i> Mirror <kbd>M</kbd>
