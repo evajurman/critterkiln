@@ -4135,7 +4135,7 @@ function renderRigs() {
   el.innerHTML = '';
   const options = [
     ...RIGS.map((r) => ({ base: r.id, icon: `<i class="${r.icon}" aria-hidden="true"></i>`, name: r.name })),
-    ...savedRigs().map((r) => ({ base: r.base, icon: faClassic('bone'), name: r.name })),
+    ...savedRigs().map((r) => ({ base: r.base, icon: '<i class="fa-solid fa-bone" aria-hidden="true"></i>', name: r.name })),
   ];
   for (const o of options) {
     const btn = document.createElement('button');
@@ -4467,6 +4467,18 @@ function renderEyes() {
   $<HTMLInputElement>('#eye-lift').value = String(pair.lift ?? e.lift ?? 0);
   $<HTMLInputElement>('#eye-turn').value = String(Math.round(((pair.turn ?? e.turn ?? 0) * 180) / Math.PI));
   // finish and color only apply to the styles made of a material
+  // googly and sticker eyes have a pupil to size and point
+  const pupils = e.enabled && (e.style === 'googly' || e.style === 'flat');
+  $('#eye-pupil-look').hidden = !pupils;
+  if (pupils) {
+    $('#eye-pupil-title').textContent = e.style === 'googly' ? 'Googly look' : 'Sticker look';
+    $('#eye-shine-row').hidden = e.style !== 'googly';
+    $<HTMLInputElement>('#eye-shine').value = String(e.shine ?? 1);
+    $<HTMLInputElement>('#eye-pupil').value = String(e.pupil ?? 0.5);
+    $<HTMLInputElement>('#eye-look-x').value = String(e.lookX ?? 0);
+    // a sticker's loose pupil has fallen to the bottom
+    $<HTMLInputElement>('#eye-look-y').value = String(e.lookY ?? (e.style === 'flat' ? -1 : 0));
+  }
   const shaped = e.enabled && (e.style === 'bead' || e.style === 'dot' || e.style === 'button');
   $('#eye-look').hidden = !shaped;
   if (shaped) {
@@ -5488,6 +5500,14 @@ function setEyeLook(fn: (e: CreatureState['eyes']) => void) {
   creature.sync();
   commit();
   renderEyes();
+}
+for (const [id, key] of [['#eye-shine', 'shine'], ['#eye-pupil', 'pupil'], ['#eye-look-x', 'lookX'], ['#eye-look-y', 'lookY']] as const) {
+  const input = $<HTMLInputElement>(id);
+  input.oninput = () => {
+    state.eyes[key] = parseFloat(input.value);
+    creature.sync();
+  };
+  input.onchange = () => commit();
 }
 document.querySelectorAll<HTMLButtonElement>('#eye-finish button').forEach((b) => {
   b.onclick = () => setEyeLook((e) => (e.finish = b.dataset.finish as EyeFinish));

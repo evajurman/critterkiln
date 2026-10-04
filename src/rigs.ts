@@ -58,7 +58,7 @@ const Z: V3 = [0, 0, 1];
 const biped: RigDef = {
   id: 'biped',
   name: 'Biped',
-  icon: 'fa-regular fa-person',
+  icon: 'fa-solid fa-person-limbs-wide',
   headId: 'head',
   // one bone per limb: short and stout (Split a bone in Rig mode for elbows and knees)
   bones: [
@@ -72,7 +72,7 @@ const biped: RigDef = {
 const quadruped: RigDef = {
   id: 'quadruped',
   name: 'Quadruped',
-  icon: 'fa-regular fa-dog',
+  icon: 'fa-solid fa-dog',
   headId: 'head',
   bones: [
     { id: 'body', name: 'Body', start: [0, 0.64, -0.46], end: [0, 0.68, 0.46], side: Y, width: 0.66, anchor: true },
@@ -88,7 +88,7 @@ const quadruped: RigDef = {
 const bird: RigDef = {
   id: 'bird',
   name: 'Bird',
-  icon: 'fa-regular fa-crow',
+  icon: 'fa-solid fa-crow',
   headId: 'head',
   bones: [
     { id: 'body', name: 'Body', start: [0, 0.47, -0.38], end: [0, 0.75, 0.28], side: Y, width: 0.58, anchor: true },
@@ -106,7 +106,7 @@ const serpent: RigDef = {
   id: 'serpent',
   eyeDir: [0, 1, 0.7],
   name: 'Serpent',
-  icon: 'fa-regular fa-snake',
+  icon: 'fa-solid fa-snake',
   headId: 'head',
   // three bendy segments on the ground curving opposite ways make the S; a
   // neck rises off the front of the body, so dragging the head lifts and
@@ -124,7 +124,7 @@ const bug: RigDef = {
   id: 'bug',
   eyeDir: [0, 0.4, 1],
   name: 'Bug',
-  icon: 'fa-slab fa-regular fa-bug',
+  icon: 'fa-solid fa-ant',
   headId: 'head',
   bones: [
     { id: 'body', name: 'Body', start: [0, 0.5, -0.55], end: [0, 0.56, 0.28], side: X, width: 0.6, anchor: true },

@@ -127,7 +127,7 @@
           <div id="swatches" class="swatches"></div>
           <div class="row">
             <label class="color-pick"><input id="color" type="color" /> Custom</label>
-            <button id="paint-all" class="ghost">Paint whole creature</button>
+            <button id="paint-all" class="ghost"><i class="fa-regular fa-fill-drip" aria-hidden="true"></i> Paint whole creature</button>
           </div>
           <label class="slider wide-label" id="color-blend-row" title="Also merge touching parts of different colors, fading one color into the other. 0 keeps colors apart.">
             <span>Blend colors</span><input id="color-blend" type="range" min="0" max="0.4" step="0.005" />
@@ -228,6 +228,17 @@
                   <label class="slider" title="Turn the eyes round their part. They stick to it, so rolling the part turns them too"><span>Facing</span><input id="eye-turn" type="range" min="-180" max="180" step="1" />
                     <span class="ends"><em>one way</em><em>the other</em></span></label>
                   <button id="eye-front" class="ghost" title="Turn the eyes back to the creature's front, even if their part is rolled"><i class="fa-slab fa-regular fa-face-smile" aria-hidden="true"></i> Face front</button>
+                </div>
+                <div id="eye-pupil-look">
+                  <div class="sub-title" id="eye-pupil-title">Googly look</div>
+                  <label class="slider" id="eye-shine-row" title="A shiny plastic eyeball, or a soft matte one"><span>Shine</span><input id="eye-shine" type="range" min="0" max="1" step="0.01" />
+                    <span class="ends"><em>matte</em><em>glossy</em></span></label>
+                  <label class="slider"><span>Pupil</span><input id="eye-pupil" type="range" min="0" max="1" step="0.01" />
+                    <span class="ends"><em>small</em><em>big</em></span></label>
+                  <label class="slider" title="Where the pupils point, side to side"><span>Look</span><input id="eye-look-x" type="range" min="-1" max="1" step="0.01" />
+                    <span class="ends"><em>one way</em><em>the other</em></span></label>
+                  <label class="slider" title="Where the pupils point, up and down"><span>Look up</span><input id="eye-look-y" type="range" min="-1" max="1" step="0.01" />
+                    <span class="ends"><em>down</em><em>up</em></span></label>
                 </div>
                 <div id="eye-look">
                   <div class="sub-title">Bead, dot &amp; button look</div>

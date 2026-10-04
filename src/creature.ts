@@ -100,6 +100,16 @@ export interface EyesState {
   finish?: EyeFinish;
   /** bead / dot / button color */
   color?: string;
+  /** googly: 1 glossy .. 0 matte (default glossy) */
+  shine?: number;
+  /** googly / sticker: pupil size, 0..1 (default 0.5) */
+  pupil?: number;
+  /**
+   * googly / sticker: where the pupils look, -1..1 across (to the eye's right)
+   * and up. A sticker's pupil left unset has fallen loose to the bottom.
+   */
+  lookX?: number;
+  lookY?: number;
   /** legacy: one stand-off for every pair (now per pair) */
   lift?: number;
   /** legacy: radians every pair is turned round the head (now per pair) */
@@ -1941,6 +1951,11 @@ function eyeMaterial(finish: EyeFinish, color: string, headStyle: StyleId, headS
   }
 }
 
+/** Pupil size as a scale on the default, 0.5x .. 1.5x. */
+function pupilScale(e: EyesState): number {
+  return 0.5 + (e.pupil ?? 0.5);
+}
+
 function buildEye(style: EyeStyle, r: number, sgn: number, headStyle: StyleId, headSettings: StyleSettings, e: EyesState): THREE.Object3D {
   const g = new THREE.Group();
   const finish = e.finish ?? 'body';
@@ -1954,9 +1969,29 @@ function buildEye(style: EyeStyle, r: number, sgn: number, headStyle: StyleId, h
 
   switch (style) {
     case 'googly': {
-      add(sphereGeo, glossyWhite(), [0, 0, -r * 0.35], [r, r, r]);
-      add(sphereGeo, glossyBlack(), [0, 0, r * 0.47], [r * 0.55, r * 0.6, r * 0.3]);
-      add(sphereGeo, new THREE.MeshBasicMaterial({ color: 0xffffff }), [r * 0.2, r * 0.25, r * 0.67], [r * 0.14, r * 0.14, r * 0.14]);
+      const shine = e.shine ?? 1;
+      const white = glossyWhite();
+      white.roughness = 0.75 - 0.6 * shine;
+      white.clearcoat = shine;
+      const black = glossyBlack();
+      black.roughness = 0.7 - 0.58 * shine;
+      black.clearcoat = shine;
+      add(sphereGeo, white, [0, 0, -r * 0.35], [r, r, r]);
+      // the pupil rolls round the eyeball's centre to look about
+      const roll = new THREE.Group();
+      roll.position.set(0, 0, -r * 0.35);
+      roll.rotation.set(-(e.lookY ?? 0) * 0.7, (e.lookX ?? 0) * 0.7, 0, 'YXZ');
+      g.add(roll);
+      const k = pupilScale(e);
+      const pupil = new THREE.Mesh(sphereGeo, black);
+      pupil.position.set(0, 0, r * 0.82);
+      pupil.scale.set(r * 0.55 * k, r * 0.6 * k, r * 0.3);
+      roll.add(pupil);
+      // the catchlight is a reflection: it stays put, and fades out on a matte eye
+      if (shine > 0.05) {
+        const glint = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: shine < 1, opacity: Math.min(1, shine * 1.2) });
+        add(sphereGeo, glint, [r * 0.2, r * 0.25, r * 0.67], [r * 0.14, r * 0.14, r * 0.14]);
+      }
       break;
     }
     case 'flat': {
@@ -1965,8 +2000,16 @@ function buildEye(style: EyeStyle, r: number, sgn: number, headStyle: StyleId, h
       const disc = new THREE.CylinderGeometry(1, 1, 1, 40);
       disc.rotateX(Math.PI / 2);
       add(disc, new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.55 }), [0, 0, R * 0.06], [R, R, R * 0.12]);
-      const jiggle = (sgn * 0.13 + 0.05) * R;
-      add(disc, new THREE.MeshStandardMaterial({ color: 0x151216, roughness: 0.4 }), [jiggle, -R * 0.36, R * 0.14], [R * 0.58, R * 0.58, R * 0.04]);
+      const pr = Math.min(0.85, 0.58 * pupilScale(e));
+      // how far the pupil can roll before it reaches the rim
+      const travel = Math.max(0, 0.94 - pr);
+      // left alone, it has fallen to the bottom, each side jiggled a little differently
+      const px = e.lookX !== undefined ? e.lookX * travel : Math.max(-travel, Math.min(travel, sgn * 0.13 + 0.05));
+      const py = (e.lookY ?? -1) * travel;
+      // kept inside the disc when pushed into a corner (the loose one is as it always was)
+      const placed = e.lookX !== undefined || e.lookY !== undefined;
+      const d = Math.hypot(px, py), k = placed && d > travel && d > 0 ? travel / d : 1;
+      add(disc, new THREE.MeshStandardMaterial({ color: 0x151216, roughness: 0.4 }), [px * k * R, py * k * R, R * 0.14], [R * pr, R * pr, R * 0.04]);
       const dome = new THREE.SphereGeometry(1, 40, 16, 0, Math.PI * 2, 0, Math.PI / 2);
       dome.rotateX(Math.PI / 2);
       add(

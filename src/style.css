@@ -426,7 +426,8 @@ button.primary.slim { width: auto; flex: 1; padding: 8px 10px; font-size: 14px; 
 .dot.green { background: #22c55e; }
 .dot.diamond { border-radius: 2px; transform: rotate(45deg) scale(.85); }
 
-#eye-look[hidden] { display: none; }
+#eye-look[hidden], #eye-pupil-look[hidden] { display: none; }
+#eye-pupil-look { margin-top: 8px; }
 #eye-look { margin-top: 8px; }
 .eye-swatches { grid-template-columns: repeat(8, 1fr); margin: 6px 0; }
 
@@ -617,6 +618,8 @@ details.fine[open] > summary { margin-bottom: 6px; }
 .piece-pick { flex: 1; display: flex; align-items: center; gap: 6px; padding: 5px 8px; text-align: left; border-radius: 8px; }
 .piece-pick i:not([class]) { width: 10px; height: 10px; border-radius: 50%; display: inline-block; border: 1px solid rgba(0,0,0,.15); flex: none; }
 .piece-icon { width: 30px; height: 28px; border-radius: 8px; display: grid; place-items: center; opacity: .7; }
+/* no browser padding: it left too little room and pushed the icon off centre */
+button.piece-icon { padding: 0; }
 .piece-icon:hover { opacity: 1; background: rgba(127,127,127,.18); }
 .parts-blend { margin-top: 10px; }
 
@@ -655,7 +658,7 @@ details.fine[open] > summary { margin-bottom: 6px; }
   .sheet-grip:active::before { background: var(--muted); }
 
   /* bigger targets for fingers */
-  .parts button, .eye-pairs button { padding: 6px 12px; }
+  .parts button:not(.piece-icon), .eye-pairs button { padding: 6px 12px; }
   .check input { width: 20px; height: 20px; }
   /* iOS zooms the page into any text box under 16px */
   input.text, .creature-row .chip-name, .slider input.num, .bar-slider input.num { font-size: 16px; }
