@@ -1848,7 +1848,7 @@ function stampLoops(ds: DrawState): Vec2[][] {
 function placeStamp(ds: DrawState) {
   const loops = stampLoops(ds);
   const cut = ds.tool === 'erase' && !!ds.pending;
-  ds.stamp = null;
+  // the shape stays armed for another one; Draw (or the shape again) puts it away
   ds.stampDrag = null;
   applyLoops(ds, loops, cut);
   syncDrawBar();
@@ -2308,6 +2308,14 @@ document.querySelectorAll<HTMLButtonElement>('#draw-view [data-view]').forEach((
 });
 function setDrawTool(tool: DrawTool) {
   if (!drawState || (tool !== 'draw' && !drawState.pending)) return;
+  // Draw with a shape armed: back to drawing freehand
+  if (tool === 'draw' && drawState.stamp) {
+    drawState.stamp = null;
+    drawState.tool = 'draw';
+    syncDrawBar();
+    drawHint();
+    return;
+  }
   // tapping the active tool again goes back to drawing
   drawState.tool = drawState.tool === tool ? 'draw' : tool;
   // moving, scaling or turning puts any armed shape away
@@ -4656,7 +4664,7 @@ function renderRigPanel() {
       ? 'Join this side back up with the other: the other side becomes its mirror image again'
       : 'Copy this part onto the other side, as a mirrored pair';
   }
-  $<HTMLButtonElement>('#rig-attach').disabled = !b;
+  $('#rig-attach').hidden = !b || idle;
   $<HTMLButtonElement>('#rig-split').disabled = !b;
   $('#rig-pair-note').textContent = paired ? 'Mirrored pair: both sides move together.' : '';
   $<HTMLInputElement>('#rig-sym').checked = rigLocked();
@@ -4854,7 +4862,13 @@ function mirrorPart() {
 }
 $('#rig-mirror').onclick = () => mirrorPart();
 
-$('#rig-del').onclick = () => {
+$('#rig-del').onclick = () => removePart();
+/** Delete the picked part and everything on it (the creature's root part stays). */
+function removePart() {
+  if (!creature.bones.get(selected)?.parent) {
+    hint("The first part holds everything else, so it can't be removed", 2000, true);
+    return;
+  }
   const parent = creature.bones.get(selected)?.parent?.def.id ?? '';
   rigEdit((rig) => {
     for (const d of deleteLimb(rig, selected)) {
@@ -4866,7 +4880,7 @@ $('#rig-del').onclick = () => {
     return [];
   }, false);
   selectPart(creature.bones.has(parent) ? parent : creature.list[0].def.id);
-};
+}
 $('#eyes-add').onclick = () => {
   const b = creature.bones.get(selected);
   if (!b) return;
@@ -5714,6 +5728,10 @@ window.addEventListener('keydown', (e) => {
     else if (k === 'd' && mode === 'stuff') enterDraw({ kind: 'piece' });
     else if (k === '3') setMode('stuff');
     else if (k === 'm' && mode === 'shape' && !drawState) setMirror(!rigLock);
+    else if ((k === 'backspace' || k === 'delete') && mode === 'shape' && !idle && !drawState && !placing) {
+      e.preventDefault();
+      removePart();
+    }
     else if (mode === 'stuff' && piecePivot && !drawState && (k === 'w' || k === 'e' || k === 'r')) setPieceMode(k === 'w' ? 'translate' : k === 'e' ? 'rotate' : 'scale');
     else if (selectedAttachment && (k === 'w' || k === 'e' || k === 'r')) {
       gizmo.setMode(k === 'w' ? 'translate' : k === 'e' ? 'rotate' : 'scale');
