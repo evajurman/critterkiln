@@ -426,6 +426,31 @@ gtao.updateGtaoMaterial({ radius: 0.28, distanceExponent: 1.6, thickness: 1.2, s
 gtao.enabled = QUALITY[quality].ao;
 gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 16 });
 gtao.blendIntensity = 1.0;
+// The AO is worked out from a depth image with no anti-aliasing, then
+// multiplied onto the smoothed picture. An outline's edge pixels are part
+// floor (or whatever's behind) in the picture but all part in the AO, and a
+// part has no AO right at its edge, so they kept the floor's colour with none
+// of its shade: a light, stepped line round everything, glaring on a bright
+// backdrop. Where a pixel is clearly lighter than a neighbour (an edge), it
+// takes half that neighbour's shade, about what a half-and-half pixel needs.
+// Smooth AO, away from edges, is left exactly as it was.
+const aoTexel = new THREE.Vector2(1, 1);
+gtao.blendMaterial.uniforms.texel = { value: aoTexel };
+gtao.blendMaterial.fragmentShader = /* glsl */ `
+  uniform float intensity;
+  uniform sampler2D tDiffuse;
+  uniform vec2 texel;
+  varying vec2 vUv;
+  void main() {
+    vec4 ao = texture2D(tDiffuse, vUv);
+    float darkest = min(
+      min(texture2D(tDiffuse, vUv + vec2(texel.x, 0.0)).r, texture2D(tDiffuse, vUv - vec2(texel.x, 0.0)).r),
+      min(texture2D(tDiffuse, vUv + vec2(0.0, texel.y)).r, texture2D(tDiffuse, vUv - vec2(0.0, texel.y)).r));
+    float edge = smoothstep(0.06, 0.2, ao.r - darkest);
+    ao.rgb = vec3(mix(ao.r, darkest, 0.5 * edge));
+    gl_FragColor = vec4(mix(vec3(1.0), ao.rgb, intensity), ao.a);
+  }`;
+gtao.blendMaterial.needsUpdate = true;
 composer.addPass(gtao);
 
 /**
@@ -485,7 +510,6 @@ class FurPass extends Pass {
   }
 }
 const furPass = new FurPass();
-furPass.enabled = gtao.enabled;
 composer.addPass(furPass);
 // lights have to share the fuzz's layer to light it
 for (const l of [hemi, key, fill, rim]) l.layers.enable(FUR_LAYER);
@@ -494,6 +518,12 @@ const bokeh = new BokehPass(scene, camera, { focus: 5, aperture: 0.004, maxblur:
 bokeh.enabled = false;
 composer.addPass(bokeh);
 composer.addPass(new OutputPass());
+function setAO(on: boolean) {
+  gtao.enabled = on;
+  // without AO the fuzz is simply drawn with everything else
+  furPass.enabled = on;
+}
+setAO(gtao.enabled);
 
 // ---------------------------------------------------------------------------
 // state + history
@@ -5093,7 +5123,7 @@ function setQuality(q: Quality) {
     rt.dispose();
   }
   gtao.updateGtaoMaterial({ samples: Q.aoSamples });
-  gtao.enabled = furPass.enabled = Q.ao;
+  setAO(Q.ao);
   $<HTMLInputElement>('#ao').checked = Q.ao;
   resize();
   // every creature (and the workbench) remeshed at the new detail
@@ -5330,11 +5360,7 @@ $<HTMLInputElement>('#floor-color').oninput = (e) => {
   applyFloor();
 };
 $<HTMLInputElement>('#floor-color').onchange = () => renderFloorUI();
-$<HTMLInputElement>('#ao').onchange = (e) => {
-  gtao.enabled = (e.target as HTMLInputElement).checked;
-  // without AO the fuzz is simply drawn with everything else
-  furPass.enabled = gtao.enabled;
-};
+$<HTMLInputElement>('#ao').onchange = (e) => setAO((e.target as HTMLInputElement).checked);
 // ---------------------------------------------------------------------------
 // depth of field: focus follows the orbit target, nudged by `offset`
 
@@ -5784,6 +5810,7 @@ function resize() {
   renderer.setPixelRatio(pixelRatio());
   composer.setPixelRatio(pixelRatio());
   composer.setSize(w, h);
+  aoTexel.set(1 / gtao.pdRenderTarget.width, 1 / gtao.pdRenderTarget.height);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
   const dpr = Math.min(devicePixelRatio, 2);
@@ -5938,4 +5965,4 @@ requestAnimationFrame(loop);
 if (import.meta.env.PROD && 'serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
 
 // handy for poking at the scene from the dev-tools console
-if (import.meta.env.DEV) Object.assign(window, { __cc: { scene, camera, renderer, controls, flyTo, renderNow: () => { controls.update(); composer.render(); }, screenToLocal, localToOverlay, partPlane, get creature() { return creature; }, get drawState() { return drawState; }, openFile, selectAttachment, gizmo } });
+if (import.meta.env.DEV) Object.assign(window, { __cc: { scene, camera, renderer, composer, controls, flyTo, renderNow: () => { controls.update(); composer.render(); }, screenToLocal, localToOverlay, partPlane, get creature() { return creature; }, get drawState() { return drawState; }, openFile, selectAttachment, gizmo } });
