@@ -52,6 +52,23 @@ export function bvhFor(geo: THREE.BufferGeometry): MeshBVH {
 }
 
 const hitInfo = { point: new THREE.Vector3(), distance: 0, faceIndex: 0 };
+
+// one ray: if the first surface it meets faces away from us, we're inside
+// (an odd direction, so it doesn't run along a part's grid of vertices)
+const probe = new THREE.Ray(new THREE.Vector3(), new THREE.Vector3(0.577, 0.577, 0.577));
+const fa = new THREE.Vector3(), fb = new THREE.Vector3(), fc = new THREE.Vector3(), fn = new THREE.Vector3();
+/** Whether local point `q` is inside the part, by which way the first surface a ray meets is facing. */
+export function insideByRay(geo: THREE.BufferGeometry, bvh: MeshBVH, q: THREE.Vector3): boolean {
+  probe.origin.copy(q);
+  const hit = bvh.raycastFirst(probe, THREE.DoubleSide);
+  if (!hit?.face) return false;
+  const pos = geo.getAttribute('position') as THREE.BufferAttribute;
+  fa.fromBufferAttribute(pos, hit.face.a);
+  fb.fromBufferAttribute(pos, hit.face.b);
+  fc.fromBufferAttribute(pos, hit.face.c);
+  fn.subVectors(fb, fa).cross(fc.sub(fa));
+  return fn.dot(probe.direction) > 0;
+}
 const triA = new THREE.Vector3(), triB = new THREE.Vector3(), triC = new THREE.Vector3();
 const bary = new THREE.Vector3(), nrm = new THREE.Vector3(), away = new THREE.Vector3();
 
@@ -89,7 +106,18 @@ export function exactDistance(
     .normalize();
   away.subVectors(q, hit.point);
   const dist = away.length();
-  const sign = away.dot(nrm) >= 0 ? 1 : -1;
+  const facing = away.dot(nrm);
+  // The smoothed normal can point the wrong way where the closest point is a
+  // sharp tip or edge (a thin curl's point: the normals round it are averaged
+  // into one facing sideways), and then empty space far from the part reads
+  // as deep inside it; the seamless skin turns that into floating blocks.
+  // A closest point on a corner or an edge is shared by several triangles, so
+  // no one normal speaks for it. Then, or when the facing is unclear or
+  // disagrees with the triangle's own, count it the slow, sure way with a ray.
+  fn.subVectors(triB.fromBufferAttribute(pos, i1), triA.fromBufferAttribute(pos, i0)).cross(triC.fromBufferAttribute(pos, i2).sub(triA));
+  const onRim = Math.min(bary.x, bary.y, bary.z) < 1e-4;
+  const doubt = dist > 1e-6 && (onRim || Math.abs(facing) < 0.5 * dist || facing >= 0 !== away.dot(fn) >= 0);
+  const sign = doubt ? (insideByRay(geo, bvh, q) ? -1 : 1) : facing >= 0 ? 1 : -1;
   if (dist > 1e-6) grad.copy(away).divideScalar(dist).multiplyScalar(sign);
   else grad.copy(nrm);
   return sign * dist;

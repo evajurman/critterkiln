@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { MeshBVH } from 'three-mesh-bvh';
-import { bvhFor, exactDistance, sharedNormals } from './distance';
+import { bvhFor, exactDistance, insideByRay, sharedNormals } from './distance';
 import { applyLumps } from './inflate';
 
 /**
@@ -95,22 +95,7 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
     const d = exactDistance(pp.geo, pp.bvh, pp.normals, q, band, grad);
     if (Number.isFinite(d) || !exact) return d;
     // far from this part: all we need is which side of it we're on
-    return insidePart(pp, q) ? -band : band;
-  };
-
-  // one ray: if the first surface it meets faces away from us, we're inside
-  const ray = new THREE.Ray(new THREE.Vector3(), new THREE.Vector3(0.577, 0.577, 0.577));
-  const fa = new THREE.Vector3(), fb = new THREE.Vector3(), fc = new THREE.Vector3(), fn = new THREE.Vector3();
-  const insidePart = (pp: Prepared, local: THREE.Vector3): boolean => {
-    ray.origin.copy(local);
-    const hit = pp.bvh.raycastFirst(ray, THREE.DoubleSide);
-    if (!hit?.face) return false;
-    const pos = pp.geo.getAttribute('position') as THREE.BufferAttribute;
-    fa.fromBufferAttribute(pos, hit.face.a);
-    fb.fromBufferAttribute(pos, hit.face.b);
-    fc.fromBufferAttribute(pos, hit.face.c);
-    fn.subVectors(fb, fa).cross(fc.sub(fa));
-    return fn.dot(ray.direction) > 0;
+    return insideByRay(pp.geo, pp.bvh, q) ? -band : band;
   };
 
   /** The blended field: polynomial smooth-min of every part's distance. NaN = far from everything. */
@@ -233,7 +218,7 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
             rel.push(pp);
             relSide.push(d < 0 ? -1 : 1);
             relFar.push(Math.abs(d) - halfDiag > pp.k + 2.5 * h);
-          } else if (insidePart(pp, q)) {
+          } else if (insideByRay(pp.geo, pp.bvh, q)) {
             buried = true;
             break;
           }

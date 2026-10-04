@@ -126,9 +126,52 @@ function smoothClosed(pts: Vec2[], iterations: number): Vec2[] {
 export function cleanOutline(raw: Vec2[], spacing: number): Vec2[] {
   const fine = resampleClosed(raw, spacing / 4);
   const smooth = smoothClosed(fine, 6);
-  const out = resampleClosed(smooth, spacing);
+  const out = untangle(resampleClosed(smooth, spacing));
   if (signedArea(out) < 0) out.reverse();
   return out;
+}
+
+/**
+ * Cut off any little loops where an outline crosses over itself (a stroke
+ * that doubled back, or a thin neck that smoothing pinched shut). Puffed up,
+ * a crossed loop is partly inside out, which confuses everything that asks
+ * "is this point inside?" (the seamless skin turns it into floating blocks).
+ * At each crossing the smaller of the two loops goes. Loops that don't cross
+ * come back as they were.
+ */
+export function untangle(loop: Vec2[]): Vec2[] {
+  let cur = loop;
+  for (let guard = 0; guard < 32 && cur.length > 3; guard++) {
+    const hit = firstCrossing(cur);
+    if (!hit) return cur;
+    const { i, j, at } = hit;
+    // the crossing splits the loop in two: i+1..j, and the rest round through 0
+    const inner: Vec2[] = [at, ...cur.slice(i + 1, j + 1)];
+    const outer: Vec2[] = [...cur.slice(0, i + 1), at, ...cur.slice(j + 1)];
+    cur = Math.abs(signedArea(inner)) > Math.abs(signedArea(outer)) ? inner : outer;
+  }
+  return cur;
+}
+
+/** The first pair of non-neighbouring edges that cross (edge k runs from point k to k+1), and where. */
+function firstCrossing(loop: Vec2[]): { i: number; j: number; at: Vec2 } | null {
+  const n = loop.length;
+  for (let i = 0; i < n; i++) {
+    const [ax, ay] = loop[i], [bx, by] = loop[(i + 1) % n];
+    const minX = Math.min(ax, bx), maxX = Math.max(ax, bx), minY = Math.min(ay, by), maxY = Math.max(ay, by);
+    for (let j = i + 2; j < n; j++) {
+      // the last edge closes the loop back onto the first: neighbours
+      if (i === 0 && j === n - 1) continue;
+      const [cx, cy] = loop[j], [dx, dy] = loop[(j + 1) % n];
+      if (Math.max(cx, dx) < minX || Math.min(cx, dx) > maxX || Math.max(cy, dy) < minY || Math.min(cy, dy) > maxY) continue;
+      const den = (bx - ax) * (dy - cy) - (by - ay) * (dx - cx);
+      if (Math.abs(den) < 1e-15) continue;
+      const t = ((cx - ax) * (dy - cy) - (cy - ay) * (dx - cx)) / den;
+      const u = ((cx - ax) * (by - ay) - (cy - ay) * (bx - ax)) / den;
+      if (t > 0 && t < 1 && u > 0 && u < 1) return { i, j, at: [ax + (bx - ax) * t, ay + (by - ay) * t] };
+    }
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
