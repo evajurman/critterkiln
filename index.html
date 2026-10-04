@@ -21,7 +21,7 @@
         <div class="brand"><img class="logo" src="/icon-192.png" alt="" /> CritterKiln</div>
         <div class="modes" role="tablist">
           <button data-mode="shape" class="active" title="Shape: draw, stretch, grow and pose your creature (1)"><i class="fa-slab fa-regular fa-hand" aria-hidden="true"></i><span class="lbl"> Shape</span></button>
-          <button data-mode="look" title="Look: colors, materials, eyes and stuff to wear (2)"><i class="fa-slab fa-regular fa-palette" aria-hidden="true"></i><span class="lbl"> Look</span></button>
+          <button data-mode="look" title="Look: colors, materials and stuff to wear (2)"><i class="fa-slab fa-regular fa-palette" aria-hidden="true"></i><span class="lbl"> Look</span></button>
           <button data-mode="stuff" title="Stuff: make things to wear and carry (3)"><i class="fa-slab fa-regular fa-box" aria-hidden="true"></i><span class="lbl"> Stuff</span></button>
         </div>
         <div class="spacer"></div>
@@ -93,8 +93,6 @@
               <button id="rig-split" class="ghost" title="Split this part in the middle into two jointed halves"><i class="fa-slab fa-regular fa-scissors" aria-hidden="true"></i> Split</button>
               <button id="rig-dup" class="ghost" title="Copy this limb and everything attached to it"><i class="fa-slab fa-regular fa-copy" aria-hidden="true"></i> Copy</button>
               <button id="rig-del" class="ghost" title="Remove this part and everything attached to it"><i class="fa-slab fa-regular fa-trash" aria-hidden="true"></i> Delete</button>
-              <button id="rig-unlink" class="ghost" title="Let the left and right sides be shaped separately"><i class="fa-regular fa-link-slash" aria-hidden="true"></i> Unlink pair</button>
-              <button id="rig-eyes" class="ghost" title="Add eyes to this part (on a mirrored part, both sides get them)"><i class="fa-slab fa-regular fa-eye" aria-hidden="true"></i> Add eyes here</button>
               <button id="rig-attach" class="ghost" title="Put something from My stuff on this part (opens Look)"><i class="fa-slab fa-regular fa-paperclip" aria-hidden="true"></i> Attach stuff…</button>
             </div>
 
@@ -140,35 +138,6 @@
           <div id="styles" class="styles"></div>
           <div id="style-params" class="style-params"></div>
           <label class="check"><input id="style-part" type="checkbox" /> Only the selected part</label>
-
-          <h3 id="eyes-sec">Eyes</h3>
-          <div id="eye-styles" class="eye-styles"></div>
-          <div id="eye-pairs" class="eye-pairs"></div>
-          <div class="eye-on">
-            <label title="Which part this pair sits on (on a mirrored part, both sides get them)">On <select id="eye-bone"></select></label>
-            <label class="check" title="One eye in the middle instead of a pair"><input id="eye-single" type="checkbox" /> One eye</label>
-          </div>
-          <div id="eye-sliders">
-            <label class="slider"><span>Size</span><input id="eye-size" type="range" min="0" max="1" step="0.01" /></label>
-            <label class="slider"><span>Spacing</span><input id="eye-spacing" type="range" min="0" max="1" step="0.01" /></label>
-            <label class="slider"><span>Height</span><input id="eye-height" type="range" min="0.05" max="0.95" step="0.01" /></label>
-            <label class="slider" title="How far this pair stands off the face"><span>Stand-off</span><input id="eye-lift" type="range" min="0" max="1" step="0.01" />
-              <span class="ends"><em>on the face</em><em>lifted</em></span></label>
-            <label class="slider" title="Turn the eyes round their part. They stick to it, so rolling the part turns them too"><span>Facing</span><input id="eye-turn" type="range" min="-180" max="180" step="1" />
-              <span class="ends"><em>one way</em><em>the other</em></span></label>
-            <button id="eye-front" class="ghost" title="Turn the eyes back to the creature's front, even if their part is rolled"><i class="fa-slab fa-regular fa-face-smile" aria-hidden="true"></i> Face front</button>
-          </div>
-          <div id="eye-look">
-            <div class="sub-title">Bead, dot &amp; button look</div>
-            <div class="seg" id="eye-finish">
-              <button data-finish="body" title="The head's own material">Body</button>
-              <button data-finish="gloss">Glossy</button>
-              <button data-finish="matte">Matte</button>
-              <button data-finish="glass">Glass</button>
-            </div>
-            <div class="swatches eye-swatches" id="eye-swatches"></div>
-            <label class="color-pick"><input id="eye-color" type="color" /> Eye color</label>
-          </div>
         </section>
 
         <section id="stuff-panel" hidden>
@@ -224,14 +193,56 @@
       <main class="viewport" id="viewport">
         <canvas id="gl"></canvas>
         <canvas id="overlay"></canvas>
-        <div id="hint" class="hint"></div>
+        <div id="hint" class="hint">
+          <span class="hint-text"></span>
+          <button class="hint-close" title="Close" aria-label="Close">
+            <svg class="hint-ring" viewBox="0 0 20 20" aria-hidden="true"><circle class="track" cx="10" cy="10" r="8" /><circle class="fill" cx="10" cy="10" r="8" pathLength="1" /></svg>
+            <i class="fa-regular fa-xmark" aria-hidden="true"></i>
+          </button>
+        </div>
         <div id="settle-badge" class="settle-badge" hidden>Smoothing joins…</div>
         <div id="shape-bar" class="shape-bar">
           <div class="shape-pills">
             <button id="cr-place" class="pill-toggle" title="Move, turn or resize this creature anywhere in the scene"><i class="fa-regular fa-arrows-up-down-left-right" aria-hidden="true"></i> Arrange</button>
-            <label id="mirror-pill" class="pill-toggle" title="Both sides change together: shaping and posing (M)">
-              <input id="rig-sym" type="checkbox" checked /> <i class="fa-slab fa-regular fa-arrow-right-arrow-left" aria-hidden="true"></i> Mirror <kbd>M</kbd>
-            </label>
+            <div class="mirror-row">
+              <label id="mirror-pill" class="pill-toggle" title="Both sides change together: shaping and posing (M)">
+                <input id="rig-sym" type="checkbox" checked /> <i class="fa-slab fa-regular fa-arrow-right-arrow-left" aria-hidden="true"></i> Mirror <kbd>M</kbd>
+              </label>
+              <button id="rig-mirror" class="pill-toggle" hidden></button>
+              <button id="rig-unlink" class="pill-toggle" hidden><i class="fa-regular fa-link-slash" aria-hidden="true"></i> Unlink pair</button>
+            </div>
+            <button id="eyes-add" class="pill-toggle" title="Add eyes to this part (on a mirrored part, both sides get them)"><i class="fa-slab fa-regular fa-eye" aria-hidden="true"></i> Add eyes</button>
+            <div id="eyes-card" class="eyes-card" hidden>
+              <button id="eyes-fold" class="eyes-head" title="Show or hide the eye settings"><i class="fa-slab fa-regular fa-eye" aria-hidden="true"></i> Eyes <i class="fa-regular fa-chevron-down fold-icon" aria-hidden="true"></i></button>
+              <div class="eyes-body">
+                <div id="eye-styles" class="eye-styles"></div>
+                <div id="eye-pairs" class="eye-pairs"></div>
+                <div class="eye-on">
+                  <label class="check" title="One eye in the middle instead of a pair"><input id="eye-single" type="checkbox" /> One eye</label>
+                </div>
+                <div id="eye-sliders">
+                  <label class="slider"><span>Size</span><input id="eye-size" type="range" min="0" max="1" step="0.01" /></label>
+                  <label class="slider"><span>Spacing</span><input id="eye-spacing" type="range" min="0" max="1" step="0.01" /></label>
+                  <label class="slider"><span>Height</span><input id="eye-height" type="range" min="0.05" max="0.95" step="0.01" /></label>
+                  <label class="slider" title="How far this pair stands off the face"><span>Stand-off</span><input id="eye-lift" type="range" min="0" max="1" step="0.01" />
+                    <span class="ends"><em>on the face</em><em>lifted</em></span></label>
+                  <label class="slider" title="Turn the eyes round their part. They stick to it, so rolling the part turns them too"><span>Facing</span><input id="eye-turn" type="range" min="-180" max="180" step="1" />
+                    <span class="ends"><em>one way</em><em>the other</em></span></label>
+                  <button id="eye-front" class="ghost" title="Turn the eyes back to the creature's front, even if their part is rolled"><i class="fa-slab fa-regular fa-face-smile" aria-hidden="true"></i> Face front</button>
+                </div>
+                <div id="eye-look">
+                  <div class="sub-title">Bead, dot &amp; button look</div>
+                  <div class="seg" id="eye-finish">
+                    <button data-finish="body" title="The head's own material">Body</button>
+                    <button data-finish="gloss">Glossy</button>
+                    <button data-finish="matte">Matte</button>
+                    <button data-finish="glass">Glass</button>
+                  </div>
+                  <div class="swatches eye-swatches" id="eye-swatches"></div>
+                  <label class="color-pick"><input id="eye-color" type="color" /> Eye color</label>
+                </div>
+              </div>
+            </div>
           </div>
           <div class="legend" id="shape-legend">
             <span><b class="dot orange"></b> bend</span>

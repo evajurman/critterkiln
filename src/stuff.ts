@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { TessellateModifier } from 'three/examples/jsm/modifiers/TessellateModifier.js';
+import Delaunator from 'delaunator';
 import { bounds, buildInflatedGeometry, cleanOutline, getMeshDetail, type Vec2 } from './inflate';
 import {
   castsShadow,
@@ -146,6 +148,8 @@ export function pieceGeometry(p: Piece): THREE.BufferGeometry {
     // smooth shading across the bevel, crisp where the edges are sharp
     g = toCreasedNormals(ex, Math.PI / 3.2);
     ex.dispose();
+    // its faces are group 0: remeshed if the thing gets bent
+    g.userData.flatCaps = true;
     if (p.style === 'lowpoly') {
       const n = g.getAttribute('position').count;
       g.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(n * 3).fill(1), 3));
@@ -222,6 +226,8 @@ interface ThingBend {
   mode: BendMode;
   /** signed radius of the curve; its centre sits at z = -r */
   r: number;
+  /** how far the farthest drawn point is from the centre line (or crosshair) */
+  reach: number;
 }
 
 function thingBend(thing: Thing): ThingBend | null {
@@ -232,7 +238,141 @@ function thingBend(thing: Thing): ThingBend | null {
   let reach = 0;
   for (const p of thing.pieces) if (!p.place) for (const [x, y] of p.outline) reach = Math.max(reach, mode === 'axis' ? Math.abs(x) : Math.hypot(x, y));
   if (reach < 1e-4) return null;
-  return { mode, r: reach / (amount * (Math.PI / 2)) };
+  return { mode, r: reach / (amount * (Math.PI / 2)), reach };
+}
+
+/**
+ * Bending needs a mesh fine enough to follow the curve. A flat cut-out's two
+ * faces are long slivers fanned between its outline points: bent, each stays a
+ * flat plane and the curve comes out lumpy and stretched. They're rebuilt as an
+ * even mesh (about 7 degrees of the curve apart); anything else with edges
+ * that long has them cut down. Already-fine meshes (puffy pieces) are left alone.
+ */
+function refineForBend(src: THREE.BufferGeometry, bd: ThingBend): THREE.BufferGeometry {
+  const step = Math.min(Math.max(Math.abs(bd.r) * 0.12, bd.reach / 40), bd.reach / 4);
+  if (src.userData.flatCaps) src = remeshCaps(src, step);
+  // an even mesh's edges run a little over its spacing
+  const max = step * 2;
+  const pos = src.getAttribute('position');
+  const index = src.getIndex();
+  const v = (k: number, out: THREE.Vector3) => out.fromBufferAttribute(pos, index ? index.getX(k) : k);
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+  const count = index ? index.count : pos.count;
+  let long = false;
+  for (let k = 0; k < count && !long; k += 3) {
+    v(k, a), v(k + 1, b), v(k + 2, c);
+    long = Math.max(a.distanceTo(b), b.distanceTo(c), c.distanceTo(a)) > max;
+  }
+  if (!long) return src;
+  // each pass splits a triangle's longest edge once: enough passes to bring a
+  // sliver as long as the whole piece down to size
+  return new TessellateModifier(max, 48).modify(src);
+}
+
+/**
+ * Rebuild a flat cut-out's front and back faces (group 0 of an extrusion) as an
+ * even triangle mesh with `step` spacing, keeping the outline points so they
+ * still meet the sides. Holes come along: a triangle is kept only inside the
+ * original faces.
+ */
+function remeshCaps(src: THREE.BufferGeometry, step: number): THREE.BufferGeometry {
+  const capGroup = src.groups.find((g) => g.materialIndex === 0);
+  if (!capGroup || src.getIndex()) return src;
+  const pos = src.getAttribute('position');
+  const nor = src.getAttribute('normal');
+  const col = src.getAttribute('color');
+  const out = { pos: [] as number[], nor: [] as number[], uv: [] as number[] };
+
+  for (const front of [true, false]) {
+    // the original triangles of this face, flat at one depth
+    const tris: number[][] = [];
+    let z = 0;
+    for (let i = capGroup.start; i < capGroup.start + capGroup.count; i += 3) {
+      if (nor.getZ(i) > 0 !== front) continue;
+      z = pos.getZ(i);
+      tris.push([0, 1, 2].flatMap((k) => [pos.getX(i + k), pos.getY(i + k)]));
+    }
+    if (!tris.length) continue;
+    const ccw = (t: number[]) => (t[2] - t[0]) * (t[5] - t[1]) - (t[3] - t[1]) * (t[4] - t[0]) > 0;
+    const wantCcw = ccw(tris[0]);
+    // inside the face: in one of its triangles (a hair of slack for points on the outline)
+    const eps = step * 1e-4;
+    const inTri = (t: number[], x: number, y: number) => {
+      const s = ccw(t) ? 1 : -1;
+      for (let k = 0; k < 3; k++) {
+        const ax = t[k * 2], ay = t[k * 2 + 1], bx = t[((k + 1) % 3) * 2], by = t[((k + 1) % 3) * 2 + 1];
+        const l = Math.hypot(bx - ax, by - ay) || 1;
+        if ((s * ((bx - ax) * (y - ay) - (by - ay) * (x - ax))) / l < -eps) return false;
+      }
+      return true;
+    };
+    const inside = (x: number, y: number) => tris.some((t) => inTri(t, x, y));
+
+    // the outline points, once each
+    const pts: Vec2[] = [];
+    const seen = new Set<string>();
+    for (const t of tris) {
+      for (let k = 0; k < 3; k++) {
+        const key = `${t[k * 2].toFixed(5)},${t[k * 2 + 1].toFixed(5)}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        pts.push([t[k * 2], t[k * 2 + 1]]);
+      }
+    }
+    const nb = pts.length;
+    // a hex lattice inside, kept clear of the outline
+    const bb = bounds(pts);
+    const rowH = (step * Math.sqrt(3)) / 2;
+    const clear2 = (step * 0.5) ** 2;
+    for (let row = 0, y = bb.minY + rowH / 2; y < bb.maxY; y += rowH, row++) {
+      for (let x = bb.minX + (row % 2 ? step : step / 2); x < bb.maxX; x += step) {
+        if (!inside(x, y)) continue;
+        let near = false;
+        for (let i = 0; i < nb && !near; i++) near = (pts[i][0] - x) ** 2 + (pts[i][1] - y) ** 2 < clear2;
+        if (!near) pts.push([x, y]);
+      }
+    }
+
+    const tiny = (Math.max(bb.w, bb.h) * 1e-5) ** 2;
+    const del = new Delaunator(pts.flat());
+    const t = del.triangles;
+    for (let k = 0; k < t.length; k += 3) {
+      let a = t[k], b = t[k + 1], c = t[k + 2];
+      const [ax, ay] = pts[a], [bx, by] = pts[b], [cx, cy] = pts[c];
+      const cross = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+      if (Math.abs(cross) < tiny) continue;
+      // centre and edge midpoints all inside: drops triangles across notches and holes
+      if (!inside((ax + bx + cx) / 3, (ay + by + cy) / 3)) continue;
+      if (!inside((ax + bx) / 2, (ay + by) / 2) || !inside((bx + cx) / 2, (by + cy) / 2) || !inside((cx + ax) / 2, (cy + ay) / 2)) continue;
+      if (cross > 0 !== wantCcw) [b, c] = [c, b];
+      for (const v of [a, b, c]) {
+        out.pos.push(pts[v][0], pts[v][1], z);
+        out.nor.push(0, 0, front ? 1 : -1);
+        out.uv.push(pts[v][0], pts[v][1]);
+      }
+    }
+  }
+
+  // the new faces, then the extrusion's sides as they were
+  const sideStart = capGroup.start + capGroup.count;
+  const sides = pos.count - sideStart;
+  const n = out.pos.length / 3;
+  const g = new THREE.BufferGeometry();
+  const join = (attr: THREE.BufferAttribute | THREE.InterleavedBufferAttribute, first: number[]) => {
+    const size = attr.itemSize;
+    const arr = new Float32Array((n + sides) * size);
+    arr.set(first);
+    for (let i = 0; i < sides; i++) for (let c = 0; c < size; c++) arr[(n + i) * size + c] = attr.getComponent(sideStart + i, c);
+    return new THREE.BufferAttribute(arr, size);
+  };
+  g.setAttribute('position', join(pos, out.pos));
+  g.setAttribute('normal', join(nor, out.nor));
+  const uv = src.getAttribute('uv');
+  if (uv) g.setAttribute('uv', join(uv, out.uv));
+  if (col) g.setAttribute('color', new THREE.BufferAttribute(new Float32Array((n + sides) * 3).fill(1), 3));
+  g.addGroup(0, n, 0);
+  g.addGroup(n, sides, 1);
+  return g;
 }
 
 const bentCache = new WeakMap<THREE.BufferGeometry, Map<string, THREE.BufferGeometry>>();
@@ -242,7 +382,8 @@ function bentGeometry(src: THREE.BufferGeometry, bd: ThingBend): THREE.BufferGeo
   let per = bentCache.get(src);
   const hit = per?.get(key);
   if (hit) return hit;
-  const g = src.clone();
+  const refined = refineForBend(src, bd);
+  const g = refined === src ? src.clone() : refined;
   const pos = g.getAttribute('position') as THREE.BufferAttribute;
   const nor = g.getAttribute('normal') as THREE.BufferAttribute | undefined;
   const r0 = bd.r;

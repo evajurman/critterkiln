@@ -625,6 +625,90 @@ export function unlinkPair(rig: RigState, sceneId: string): PartCopy[] {
   return parts;
 }
 
+/** Off the centre line with no twin: a part with nothing on the other side. */
+function oneSided(b: ExpandedBone): boolean {
+  return b.sideSign === 0 && (Math.abs(b.start[0]) > 0.02 || Math.abs(b.end[0]) > 0.02);
+}
+
+/**
+ * What mirroring a one-sided part would act on: the top of the one-sided limb
+ * it belongs to, and, when it's one half of an unlinked pair (armL / armR),
+ * the other half that re-linking replaces. Null for a part that already has a
+ * twin, or sits on the centre line.
+ */
+export function mirrorTarget(rig: RigState, sceneId: string): { root: ExpandedBone; other: ExpandedBone | null } | null {
+  const bones = expandRig(rig).bones;
+  const byId = new Map(bones.map((b) => [b.id, b]));
+  let root = byId.get(sceneId);
+  if (!root || !oneSided(root)) return null;
+  for (let p = root.parent ? byId.get(root.parent) : undefined; p && oneSided(p); p = p.parent ? byId.get(p.parent) : undefined) root = p;
+  // a pair hanging below can't be mirrored again
+  const defs = subtreeDefs(rig, root.id);
+  if (rig.bones.some((d) => defs.has(d.id) && d.mirror)) return null;
+  const m = root.id.match(/^(.+)([LR])$/);
+  const other = m ? byId.get(m[1] + (m[2] === 'L' ? 'R' : 'L')) : undefined;
+  const stem = (p?: string) => p?.replace(/[LR]$/, '');
+  const matches = !!other && oneSided(other) && stem(other.parent) === stem(root.parent) && Math.sign(other.start[0] + other.end[0]) !== Math.sign(root.start[0] + root.end[0]);
+  return { root, other: matches ? other! : null };
+}
+
+export interface MirrorResult {
+  /** old scene id -> new scene id of the same bone (on its own side) */
+  renamed: [string, string][];
+  /** scene ids of the replaced other side, now gone */
+  removed: string[];
+  /** the bones were on the right (-X): their new left twins are the mirror image */
+  flipped: boolean;
+}
+
+/**
+ * Turn a one-sided limb into a mirrored pair. If it was half of an unlinked
+ * pair, the other half is replaced by its mirror image (re-linking them);
+ * otherwise a mirror image appears on the other side.
+ */
+export function mirrorLimb(rig: RigState, sceneId: string): MirrorResult | null {
+  const t = mirrorTarget(rig, sceneId);
+  if (!t) return null;
+  const { root, other } = t;
+  const flipped = root.start[0] + root.end[0] < 0;
+  const own = subtreeDefs(rig, root.id);
+  const gone = other ? subtreeDefs(rig, other.id) : new Set<string>();
+  const keep = rig.bones.filter((d) => !gone.has(d.id));
+  const taken = new Set(keep.filter((d) => !own.has(d.id)).flatMap((d) => [d.id, d.id + 'L', d.id + 'R']));
+  const newId = new Map<string, string>();
+  for (const d of keep) {
+    if (!own.has(d.id)) continue;
+    // re-linking drops the L/R it got when it was unlinked
+    let stem = other ? d.id.replace(/[LR]$/, '') : d.id;
+    for (let n = 2; taken.has(stem) || taken.has(stem + 'L') || taken.has(stem + 'R'); n++) stem = d.id.replace(/[LR]?\d*$/, '') + n;
+    taken.add(stem).add(stem + 'L').add(stem + 'R');
+    newId.set(d.id, stem);
+  }
+  const mirroredIds = new Set(keep.filter((d) => d.mirror).map((d) => d.id));
+  const renamed: [string, string][] = [];
+  rig.bones = keep.map((d) => {
+    const id = newId.get(d.id);
+    if (!id) return d;
+    let parent = d.parent;
+    if (parent && newId.has(parent)) parent = newId.get(parent);
+    // on one twin of a pair: the new pair hangs off both twins
+    else if (parent && /[LR]$/.test(parent) && mirroredIds.has(parent.slice(0, -1))) parent = parent.slice(0, -1);
+    renamed.push([d.id, id + (flipped ? 'R' : 'L')]);
+    const out: BoneDef = { ...d, id, name: d.name.replace(/ \((L|R)\)$/, ''), parent, mirror: true };
+    // a pair is defined by its left twin
+    if (flipped) {
+      out.start = mirrorV(d.start);
+      out.end = mirrorV(d.end);
+      out.side = mirrorV(d.side);
+      out.roll = d.roll ? -d.roll : undefined;
+      out.bendDir = d.bendDir ? -d.bendDir : d.bendDir;
+    }
+    return out;
+  });
+  if (newId.has(rig.headId)) rig.headId = newId.get(rig.headId)! + (flipped ? 'R' : 'L');
+  return { renamed, removed: [...gone], flipped };
+}
+
 // ---------------------------------------------------------------------------
 // saved rigs (skeleton only) in localStorage
 

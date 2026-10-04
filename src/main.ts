@@ -61,6 +61,8 @@ import {
   expandRig,
   extendBone,
   getRig,
+  mirrorLimb,
+  mirrorTarget,
   moveJoint,
   partIds,
   rigFromTemplate,
@@ -396,10 +398,26 @@ function showFur() {
   furHidden = [];
 }
 
+// Handles and gizmos (drawn with depthTest off, to show through the body)
+// would end up under the fuzz too, so with the fur pass on they're held back
+// as well and drawn last, over the fuzz.
+const OVERLAY_LAYER = 2;
+let overlayHidden: THREE.Object3D[] = [];
+function hideOverlays() {
+  scene.traverseVisible((o) => {
+    const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
+    if (m && (Array.isArray(m) ? m : [m]).some((x) => !x.depthTest)) overlayHidden.push(o);
+  });
+  for (const o of overlayHidden) o.visible = false;
+}
+
 const scenePass = new RenderPass(scene, camera);
 const scenePassRender = scenePass.render.bind(scenePass);
 scenePass.render = (...args: Parameters<RenderPass['render']>) => {
-  if (furPass.enabled) hideFur();
+  if (furPass.enabled) {
+    hideFur();
+    hideOverlays();
+  }
   scenePassRender(...args);
 };
 composer.addPass(scenePass);
@@ -435,8 +453,11 @@ class FurPass extends Pass {
 
   render(renderer: THREE.WebGLRenderer, _writeBuffer: THREE.WebGLRenderTarget, readBuffer: THREE.WebGLRenderTarget) {
     const fur = furHidden;
+    const overlays = overlayHidden;
+    overlayHidden = [];
     showFur();
-    if (!fur.length) return;
+    for (const o of overlays) o.visible = true;
+    if (!fur.length && !overlays.length) return;
     renderer.setRenderTarget(this.renderToScreen ? null : readBuffer);
     const autoClear = renderer.autoClear;
     renderer.autoClear = false;
@@ -447,8 +468,17 @@ class FurPass extends Pass {
     const background = scene.background;
     scene.background = null;
     const mask = camera.layers.mask;
-    camera.layers.set(FUR_LAYER);
-    renderer.render(scene, camera);
+    if (fur.length) {
+      camera.layers.set(FUR_LAYER);
+      renderer.render(scene, camera);
+    }
+    // then the handles, on top of it all
+    if (overlays.length) {
+      for (const o of overlays) o.layers.enable(OVERLAY_LAYER);
+      camera.layers.set(OVERLAY_LAYER);
+      renderer.render(scene, camera);
+      for (const o of overlays) o.layers.disable(OVERLAY_LAYER);
+    }
     camera.layers.mask = mask;
     scene.background = background;
     renderer.autoClear = autoClear;
@@ -1188,13 +1218,14 @@ function pickEye(x: number, y: number): number | null {
   return eye && (!part || eye.distance <= part.distance) ? eye.pair : null;
 }
 
-/** Opens the Look tab at the eye settings, with this pair picked. */
+/** Picks the part these eyes are on, with its eye settings open at this pair. */
 function showEyes(pair: number) {
   deselectAttachment();
   eyePair = pair;
-  if (mode !== 'look') setMode('look');
-  renderUI();
-  $('#eyes-sec').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  setEyesFolded(false);
+  const on = creature.eyeBones(state.eyes.pairs[pair])[0];
+  if (on) selectPart(on.def.id);
+  else renderUI();
 }
 
 /** Handles are tiny, so pick the nearest one in screen space. */
@@ -2009,7 +2040,7 @@ function finishDraw() {
   commit();
   renderParts();
   flashPart();
-  hint('Inflated! Drag to look around, or pick another part', 2200);
+  hintOnce('Inflated! Drag to look around, or pick another part', 2200);
 }
 
 function addStrokePoint(p: Vec2) {
@@ -2464,7 +2495,7 @@ function setPieceMode(m: PieceMode) {
 function setPieceDim(d: '2d' | '3d') {
   pieceDim = d;
   setPieceMode(pieceMode);
-  if (d === '3d') hint('3D: lift pieces off the board and tilt them any way', 2200);
+  if (d === '3d') hintOnce('3D: lift pieces off the board and tilt them any way', 2200);
 }
 
 /** Make the gizmo's change permanent. */
@@ -3189,7 +3220,7 @@ $('#cr-add').onclick = () => {
   s.materialSettings = structuredClone(state.materialSettings);
   s.placement = freeSpot();
   addCreature(s);
-  hint('Added a new creature: click any creature to switch between them', 2600);
+  hintOnce('Added a new creature: click any creature to switch between them', 2600);
 };
 function duplicateCreature(i: number) {
   const src = world.creatures[i];
@@ -3260,7 +3291,7 @@ function attachThing(t: Thing) {
   commit();
   $('#attach-pop').hidden = true;
   selectAttachment(a.id);
-  hint('Drag the arrows to place it; switch to rotate or scale in the top bar', 3000);
+  hintOnce('Drag the arrows to place it; switch to rotate or scale in the top bar', 3000);
 }
 
 function renderAttachList() {
@@ -4078,6 +4109,12 @@ function selectPart(id: string) {
   updateSkeletonVisibility();
   flashPart();
   renderUI();
+  if (mode === 'shape') shapeTips();
+}
+
+/** What the handles on a picked part do: the first time one is picked in Shape. */
+function shapeTips() {
+  hintOnce(`Drag the orange balls to pose · ${touchScreen() ? 'double-tap' : 'double-click'} a part to draw it`, 3600);
 }
 
 let flashStart = 0;
@@ -4313,9 +4350,41 @@ function renderStyleParams(style: StyleId, el: HTMLElement = $('#style-params'),
   }
 }
 
+// the on-screen eye card can be folded away (remembered)
+const EYES_FOLD_KEY = 'creature-creator/eyes-folded';
+let eyesFolded = (() => {
+  try {
+    return localStorage.getItem(EYES_FOLD_KEY) === '1';
+  } catch {
+    return false;
+  }
+})();
+function setEyesFolded(on: boolean) {
+  eyesFolded = on;
+  try {
+    localStorage.setItem(EYES_FOLD_KEY, on ? '1' : '0');
+  } catch {
+    /* ignore */
+  }
+  $('#eyes-card').classList.toggle('folded', on);
+}
+$('#eyes-fold').onclick = () => setEyesFolded(!eyesFolded);
+
+/** Eye pairs on the picked part (either side of a mirrored pair), by index into state.eyes.pairs. */
+function partEyes(): number[] {
+  return state.eyes.pairs.flatMap((p, i) => (creature.eyeBones(p).some((b) => b.def.id === selected) ? [i] : []));
+}
+
 function renderEyes() {
   const e = state.eyes;
   e.style ??= 'googly';
+  // the picked part's eyes get the card; a part without any gets an Add button
+  const mine = idle ? [] : partEyes();
+  $('#eyes-add').hidden = idle || mine.length > 0;
+  $('#eyes-card').hidden = !mine.length;
+  $('#eyes-card').classList.toggle('folded', eyesFolded);
+  if (!mine.length) return;
+  if (!mine.includes(eyePair)) eyePair = mine[0];
   const el = $('#eye-styles');
   el.innerHTML = '';
   const options: { id: EyeStyle | 'none'; name: string }[] = [{ id: 'none', name: 'None' }, ...EYE_STYLES];
@@ -4343,12 +4412,11 @@ function renderEyes() {
     };
     el.append(btn);
   }
-  eyePair = Math.min(eyePair, e.pairs.length - 1);
   const tabs = $('#eye-pairs');
   tabs.innerHTML = '';
-  e.pairs.forEach((_, i) => {
+  mine.forEach((i, n) => {
     const btn = document.createElement('button');
-    btn.textContent = `${e.pairs[i].single ? 'Eye' : 'Pair'} ${i + 1}`;
+    btn.textContent = `${e.pairs[i].single ? 'Eye' : 'Pair'} ${n + 1}`;
     btn.classList.toggle('active', i === eyePair);
     btn.onclick = () => {
       eyePair = i;
@@ -4360,9 +4428,9 @@ function renderEyes() {
   add.textContent = '+ Add';
   add.className = 'add';
   add.onclick = () => {
-    const last = e.pairs[e.pairs.length - 1];
-    const on = e.pairs[eyePair] ?? last;
-    e.pairs.push({ size: Math.max(0.15, last.size * 0.75), spacing: last.spacing, height: Math.max(0.1, last.height - 0.22), lift: last.lift ?? e.lift, bone: on.bone, single: on.single, turn: on.turn ?? e.turn });
+    // another pair on the same part, a little smaller and lower
+    const on = e.pairs[eyePair];
+    e.pairs.push({ size: Math.max(0.15, on.size * 0.75), spacing: on.spacing, height: Math.max(0.1, on.height - 0.22), lift: on.lift ?? e.lift, bone: on.bone, single: on.single, turn: on.turn ?? e.turn });
     eyePair = e.pairs.length - 1;
     e.enabled = true;
     creature.sync();
@@ -4370,24 +4438,18 @@ function renderEyes() {
     renderEyes();
   };
   tabs.append(add);
-  if (e.pairs.length > 1) {
-    const del = document.createElement('button');
-    del.textContent = 'Remove';
-    del.className = 'remove';
-    del.onclick = () => {
-      e.pairs.splice(eyePair, 1);
-      creature.sync();
-      commit();
-      renderEyes();
-    };
-    tabs.append(del);
-  }
+  const del = document.createElement('button');
+  del.textContent = 'Remove';
+  del.className = 'remove';
+  del.title = 'Take these eyes off';
+  del.onclick = () => {
+    e.pairs.splice(eyePair, 1);
+    creature.sync();
+    commit();
+    renderEyes();
+  };
+  tabs.append(del);
   const pair = e.pairs[eyePair];
-  // which part they're on: a mirrored pair of parts is one choice
-  const where = $<HTMLSelectElement>('#eye-bone');
-  where.innerHTML = '';
-  for (const b of sources()) where.append(new Option(partLabel(b.def.id), b.src));
-  where.value = creature.eyeBones(pair)[0]?.src ?? '';
   $<HTMLInputElement>('#eye-single').checked = !!pair.single;
   $<HTMLInputElement>('#eye-size').value = String(pair.size);
   $<HTMLInputElement>('#eye-spacing').value = String(pair.spacing);
@@ -4518,7 +4580,7 @@ function setMode(m: Mode) {
     renderStuffPanel();
     focusOnBoard();
     autosaveThing();
-    hint('Draw pieces on the board; the blue crosshair is where it attaches', 3200);
+    hintOnce('Draw pieces on the board; the blue crosshair is where it attaches', 3200);
   } else if (wasStuff) {
     frameCreature();
   }
@@ -4526,10 +4588,11 @@ function setMode(m: Mode) {
   syncIdle();
   refreshPieceGizmo();
   if (m === 'shape') {
-    hint(`Drag the orange balls to bend · the teal arrows to stretch · ${touchScreen() ? 'double-tap' : 'double-click'} a part to draw it`, 3600);
+    if (idle) hintOnce('Click a part to begin!');
+    else shapeTips();
     renderRigPanel();
   }
-  if (m === 'look') hint('Click a part, then pick its color and material', 2200);
+  if (m === 'look') hintOnce('Click a part, then pick its color and material', 2200);
 }
 
 // ---------------------------------------------------------------------------
@@ -4578,8 +4641,21 @@ function renderRigPanel() {
   const paired = !!b && b.def.sideSign !== 0;
   $<HTMLButtonElement>('#rig-dup').disabled = !b || isRoot;
   $<HTMLButtonElement>('#rig-del').disabled = !b || isRoot;
-  $<HTMLButtonElement>('#rig-unlink').disabled = !paired || rigLocked();
-  $<HTMLButtonElement>('#rig-eyes').disabled = !b;
+  // beside Mirror, on a mirrored pair (a one-sided part gets Mirror part there instead)
+  const unlink = $<HTMLButtonElement>('#rig-unlink');
+  unlink.hidden = !paired || idle;
+  unlink.disabled = rigLocked();
+  unlink.title = rigLocked() ? 'Turn Mirror off to unlink this pair' : 'Let the left and right sides be shaped separately';
+  // a part with nothing on the other side can be mirrored (or re-linked, if it was unlinked)
+  const lone = b && !idle ? mirrorTarget(state.rig, selected) : null;
+  const mirrorBtn = $<HTMLButtonElement>('#rig-mirror');
+  mirrorBtn.hidden = !lone;
+  if (lone) {
+    iconLabel(mirrorBtn, faClassic(lone.other ? 'link' : 'clone'), lone.other ? 'Re-link' : 'Mirror part');
+    mirrorBtn.title = lone.other
+      ? 'Join this side back up with the other: the other side becomes its mirror image again'
+      : 'Copy this part onto the other side, as a mirrored pair';
+  }
   $<HTMLButtonElement>('#rig-attach').disabled = !b;
   $<HTMLButtonElement>('#rig-split').disabled = !b;
   $('#rig-pair-note').textContent = paired ? 'Mirrored pair: both sides move together.' : '';
@@ -4726,6 +4802,58 @@ $<HTMLInputElement>('#rig-title').onkeydown = (e) => {
 $('#rig-extend').onclick = () => rigEdit((rig) => extendBone(rig, selected), false);
 $('#rig-dup').onclick = () => rigEdit((rig) => duplicateLimb(rig, selected), true);
 $('#rig-unlink').onclick = () => rigEdit((rig) => unlinkPair(rig, selected), true);
+/**
+ * Give a one-sided part a mirror image on the other side, as a linked pair. Half
+ * of an unlinked pair is re-linked instead: the other half becomes its mirror image.
+ */
+function mirrorPart() {
+  const r = mirrorLimb(state.rig, selected);
+  if (!r) return;
+  const relink = r.removed.length > 0;
+  const parts = state.parts, pose = state.pose;
+  const oldParts = { ...parts }, oldPose = { ...pose };
+  const gone = new Set([...r.removed, ...r.renamed.map(([from]) => from)]);
+  for (const id of gone) {
+    delete parts[id];
+    delete pose[id];
+  }
+  const to = new Map(r.renamed);
+  // a pair keeps one drawing, under its left twin's id
+  const left = (id: string) => id.slice(0, -1) + 'L';
+  for (const [from, id] of r.renamed) {
+    if (oldParts[from]) parts[left(id)] = oldParts[from];
+    if (oldPose[from]) pose[id] = oldPose[from];
+  }
+  // eyes on the replaced side go with it; this side's now sit on both
+  const e = state.eyes;
+  e.pairs = e.pairs.filter((p) => !p.bone || !r.removed.includes(p.bone));
+  for (const p of e.pairs) {
+    const id = p.bone && to.get(p.bone);
+    if (!id) continue;
+    p.bone = left(id);
+    // stored for the left twin, which faces the other way round
+    if (r.flipped && p.turn) p.turn = -p.turn;
+  }
+  if (state.attachments) {
+    state.attachments = state.attachments.filter((a) => !r.removed.includes(a.bone));
+    for (const a of state.attachments) {
+      const id = to.get(a.bone);
+      if (id) (a.bone = id), (a.mirror = true);
+    }
+  }
+  if (!state.rig.base.startsWith('custom')) state.rig.base = 'custom';
+  selected = to.get(selected) ?? r.renamed[0][1];
+  buildCreature();
+  // the new side takes this side's pose
+  creature.mirrorPose(r.renamed.map(([, id]) => creature.bones.get(id)!).filter(Boolean));
+  creature.capturePose();
+  creature.applyPose();
+  commit();
+  renderUI();
+  hint(relink ? 'Linked again: the other side is its mirror image' : 'Mirrored onto the other side', 2000);
+}
+$('#rig-mirror').onclick = () => mirrorPart();
+
 $('#rig-del').onclick = () => {
   const parent = creature.bones.get(selected)?.parent?.def.id ?? '';
   rigEdit((rig) => {
@@ -4739,7 +4867,7 @@ $('#rig-del').onclick = () => {
   }, false);
   selectPart(creature.bones.has(parent) ? parent : creature.list[0].def.id);
 };
-$('#rig-eyes').onclick = () => {
+$('#eyes-add').onclick = () => {
   const b = creature.bones.get(selected);
   if (!b) return;
   const e = state.eyes;
@@ -4750,7 +4878,7 @@ $('#rig-eyes').onclick = () => {
   creature.sync();
   commit();
   showEyes(e.pairs.length - 1);
-  hint(limb ? 'Eye added: shape it under Eyes' : 'Eyes added: shape them under Eyes', 1800);
+  hint(limb ? 'Eye added' : 'Eyes added', 1400);
 };
 $('#rig-save').onclick = () => {
   const input = $<HTMLInputElement>('#rig-name');
@@ -4770,21 +4898,44 @@ $('#rig-save').onclick = () => {
   hint(`Saved rig "${name}"`, 1800);
 };
 
-let hintTimer = 0;
+/** How much longer than asked a timed hint stays up, so there's time to read it. */
+const HINT_EXTRA_MS = 4500;
+const hintEl = $('#hint');
+const hintRing = hintEl.querySelector<SVGCircleElement>('.hint-ring .fill')!;
+function closeHint() {
+  if (drawState) drawHint();
+  else hintEl.classList.remove('show');
+}
+// the ring filling up is the timer: hovering pauses it (CSS), so the hint
+// stays while it's being read; the x closes it
+hintRing.addEventListener('animationend', () => closeHint());
+hintEl.querySelector<HTMLButtonElement>('.hint-close')!.onclick = () => {
+  hintEl.classList.remove('show');
+};
+
+/** Guidance shown since the page loaded: each tip is shown once a session (a reload brings them back). */
+const hintsShown = new Set<string>();
+/** A how-to tip, shown only the first time it comes up. Feedback on what was just done uses hint(). */
+function hintOnce(text: string, ms = 2000) {
+  if (hintsShown.has(text)) return;
+  hintsShown.add(text);
+  hint(text, ms);
+}
+
+/** A message at the bottom of the view; `ms` 0 keeps it up until replaced (drawing instructions). */
 function hint(text: string, ms = 2000, warn = false) {
-  const el = $('#hint');
-  clearTimeout(hintTimer);
   // fingers tap
-  if (touchScreen()) text = text.replace(/([Cc])lick(ing|ed)?/g, (_, c: string, end = '') => (c === 'C' ? 'T' : 't') + 'ap' + (end && 'p' + end));
-  el.textContent = text;
-  el.classList.toggle('show', !!text);
-  el.classList.toggle('warn', warn);
-  if (text && ms > 0) {
-    hintTimer = window.setTimeout(() => {
-      if (drawState) drawHint();
-      else el.classList.remove('show');
-    }, ms);
-  }
+  if (touchScreen()) text = text.replace(/([Cc])lick(ing|ed)?/g, (_, c: string, end = '') => (c === 'C' ? 'T' : 't') + 'ap' + (end && 'p' + end));
+  hintEl.querySelector('.hint-text')!.textContent = text;
+  hintEl.classList.toggle('show', !!text);
+  hintEl.classList.toggle('warn', warn);
+  const timed = !!text && ms > 0;
+  hintEl.classList.toggle('timed', timed);
+  // restart the ring for this message
+  hintRing.style.animation = 'none';
+  void hintRing.getBoundingClientRect();
+  hintRing.style.animation = '';
+  if (timed) hintEl.style.setProperty('--hint-ms', `${ms + HINT_EXTRA_MS}ms`);
 }
 
 // ---------------------------------------------------------------------------
@@ -5340,16 +5491,6 @@ $<HTMLInputElement>('#eye-lift').oninput = (ev) => {
   creature.sync();
 };
 $<HTMLInputElement>('#eye-lift').onchange = () => commit();
-$<HTMLSelectElement>('#eye-bone').onchange = (ev) => {
-  const pair = state.eyes.pairs[eyePair];
-  const src = (ev.target as HTMLSelectElement).value;
-  // the head is the default, so a pair moved back there forgets its part
-  if (creature.bones.get(state.rig.headId)?.src === src) delete pair.bone;
-  else pair.bone = src;
-  creature.sync();
-  commit();
-  renderEyes();
-};
 $<HTMLInputElement>('#eye-single').onchange = (ev) => {
   const pair = state.eyes.pairs[eyePair];
   if ((ev.target as HTMLInputElement).checked) pair.single = true;
@@ -5743,6 +5884,7 @@ if (opened.id) {
 }
 commit();
 renderUI();
+if (mode === 'shape' && idle) hintOnce('Click a part to begin!');
 renderSettings();
 applyLighting();
 applyFloor();

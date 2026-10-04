@@ -221,13 +221,31 @@ input[type=range] { accent-color: var(--accent); width: 100%; }
 .hint {
   /* above the camera view bar (bottom right), so a long hint never runs under it */
   position: absolute; left: 50%; bottom: 60px; transform: translateX(-50%);
-  background: rgba(47, 40, 51, .86); color: #fff; padding: 8px 16px;
+  background: rgba(47, 40, 51, .86); color: #fff; padding: 6px 8px 6px 16px;
   border-radius: 18px; font-weight: 700; font-size: 14px; pointer-events: none;
   opacity: 0; transition: opacity .2s;
+  display: flex; align-items: center; gap: 10px;
   /* one line where it fits, wrapped (centred) where it doesn't */
   width: max-content; max-width: calc(100% - 32px); text-align: center;
 }
-.hint.show { opacity: 1; }
+.hint.show { opacity: 1; pointer-events: auto; }
+.hint-text { flex: 1 1 auto; min-width: 0; }
+/* a ring that fills up until the hint closes itself; on hover it stops and turns into an x */
+.hint-close {
+  flex: none; position: relative; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%;
+  background: none; color: #fff; cursor: var(--cursor-click); display: grid; place-items: center;
+}
+.hint-close i { font-size: 13px; opacity: 0; transition: opacity .15s; }
+.hint-ring { position: absolute; inset: 2px; width: 18px; height: 18px; transform: rotate(-90deg); transition: opacity .15s; }
+.hint-ring circle { fill: none; stroke-width: 2.5; }
+.hint-ring .track { stroke: rgba(255,255,255,.22); }
+.hint-ring .fill { stroke: #fff; stroke-linecap: round; stroke-dasharray: 1; stroke-dashoffset: 1; }
+.hint.show.timed .hint-ring .fill { animation: hint-timer var(--hint-ms, 6500ms) linear forwards; }
+.hint.show.timed:hover .hint-ring .fill { animation-play-state: paused; }
+.hint:hover .hint-ring, .hint:not(.timed) .hint-ring { opacity: 0; }
+.hint:hover .hint-close i, .hint:not(.timed) .hint-close i { opacity: 1; }
+.hint-close:hover { background: rgba(255,255,255,.16); }
+@keyframes hint-timer { to { stroke-dashoffset: 0; } }
 .hint.warn { background: rgba(217, 78, 48, .92); }
 .cancel {
   position: absolute; top: 14px; right: 14px; border: 0; background: var(--ink);
@@ -304,11 +322,6 @@ input.text {
 .eye-pairs button.add { background: #fff; border-style: dashed; }
 .eye-pairs button.remove { background: #fff; color: #c2410c; }
 .eye-on { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin: 8px 0 2px; }
-.eye-on > label:first-child { display: flex; align-items: center; gap: 6px; font-weight: 700; }
-.eye-on select {
-  min-width: 0; max-width: 160px; padding: 5px 8px; border-radius: 10px;
-  border: 1px solid var(--line); background: var(--panel); cursor: var(--cursor-click);
-}
 
 .style-params { margin-top: 10px; padding: 8px 10px 2px; border: 1px solid var(--line); border-radius: var(--radius); background: #fff; }
 .slider input.num {
@@ -475,7 +488,31 @@ body.show-nums .slider input.num, body.show-nums .bar-slider input.num { display
 }
 /* Arrange, with Mirror under it; in Look mode only Arrange applies */
 .shape-pills { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
-.shape-bar.look #mirror-pill, .shape-bar.look .legend { display: none; }
+.shape-bar.look .mirror-row, .shape-bar.look .legend { display: none; }
+.mirror-row { display: flex; gap: 6px; }
+.shape-bar .pill-toggle[hidden], .eyes-card[hidden] { display: none; }
+.shape-bar button.pill-toggle { font-family: inherit; color: var(--ink); }
+.shape-bar button.pill-toggle:disabled { opacity: .45; cursor: var(--cursor); transform: none; }
+/* the picked part's eyes: a card under Mirror, foldable to just its title */
+.eyes-card {
+  width: 250px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: 0 8px 30px rgba(0,0,0,.12); padding: 4px 0 0;
+  /* only the settings scroll: the title (which folds the card) stays put, so it never shows a scroll thumb */
+  display: flex; flex-direction: column; max-height: calc(100vh - 220px); overflow: hidden;
+}
+.eyes-card > .eyes-head { flex: none; padding: 6px 12px; }
+.eyes-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 12px 10px; }
+.eyes-head {
+  display: flex; align-items: center; gap: 6px; width: 100%; padding: 6px 0; border: 0; background: none;
+  font: inherit; font-size: 13px; font-weight: 800; color: var(--ink); cursor: var(--cursor-click);
+}
+.eyes-head .fold-icon { margin-left: auto; font-size: 11px; color: var(--muted); transition: transform .15s; }
+.eyes-card.folded { padding-bottom: 0; }
+.eyes-card.folded .eyes-body { display: none; }
+.eyes-card.folded .fold-icon { transform: rotate(-90deg); }
+.eyes-card .eye-styles button { font-size: 11px; padding: 4px 2px; }
+.eyes-card .eye-styles button span { font-size: 15px; }
+.eyes-card .slider { margin: 6px 0; }
 .shape-bar[hidden] { display: none; }
 .shape-bar > * { pointer-events: auto; }
 .shape-bar .pill-toggle {
@@ -645,6 +682,7 @@ details.fine[open] > summary { margin-bottom: 6px; }
   /* while a bar is up, it owns the top edge */
   .viewport:has(.draw-bar:not([hidden])) .shape-bar { display: none; }
   .shape-bar { left: 8px; top: 8px; }
+  .eyes-card { width: min(250px, calc(100vw - 16px)); max-height: 45vh; }
 
   .view-bar { right: 8px; bottom: 8px; }
   .view-bar button { padding: 6px 8px; }
