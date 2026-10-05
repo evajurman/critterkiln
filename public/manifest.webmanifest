@@ -1,7 +1,7 @@
 {
   "name": "CritterKiln",
   "short_name": "CritterKiln",
-  "description": "Draw, sculpt and dress up clay critters.",
+  "description": "Draw, sculpt and dress up critters.",
   "id": "./",
   "start_url": "./",
   "scope": "./",

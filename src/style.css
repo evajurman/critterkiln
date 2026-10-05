@@ -572,6 +572,8 @@ details.fine[open] > summary { margin-bottom: 6px; }
 .creation-when { font-size: 11px; }
 .creation-rename { width: 100%; font-size: 13px; padding: 2px 6px; }
 .creation-actions { display: flex; justify-content: space-between; }
+/* five of them share the card, however narrow */
+.creation-actions .piece-icon { width: auto; flex: 0 1 30px; min-width: 0; }
 .creation-new { cursor: var(--cursor-click); }
 .creation-new .thumb { font-size: 28px; color: var(--muted); border: 2px dashed var(--line); background: #fff; }
 .creation-new:hover .thumb { border-color: var(--accent); color: var(--accent); }

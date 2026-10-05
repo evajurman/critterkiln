@@ -14,7 +14,9 @@ function serviceWorker(): Plugin {
     enforce: 'post',
     generateBundle(_, bundle) {
       const built = Object.keys(bundle).filter((f) => !f.endsWith('.map') && f !== 'index.html');
-      const files = ['./', ...[...built, ...readdirSync('public')].sort().map((f) => `./${f}`)];
+      // the link-preview picture is for other sites' crawlers, not the app
+      const shared = readdirSync('public').filter((f) => !f.startsWith('og-image'));
+      const files = ['./', ...[...built, ...shared].sort().map((f) => `./${f}`)];
       // the page has no hash in its name: its contents count too
       const page = bundle['index.html'];
       const html = page?.type === 'asset' ? String(page.source) : '';

@@ -3984,6 +3984,7 @@ function creationCard(c: SavedCreation): HTMLElement {
     b.onclick = fn;
     actions.append(b);
   };
+  action('plus', 'Add to scene: its creatures join the one open now', () => addCreationToScene(c));
   action('pencil', 'Rename', () => renameCreation(c, label));
   action('copy', 'Make a copy', () => void copyCreation(c));
   action('arrow-down-to-line', 'Download it as a file', () => downloadCreation(c));
@@ -4024,6 +4025,18 @@ function renameCreation(c: SavedCreation, label: HTMLElement) {
     else if (e.key === 'Escape') void finish(false);
   };
   input.onblur = () => void finish(true);
+}
+
+/** Bring a creation's creatures into the open scene, beside everyone already here. */
+function addCreationToScene(c: SavedCreation) {
+  const d = c.id === opened.id ? creationData() : c.data;
+  const list = structuredClone(d.creatures).map(migrate).filter((s): s is CreatureState => !!s);
+  if (!list.length) return hint("That creation couldn't be added", 2500, true);
+  for (const s of list) delete s.workbench;
+  closeLibrary();
+  if (mode === 'stuff') setMode('shape');
+  // a fresh scene nobody has touched yet: they take the starter creature's place
+  loadBundle({ creatures: list, stuff: [], rigs: [] }, { creatures: list.map(() => true), stuff: [], rigs: [], look: false }, !opened.keep);
 }
 
 async function copyCreation(c: SavedCreation) {
