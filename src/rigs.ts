@@ -80,8 +80,8 @@ const quadruped: RigDef = {
     { id: 'tail', name: 'Tail', parent: 'body', start: [0, 0.72, -0.52], end: [0, 0.98, -0.86], side: Y, width: 0.14 },
     { id: 'frontLeg', name: 'Front leg', parent: 'body', start: [0.21, 0.56, 0.32], end: [0.22, 0.12, 0.35], side: Z, width: 0.24, widthEnd: 0.22, mirror: true },
     { id: 'backLeg', name: 'Back leg', parent: 'body', start: [0.21, 0.56, -0.34], end: [0.22, 0.12, -0.36], side: Z, width: 0.26, widthEnd: 0.23, mirror: true },
-
-
+    // short ears up on top of the head
+    { id: 'ear', name: 'Ear', parent: 'head', start: [0.11, 1.16, 0.72], end: [0.15, 1.32, 0.7], side: X, width: 0.16, widthEnd: 0.1, mirror: true },
   ],
 };
 
@@ -94,8 +94,8 @@ const bird: RigDef = {
     { id: 'body', name: 'Body', start: [0, 0.47, -0.38], end: [0, 0.75, 0.28], side: Y, width: 0.58, anchor: true },
     { id: 'head', name: 'Head', parent: 'body', start: [0, 0.79, 0.24], end: [0, 1.21, 0.36], side: Z, width: 0.42 },
     { id: 'beak', name: 'Beak', parent: 'head', start: [0, 1.03, 0.46], end: [0, 0.99, 0.74], side: Y, width: 0.13, thickness: 0.7, color: '#f2a23a' },
-    // one bendy bone per wing, swept gently back
-    { id: 'wing', name: 'Wing', parent: 'body', start: [0.22, 0.71, 0.05], end: [1.12, 0.8, -0.14], side: Z, width: 0.42, widthEnd: 0.26, thickness: 0.25, mirror: true, bendy: true, bend: 0.3, bendDir: -1.9 },
+    // folded wings: from the shoulder at the neck line, down and back along the body
+    { id: 'wing', name: 'Wing', parent: 'body', start: [0.27, 0.72, 0.2], end: [0.32, 0.44, -0.42], side: Y, width: 0.36, widthEnd: 0.22, thickness: 0.25, mirror: true, bendy: true, bend: 0 },
     { id: 'tail', name: 'Tail', parent: 'body', start: [0, 0.49, -0.38], end: [0, 0.37, -0.86], side: X, width: 0.34, thickness: 0.28 },
     // short stub legs
     { id: 'leg', name: 'Leg', parent: 'body', start: [0.12, 0.42, 0.02], end: [0.13, 0.06, 0.05], side: Z, width: 0.1, widthEnd: 0.13, mirror: true, color: '#f2a23a' },
@@ -104,19 +104,20 @@ const bird: RigDef = {
 
 const serpent: RigDef = {
   id: 'serpent',
-  eyeDir: [0, 1, 0.7],
+  eyeDir: [0, 0.6, 1],
   name: 'Serpent',
   icon: 'fa-solid fa-snake',
   headId: 'head',
-  // three bendy segments on the ground curving opposite ways make the S; a
-  // neck rises off the front of the body, so dragging the head lifts and
-  // curls it (the drag bends the neck too, stopping at the anchored body)
+  // coiled up: three bendy segments spiral out along the ground (each bulging
+  // away from the middle of the coil), and a neck rises from the inside of the
+  // coil to hold the head up, looking forward. Dragging the head uncurls the
+  // neck, stopping at the anchored body
   bones: [
-    { id: 'body', name: 'Body', start: [0, 0.2, 0.3], end: [0, 0.2, -0.5], side: X, width: 0.34, anchor: true, bendy: true, bend: 0.16 },
-    { id: 'neck', name: 'Neck', parent: 'body', start: [0, 0.21, 0.28], end: [0, 0.36, 0.74], side: X, width: 0.31, widthEnd: 0.29, bendy: true, bend: 0 },
-    { id: 'head', name: 'Head', parent: 'neck', start: [0, 0.36, 0.72], end: [0, 0.4, 1.18], side: X, width: 0.42 },
-    { id: 'tail', name: 'Tail', parent: 'body', start: [0, 0.2, -0.5], end: [0, 0.19, -1.2], side: X, width: 0.32, widthEnd: 0.26, bendy: true, bend: -0.3 },
-    { id: 'tip', name: 'Tail tip', parent: 'tail', start: [0, 0.19, -1.2], end: [0, 0.16, -1.85], side: X, width: 0.24, widthEnd: 0.08, bendy: true, bend: 0.26 },
+    { id: 'body', name: 'Body', start: [0, 0.176, -0.3], end: [-0.308, 0.176, 0.308], side: [-0.924, 0, -0.383], width: 0.34, anchor: true, bendy: true, bend: 0.75 },
+    { id: 'neck', name: 'Neck', parent: 'body', start: [0, 0.196, -0.28], end: [0, 0.716, 0.06], side: X, width: 0.31, widthEnd: 0.29, bendy: true, bend: 0.4, bendDir: -Math.PI / 2 },
+    { id: 'head', name: 'Head', parent: 'neck', start: [0, 0.716, 0.04], end: [0, 0.696, 0.5], side: X, width: 0.42, thickness: 0.7 },
+    { id: 'tail', name: 'Tail', parent: 'body', start: [-0.308, 0.176, 0.308], end: [0.57, 0.166, 0], side: [0.383, 0, 0.924], width: 0.33, widthEnd: 0.27, bendy: true, bend: 0.75 },
+    { id: 'tip', name: 'Tail tip', parent: 'tail', start: [0.57, 0.166, 0], end: [-0.499, 0.126, -0.499], side: [0.383, 0, -0.924], width: 0.26, widthEnd: 0.07, bendy: true, bend: 0.75 },
   ],
 };
 
