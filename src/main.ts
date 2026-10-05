@@ -722,12 +722,12 @@ function makeCreature(s: CreatureState): Creature {
 function activate(i: number) {
   const next = creatures[i];
   const switching = creature !== next;
+  // gizmos belong to the previous creature (first: leaving Arrange would show its handles again)
+  if (switching) stopPlacing();
   if (creature && switching) {
     creature.setSkeletonVisible(false);
     creature.flash(null, 0);
   }
-  // gizmos belong to the previous creature
-  if (switching) stopPlacing();
   world.active = i;
   state = world.creatures[i];
   creature = next;
