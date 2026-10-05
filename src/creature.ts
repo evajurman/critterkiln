@@ -1515,7 +1515,7 @@ export class Creature {
   private syncEyes() {
     const e = this.state.eyes;
     const used = [...new Set(e.pairs.flatMap((p) => this.eyeBones(p)))];
-    const key = JSON.stringify([e, used.map((b) => [b.def.id, b.meshKey, b.length, b.def.roll]), this.state.style, this.state.materialSettings]);
+    const key = JSON.stringify([e, used.map((b) => [b.def.id, b.meshKey, b.length, this.rollTurn(b).toArray()]), this.state.style, this.state.materialSettings]);
     if (key === this.eyesKey) return;
     this.eyesKey = key;
     this.mergeDirty = true;
@@ -1544,6 +1544,23 @@ export class Creature {
     for (const [b] of groups) setFuzzMask(b.mesh!, this.eyeSpots.get(b.def.id)!);
   }
 
+  /**
+   * How far rolling has turned a part from where it was drawn, in skeleton
+   * space: its own roll, and each roll above it (rolling a part carries
+   * everything hanging off it round its length). Root-most first, each about
+   * the rolled part's axis as it is now.
+   */
+  private rollTurn(part: BoneRT): THREE.Quaternion {
+    const q = new THREE.Quaternion();
+    for (let b: BoneRT | null = part; b; b = b.parent) {
+      const r = (b.def.roll ?? 0) * (b.def.sideSign === -1 ? -1 : 1);
+      if (!r) continue;
+      const axis = new THREE.Vector3(0, 1, 0).transformDirection(b.restWorld);
+      q.multiply(new THREE.Quaternion().setFromAxisAngle(axis, r));
+    }
+    return q;
+  }
+
   /** Stick one pair (or single eye) onto a part, found by aiming at it from the creature's front. */
   private placeEyes(part: BoneRT, pair: EyePair, pairIndex: number, group: THREE.Group, spots: FuzzSpot[]) {
     const e = this.state.eyes;
@@ -1555,9 +1572,12 @@ export class Creature {
     const up = new THREE.Vector3(0, 1, 0);
     if (Math.abs(up.dot(forward)) > 0.9) up.set(0, 0, -1);
     up.addScaledVector(forward, -up.dot(forward)).normalize();
-    // the eyes stick to the part: rolling it carries them round, and Facing turns them further
-    // (the other way on a right-hand twin, so the two sides mirror)
-    const turn = ((part.def.roll ?? 0) + (pair.turn ?? e.turn ?? 0)) * (part.def.sideSign === -1 ? -1 : 1);
+    // the eyes stick to the part: rolling it (or a part it hangs from) carries them
+    // round, and Facing turns them further (the other way on a right-hand twin, so the two sides mirror)
+    const rolled = this.rollTurn(part);
+    forward.applyQuaternion(rolled);
+    up.applyQuaternion(rolled);
+    const turn = (pair.turn ?? e.turn ?? 0) * (part.def.sideSign === -1 ? -1 : 1);
     if (turn) {
       const axis = new THREE.Vector3(0, 1, 0).transformDirection(toWorld);
       forward.applyAxisAngle(axis, turn);
@@ -1881,7 +1901,48 @@ export class Creature {
         this.aimBone(j, tipPos, target);
       }
     }
+    // turning the parts it hangs from (or the head itself) doesn't tip the head over
+    const head = this.bones.get(this.rig.headId);
+    for (let h = head ?? null; h; h = h.parent) {
+      if (!chain.includes(h)) continue;
+      this.levelHead(head!);
+      break;
+    }
     return chain;
+  }
+
+  /**
+   * Turn the head about its own length (only) so it's as upright as it was
+   * drawn: its side across level, or tipped by however much its rest pose is.
+   * Aiming swings parts the shortest way, which tilts a head riding on them.
+   */
+  levelHead(b: BoneRT) {
+    const Y = new THREE.Vector3(0, 1, 0);
+    const levelSide = (along: THREE.Vector3, up: THREE.Vector3) => new THREE.Vector3().crossVectors(up, along);
+    // how far its rest pose is tipped, in skeleton space: against up as the
+    // eyes see it (rolling a part it hangs from carries that round too)
+    const restAlong = new THREE.Vector3(0, 1, 0).transformDirection(b.restWorld);
+    const restSide = new THREE.Vector3(1, 0, 0).transformDirection(b.restWorld);
+    const restUp = b.parent ? Y.clone().applyQuaternion(this.rollTurn(b.parent)) : Y;
+    const restLevel = levelSide(restAlong, restUp);
+    if (restLevel.lengthSq() < 0.05) return;
+    restLevel.normalize();
+    const tip = Math.atan2(new THREE.Vector3().crossVectors(restLevel, restSide).dot(restAlong), restLevel.dot(restSide));
+    // where it is now, in the scene
+    const up = Y.clone().applyQuaternion(this.root.getWorldQuaternion(new THREE.Quaternion()));
+    const worldQ = b.pivot.getWorldQuaternion(new THREE.Quaternion());
+    const along = new THREE.Vector3(0, 1, 0).applyQuaternion(worldQ);
+    const side = new THREE.Vector3(1, 0, 0).applyQuaternion(worldQ);
+    const want = levelSide(along, up);
+    // pointing (nearly) straight up or down: there's no level to keep
+    if (want.lengthSq() < 0.05) return;
+    want.normalize().applyAxisAngle(along, tip);
+    const twist = Math.atan2(new THREE.Vector3().crossVectors(side, want).dot(along), side.dot(want));
+    if (Math.abs(twist) < 1e-5) return;
+    worldQ.premultiply(new THREE.Quaternion().setFromAxisAngle(along, twist));
+    const parentQ = b.pivot.parent!.getWorldQuaternion(new THREE.Quaternion());
+    b.pivot.quaternion.copy(parentQ.invert().multiply(worldQ));
+    b.pivot.updateMatrixWorld(true);
   }
 
   /**

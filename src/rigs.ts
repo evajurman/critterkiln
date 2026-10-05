@@ -108,16 +108,17 @@ const serpent: RigDef = {
   name: 'Serpent',
   icon: 'fa-solid fa-snake',
   headId: 'head',
-  // coiled up: three bendy segments spiral out along the ground (each bulging
-  // away from the middle of the coil), and a neck rises from the inside of the
-  // coil to hold the head up, looking forward. Dragging the head uncurls the
-  // neck, stopping at the anchored body
+  // laid out straight along the middle, front to back, every part's drawing
+  // square to the creature, so turning one part keeps the rest symmetric and
+  // the head level. A neck rises from the front of the body in a gentle S to
+  // hold the head up, looking forward; the tail slithers off behind in a
+  // sideways S. Dragging the head uncurls the neck, stopping at the anchored body
   bones: [
-    { id: 'body', name: 'Body', start: [0, 0.176, -0.3], end: [-0.308, 0.176, 0.308], side: [-0.924, 0, -0.383], width: 0.34, anchor: true, bendy: true, bend: 0.75 },
-    { id: 'neck', name: 'Neck', parent: 'body', start: [0, 0.196, -0.28], end: [0, 0.716, 0.06], side: X, width: 0.31, widthEnd: 0.29, bendy: true, bend: 0.4, bendDir: -Math.PI / 2 },
-    { id: 'head', name: 'Head', parent: 'neck', start: [0, 0.716, 0.04], end: [0, 0.696, 0.5], side: X, width: 0.42, thickness: 0.7 },
-    { id: 'tail', name: 'Tail', parent: 'body', start: [-0.308, 0.176, 0.308], end: [0.57, 0.166, 0], side: [0.383, 0, 0.924], width: 0.33, widthEnd: 0.27, bendy: true, bend: 0.75 },
-    { id: 'tip', name: 'Tail tip', parent: 'tail', start: [0.57, 0.166, 0], end: [-0.499, 0.126, -0.499], side: [0.383, 0, -0.924], width: 0.26, widthEnd: 0.07, bendy: true, bend: 0.75 },
+    { id: 'body', name: 'Body', start: [0, 0.17, -0.22], end: [0, 0.17, 0.22], side: X, width: 0.34, anchor: true },
+    { id: 'neck', name: 'Neck', parent: 'body', start: [0, 0.19, 0.2], end: [0, 0.7, 0.32], side: X, width: 0.31, widthEnd: 0.28, bendy: true, bend: 0.35, bendDir: -Math.PI / 2 },
+    { id: 'head', name: 'Head', parent: 'neck', start: [0, 0.7, 0.3], end: [0, 0.68, 0.76], side: X, width: 0.42, thickness: 0.7 },
+    { id: 'tail', name: 'Tail', parent: 'body', start: [0, 0.17, -0.22], end: [0, 0.16, -0.66], side: X, width: 0.33, widthEnd: 0.27, bendy: true, bend: 0.4 },
+    { id: 'tip', name: 'Tail tip', parent: 'tail', start: [0, 0.16, -0.66], end: [0, 0.12, -1.06], side: X, width: 0.26, widthEnd: 0.07, bendy: true, bend: 0.4, bendDir: Math.PI },
   ],
 };
 
