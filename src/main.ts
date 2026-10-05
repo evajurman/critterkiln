@@ -422,7 +422,16 @@ scenePass.render = (...args: Parameters<RenderPass['render']>) => {
 };
 composer.addPass(scenePass);
 const gtao = new GTAOPass(scene, camera, 1, 1);
-gtao.updateGtaoMaterial({ radius: 0.28, distanceExponent: 1.6, thickness: 1.2, scale: 1.3, samples: QUALITY[quality].aoSamples });
+// Stock GTAO counts anything within `thickness` in camera depth as an
+// occluder, cut off sharply. Looking down, the floor behind a leg's edge
+// comes within that depth partway up the leg, so the shade switched on there
+// and moved as the camera did. Here an occluder fades out by its real distance
+// instead: the same from every angle, and soft at the limit.
+gtao.gtaoMaterial.fragmentShader = gtao.gtaoMaterial.fragmentShader
+  .replaceAll('if (abs(viewDelta.z) < thickness) {', '{ float occW = 1. - smoothstep(0.5 * thickness, thickness, length(viewDelta));')
+  .replace(/(cosHorizons\.[xy] \+= max\(0\., \(sampleCosHorizon - cosHorizons\.[xy]\) \* mix\(1\., 2\. \/ float\(j \+ 2\), distanceFallOff\))\);/g, '$1 * occW);');
+gtao.gtaoMaterial.needsUpdate = true;
+gtao.updateGtaoMaterial({ radius: 0.28, distanceExponent: 1.6, thickness: 0.6, scale: 1.3, samples: QUALITY[quality].aoSamples });
 gtao.enabled = QUALITY[quality].ao;
 gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 16 });
 gtao.blendIntensity = 1.0;
