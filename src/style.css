@@ -333,7 +333,6 @@ button.link { border: 0; background: none; color: var(--accent); font-weight: 70
 
 .attach-sec { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--line); }
 .sub-title { font-size: 12px; font-weight: 800; color: var(--muted); margin-bottom: 6px; }
-.attach-sec .parts { margin-bottom: 8px; }
 input.text.wide, button.wide { width: 100%; margin-bottom: 8px; }
 button.primary.slim { width: auto; flex: 1; padding: 8px 10px; font-size: 14px; }
 #stuff-panel .primary { margin: 8px 0 2px; }

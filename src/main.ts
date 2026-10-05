@@ -1152,15 +1152,8 @@ canvas.addEventListener('pointerup', (e) => {
     showEyes(eye);
     return;
   }
-  if (mode === 'look') {
-    const att = pickAttachment(e.clientX, e.clientY);
-    if (att) {
-      const a = state.attachments?.find((x) => x.id === att);
-      if (a && creature.bones.has(a.bone)) selectPart(a.bone);
-      selectAttachment(att);
-      return;
-    }
-  }
+  const att = pickAttachment(e.clientX, e.clientY);
+  if (att) return pickStuff(att);
   const id = pickPart(e.clientX, e.clientY);
   if (id) {
     deselectAttachment();
@@ -1290,8 +1283,8 @@ function pickHandle(x: number, y: number): THREE.Object3D | null {
 }
 
 function handlesVisible() {
-  // Arrange has its own handles at the creature's feet
-  return !idle && !drawState && !placing && mode === 'shape';
+  // Arrange has its own handles at the creature's feet, and picked stuff its own arrows
+  return !idle && !drawState && !placing && !selectedAttachment && mode === 'shape';
 }
 
 /** Back to nothing picked: clicking empty space in Shape. */
@@ -3083,7 +3076,8 @@ function selectAttachment(id: string) {
   gizmo.attach(obj);
   $('#attach-bar').hidden = false;
   syncAttachBar();
-  renderAttachList();
+  updateSkeletonVisibility();
+  renderCreatureStuff();
 }
 
 function deselectAttachment() {
@@ -3091,7 +3085,9 @@ function deselectAttachment() {
   if (!placing) gizmo.detach();
   $('#attach-bar').hidden = true;
   $('#attach-mat-pop').hidden = true;
-  renderAttachList();
+  // (also called while a world is being swapped, between creatures)
+  if (creature) updateSkeletonVisibility();
+  renderCreatureStuff();
 }
 
 // ---------------------------------------------------------------------------
@@ -3343,20 +3339,28 @@ function attachThing(t: Thing) {
   hintOnce('Drag the arrows to place it; switch to rotate or scale in the top bar', 3000);
 }
 
-function renderAttachList() {
-  const el = $('#attach-list');
+/** Everything the creature is wearing, under Parts: picking one goes to Look with it selected, as clicking it would. */
+function renderCreatureStuff() {
+  const el = $('#creature-stuff');
   el.innerHTML = '';
-  const bone = creature.bones.get(selected);
-  if (!bone) return;
-  const twin = creature.twinOf(bone)?.def.id;
-  const mine = (state.attachments ?? []).filter((a) => a.bone === selected || (a.mirror && a.bone === twin));
-  for (const a of mine) {
+  const all = state.attachments ?? [];
+  $('#creature-stuff-sec').hidden = !all.length;
+  for (const a of all) {
     const btn = document.createElement('button');
     iconLabel(btn, fa('paperclip'), a.thing.name);
+    const src = creature.bones.get(a.bone)?.src;
+    if (src) btn.title = `On the ${partLabel(src).toLowerCase()}`;
     btn.classList.toggle('active', a.id === selectedAttachment);
-    btn.onclick = () => (a.id === selectedAttachment ? deselectAttachment() : selectAttachment(a.id));
+    btn.onclick = () => (a.id === selectedAttachment ? deselectAttachment() : pickStuff(a.id));
     el.append(btn);
   }
+}
+
+/** Pick a piece of stuff in Shape or Look, with the part it's on picked too (that part's handles stay hidden meanwhile). */
+function pickStuff(id: string) {
+  const a = state.attachments?.find((x) => x.id === id);
+  if (a && creature.bones.has(a.bone)) selectPart(a.bone, false);
+  selectAttachment(id);
 }
 
 function pickAttachment(x: number, y: number): string | null {
@@ -3365,11 +3369,6 @@ function pickAttachment(x: number, y: number): string | null {
   return hit ? (hit.object.userData.attachmentId as string) : null;
 }
 
-$('#attach-add').onclick = () => {
-  const pop = $('#attach-pop');
-  pop.hidden = !pop.hidden;
-  renderCollection();
-};
 $('#attach-pop-close').onclick = () => ($('#attach-pop').hidden = true);
 // from Shape: stuff is placed and styled in Look, so go there with this part still picked
 $('#rig-attach').onclick = () => {
@@ -3397,12 +3396,23 @@ $<HTMLInputElement>('#attach-mirror').onchange = (e) => {
   commit();
   selectAttachment(a.id);
 };
-$('#attach-remove').onclick = () => {
+function removeAttachment() {
   state.attachments = (state.attachments ?? []).filter((a) => a.id !== selectedAttachment);
   deselectAttachment();
   creature.sync();
   commit();
-  renderAttachList();
+}
+$('#attach-remove').onclick = removeAttachment;
+// a copy lands a little to one side of the original, so it can be seen and dragged off it
+$('#attach-copy').onclick = () => {
+  const a = currentAttachment();
+  if (!a) return;
+  const [x, y, z] = a.position;
+  const copy: Attachment = { ...structuredClone(a), id: uid(), position: [x + 0.08, y + 0.08, z] };
+  state.attachments = [...(state.attachments ?? []), copy];
+  creature.sync();
+  commit();
+  selectAttachment(copy.id);
 };
 $('#attach-done').onclick = () => deselectAttachment();
 
@@ -4151,14 +4161,14 @@ function selPart() {
   return state.parts[creature.bones.get(selected)!.src];
 }
 
-function selectPart(id: string) {
+function selectPart(id: string, tips = true) {
   idle = false;
   selected = id;
   creature.select(id);
   updateSkeletonVisibility();
   flashPart();
   renderUI();
-  if (mode === 'shape') shapeTips();
+  if (tips && mode === 'shape') shapeTips();
 }
 
 /** What the handles on a picked part do: the first time one is picked in Shape. */
@@ -4206,13 +4216,8 @@ function renderParts() {
 
 function renderPartCard() {
   const p = selPart();
-  $('#part-title').textContent = partLabel(creature.bones.get(selected)!.src);
   $<HTMLInputElement>('#thickness').value = String(p.thickness);
   $<HTMLInputElement>('#opacity').value = String(p.opacity ?? 1);
-  // parts blended into this one are one surface: they share its opacity
-  const others = creature.blendedWith(selected).filter((src) => src !== creature.bones.get(selected)!.src);
-  $('#opacity-note').hidden = !others.length;
-  $('#opacity-note').textContent = others.length ? `Blended with ${others.map(partLabel).join(', ')}: they fade together.` : '';
   $<HTMLButtonElement>('#reset-shape').disabled = !p.outline;
 }
 
@@ -4550,7 +4555,7 @@ function renderUI() {
   renderMerge();
   renderEyes();
   renderRigPanel();
-  renderAttachList();
+  renderCreatureStuff();
   renderStuffPanel();
   renderCreatureBar();
   syncIdle();
@@ -4629,10 +4634,8 @@ function setMode(m: Mode) {
   $('#stuff-panel').hidden = m !== 'stuff';
   $('#creature-bar').hidden = m === 'stuff';
   if (m === 'stuff') stopPlacing();
-  if (m !== 'look') {
-    deselectAttachment();
-    $('#attach-pop').hidden = true;
-  }
+  if (m === 'stuff') deselectAttachment();
+  if (m !== 'look') $('#attach-pop').hidden = true;
   const wasStuff = board.visible;
   board.visible = m === 'stuff';
   for (const c of creatures) c.root.visible = m !== 'stuff';
@@ -5790,6 +5793,11 @@ window.addEventListener('keydown', (e) => {
     else if (k === 'd' && mode === 'stuff') enterDraw({ kind: 'piece' });
     else if (k === '3') setMode('stuff');
     else if (k === 'm' && mode === 'shape' && !drawState) setMirror(!rigLock);
+    // picked stuff goes first: its part is picked too, and mustn't go with it
+    else if ((k === 'backspace' || k === 'delete') && selectedAttachment && !drawState) {
+      e.preventDefault();
+      removeAttachment();
+    }
     else if ((k === 'backspace' || k === 'delete') && mode === 'shape' && !idle && !drawState && !placing) {
       e.preventDefault();
       removePart();
