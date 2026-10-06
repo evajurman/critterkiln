@@ -87,6 +87,14 @@ export interface EyePair {
   single?: boolean;
   /** radians round the part (falls back to the old shared `turn`) */
   turn?: number;
+  /**
+   * placed by hand (dropped or dragged onto the part): where the first eye sits,
+   * in the part's own frame, and which way the surface faced there. A pair's
+   * other eye is its mirror image across the part's own middle. Unset = placed
+   * from Spacing and Height, looking from the creature's front.
+   */
+  at?: V3;
+  n?: V3;
 }
 
 export type EyeFinish = 'body' | 'gloss' | 'matte' | 'glass';
@@ -1561,6 +1569,14 @@ export class Creature {
     return q;
   }
 
+  /** The middle of a part's drawing, side to side, in its own frame: a hand-placed pair of eyes mirrors across it. */
+  partMid(b: BoneRT): number {
+    const geo = (b.mesh?.userData.baseGeo as THREE.BufferGeometry | undefined) ?? b.mesh?.geometry;
+    if (!geo) return 0;
+    if (!geo.boundingBox) geo.computeBoundingBox();
+    return (geo.boundingBox!.min.x + geo.boundingBox!.max.x) / 2;
+  }
+
   /** Stick one pair (or single eye) onto a part, found by aiming at it from the creature's front. */
   private placeEyes(part: BoneRT, pair: EyePair, pairIndex: number, group: THREE.Group, spots: FuzzSpot[]) {
     const e = this.state.eyes;
@@ -1606,23 +1622,60 @@ export class Creature {
     const localUp = up.clone().transformDirection(toLocal);
 
     const r = Math.max(0.02, Math.min(sizeR, sizeU) * 0.16 * (0.4 + pair.size * 1.2));
-    for (const sgn of pair.single ? [0] : [1, -1]) {
-      const originW = new THREE.Vector3()
-        .addScaledVector(right, (minR + maxR) / 2 + sgn * (sizeR / 2) * pair.spacing * 0.8)
-        .addScaledVector(up, minU + sizeU * pair.height)
-        .addScaledVector(forward, maxF + 1);
-      ray.set(originW.applyMatrix4(toLocal), localForward.clone().negate());
-      const hit = ray.intersectObject(probe, false)[0];
+    // where each eye is looked for: a ray in the part's frame (and, for one
+    // placed by hand, the spot it should land nearest)
+    const aims: { sgn: number; from: THREE.Vector3; dir: THREE.Vector3; near?: THREE.Vector3 }[] = [];
+    if (pair.at) {
+      if (!geo.boundingBox) geo.computeBoundingBox();
+      const mid = this.partMid(part);
+      const reach = geo.boundingBox!.getSize(new THREE.Vector3()).length();
+      const at = new THREE.Vector3(...pair.at);
+      const n = new THREE.Vector3(...(pair.n ?? [0, 0, 1])).normalize();
+      // kept in the left twin's frame; a right twin's is that mirrored across its Z
+      if (part.def.sideSign === -1) {
+        at.z = -at.z;
+        n.z = -n.z;
+      }
+      // a pair dropped on the middle line is pushed apart so the two don't overlap
+      if (!pair.single && Math.abs(at.x - mid) < r * 1.15) at.x = mid + (at.x < mid ? -1 : 1) * r * 1.15;
+      const spin = (pair.turn ?? e.turn ?? 0) * (part.def.sideSign === -1 ? -1 : 1);
+      const Y = new THREE.Vector3(0, 1, 0);
+      for (const sgn of pair.single ? [0] : [1, -1]) {
+        const p = at.clone(), d = n.clone();
+        if (sgn === -1) {
+          p.x = 2 * mid - p.x;
+          d.x = -d.x;
+        }
+        // Facing turns them round the part
+        p.applyAxisAngle(Y, spin);
+        d.applyAxisAngle(Y, spin);
+        aims.push({ sgn, from: p.clone().addScaledVector(d, reach), dir: d.negate(), near: p });
+      }
+    } else {
+      for (const sgn of pair.single ? [0] : [1, -1]) {
+        const originW = new THREE.Vector3()
+          .addScaledVector(right, (minR + maxR) / 2 + sgn * (sizeR / 2) * pair.spacing * 0.8)
+          .addScaledVector(up, minU + sizeU * pair.height)
+          .addScaledVector(forward, maxF + 1);
+        aims.push({ sgn, from: originW.applyMatrix4(toLocal), dir: localForward.clone().negate() });
+      }
+    }
+    for (const { sgn, from, dir, near } of aims) {
+      ray.set(from, dir);
+      const hits = ray.intersectObject(probe, false).filter((h) => h.face);
+      // by hand: the surface nearest the spot (a fold of the part may be in front of it)
+      const hit = near ? hits.sort((a, b) => a.point.distanceTo(near) - b.point.distanceTo(near))[0] : hits[0];
       if (!hit || !hit.face) continue;
 
-      // Flat eyes lie flush with the surface; round ones mostly look forward.
+      // Flat eyes lie flush with the surface; round ones mostly look forward
+      // (or, placed by hand, mostly out from where they sit)
       const surfN = hit.face.normal.clone().normalize();
       const flat = e.style === 'flat' || e.style === 'button' || e.style === 'dot';
-      const z = flat ? surfN : surfN.clone().multiplyScalar(0.5).add(localForward).normalize();
+      const z = flat ? surfN : near ? surfN.clone().addScaledVector(localForward, 0.6).normalize() : surfN.clone().multiplyScalar(0.5).add(localForward).normalize();
       const y = localUp.clone().addScaledVector(z, -localUp.dot(z)).normalize();
       const x = new THREE.Vector3().crossVectors(y, z);
       const eye = new THREE.Group();
-      eye.userData.eye = { pair: pairIndex, r };
+      eye.userData.eye = { pair: pairIndex, r, sgn };
       eye.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
       // stand-off: lift the eye out along its facing direction
       eye.position.copy(hit.point).addScaledVector(z, (pair.lift ?? e.lift ?? 0) * r * 1.2);
@@ -1844,22 +1897,43 @@ export class Creature {
   }
 
   /**
+   * Where a ray first meets the creature: the part, the spot and which way the
+   * surface faces there, in the scene and in the part's own frame. `local` is
+   * as the part's definition sees it: on a right twin, mirrored back across Z.
+   */
+  surfaceAt(ray: THREE.Raycaster): { bone: BoneRT; point: THREE.Vector3; normal: THREE.Vector3; local: THREE.Vector3; localNormal: THREE.Vector3 } | null {
+    const hit = ray.intersectObjects(this.meshes(), false)[0];
+    const bone = hit?.face && this.bones.get(hit.object.userData.boneId as string);
+    if (!hit?.face || !bone) return null;
+    const normal = hit.face.normal.clone().applyMatrix3(new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld)).normalize();
+    bone.pivot.updateMatrixWorld(true);
+    const toLocal = bone.pivot.matrixWorld.clone().invert();
+    const local = hit.point.clone().applyMatrix4(toLocal);
+    const localNormal = normal.clone().transformDirection(toLocal);
+    if (bone.def.sideSign === -1) {
+      local.z = -local.z;
+      localNormal.z = -localNormal.z;
+    }
+    return { bone, point: hit.point.clone(), normal, local, localNormal };
+  }
+
+  /**
    * The eye pair a ray hits first, and how far along. The eyes themselves
    * don't take raycasts (clicks go through to the head), so each eye counts as
    * a ball of its own size.
    */
-  pickEye(ray: THREE.Ray): { pair: number; distance: number } | null {
+  pickEye(ray: THREE.Ray): { pair: number; distance: number; sgn: number; bone: string } | null {
     const shown = this.eyes.filter((g) => g.parent && g.visible);
-    let best: { pair: number; distance: number } | null = null;
+    let best: { pair: number; distance: number; sgn: number; bone: string } | null = null;
     const sphere = new THREE.Sphere();
     const at = new THREE.Vector3();
     for (const eye of shown.flatMap((g) => g.children)) {
-      const { pair, r } = eye.userData.eye as { pair: number; r: number };
+      const { pair, r, sgn } = eye.userData.eye as { pair: number; r: number; sgn: number };
       eye.getWorldPosition(sphere.center);
       sphere.radius = r * eye.getWorldScale(at).x;
       if (!ray.intersectSphere(sphere, at)) continue;
       const distance = at.distanceTo(ray.origin);
-      if (!best || distance < best.distance) best = { pair, distance };
+      if (!best || distance < best.distance) best = { pair, distance, sgn, bone: (eye.parent?.parent?.userData.boneId as string) ?? '' };
     }
     return best;
   }

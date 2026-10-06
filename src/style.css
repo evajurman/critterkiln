@@ -705,3 +705,20 @@ button.piece-icon { padding: 0; }
   .popover.library-pop { left: 8px; right: 8px; top: 8px; transform: none; width: auto; max-height: calc(100% - 16px); }
   .creation-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
 }
+
+/* carrying eyes or stuff from a menu onto the creature */
+.carry { touch-action: pan-y; user-select: none; -webkit-user-drag: none; }
+.carry img { -webkit-user-drag: none; }
+#eyes-add.carry { touch-action: none; cursor: grab; }
+.carry-ghost {
+  position: fixed; left: 0; top: 0; z-index: 1000; pointer-events: none;
+  width: 44px; height: 44px; margin: -22px 0 0 -22px; display: grid; place-items: center;
+  border-radius: 12px; background: #fff; border: 1px solid var(--line); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+  font-size: 20px; color: var(--ink, #222); transition: opacity 0.12s;
+}
+.carry-ghost img { width: 100%; height: 100%; object-fit: cover; border-radius: 11px; }
+/* over the creature it's really there, so the stand-in fades away */
+.carry-ghost.landing { opacity: 0; }
+body.carrying, body.carrying * { cursor: grabbing !important; }
+.eye-placed { margin: 4px 0; }
+#eye-spacing-row[hidden], #eye-height-row[hidden], .eye-placed[hidden] { display: none; }

@@ -393,7 +393,9 @@ function getStoneTex() {
     stamp(pits, size, r() * size, r() * size, rad, (dx, dy) => -depth * (1 - (dx * dx + dy * dy) / (rad * rad)));
   }
 
-  // cracks: wandering, branching lines, each at its own level (brightest show first)
+  // cracks: jagged fractures, each at its own level (brightest show first). Real
+  // cracks are rough at every scale (midpoint displacement), widest where they
+  // opened and pinched to a hair at the ends, and they fork off at sharp angles
   const cc = document.createElement('canvas');
   cc.width = cc.height = size;
   const ctx = cc.getContext('2d')!;
@@ -402,20 +404,44 @@ function getStoneTex() {
   ctx.lineCap = ctx.lineJoin = 'round';
   // 'lighten' keeps the higher level where cracks cross
   ctx.globalCompositeOperation = 'lighten';
-  const crack = (x: number, y: number, ang: number, len: number, w: number, level: number, depth: number) => {
-    const pts: Vec2d[] = [[x, y]];
-    for (let s = 0; s < len; s += 5) {
-      ang += (r() - 0.5) * 0.38;
-      x += Math.cos(ang) * 5;
-      y += Math.sin(ang) * 5;
-      pts.push([x, y]);
-      if (depth < 2 && r() < 0.02) crack(x, y, ang + (r() < 0.5 ? -1 : 1) * (0.5 + r() * 0.8), (len - s) * (0.3 + r() * 0.4), w * 0.65, level * 0.9, depth + 1);
+  /** A rough path from a to b: each piece's middle pushed sideways by a share of its length. */
+  const jagged = (a: Vec2d, b: Vec2d, rough: number): Vec2d[] => {
+    let pts: Vec2d[] = [a, b];
+    for (let seg = Math.hypot(b[0] - a[0], b[1] - a[1]); seg > 3; seg /= 2) {
+      const next: Vec2d[] = [pts[0]];
+      for (let i = 1; i < pts.length; i++) {
+        const [x0, y0] = pts[i - 1], [x1, y1] = pts[i];
+        const k = (r() - 0.5) * 2 * rough;
+        next.push([(x0 + x1) / 2 - (y1 - y0) * k, (y0 + y1) / 2 + (x1 - x0) * k], pts[i]);
+      }
+      pts = next;
     }
+    return pts;
+  };
+  const crack = (x: number, y: number, ang: number, len: number, w: number, level: number, depth: number) => {
+    // a gently bending spine, roughened between its joints
+    const pts: Vec2d[] = [[x, y]];
+    const legs = 3 + Math.floor(r() * 3);
+    for (let i = 0; i < legs; i++) {
+      ang += (r() - 0.5) * 0.7;
+      const [px0, py0] = pts[pts.length - 1];
+      const step = len / legs;
+      pts.push(...jagged([px0, py0], [px0 + Math.cos(ang) * step, py0 + Math.sin(ang) * step], 0.3).slice(1));
+    }
+    // opened somewhere along its length, pinched shut at the ends; wobbling a little
+    const widest = 0.15 + r() * 0.5;
+    let wob = 1;
+    const widths = pts.map((_, i) => {
+      const t = i / (pts.length - 1);
+      const shape = t < widest ? t / widest : (1 - t) / (1 - widest);
+      wob = THREE.MathUtils.clamp(wob + (r() - 0.5) * 0.25, 0.6, 1.3);
+      return Math.max(0.7, w * Math.pow(shape, 0.55) * wob);
+    });
     const g = Math.round(level * 255);
     ctx.strokeStyle = `rgb(${g},${g},${g})`;
-    // drawn at every wrap offset so it tiles; thinning towards the tip
+    // drawn at every wrap offset so it tiles
     for (let i = 1; i < pts.length; i++) {
-      ctx.lineWidth = Math.max(0.8, w * Math.pow(1 - i / pts.length, 0.6));
+      ctx.lineWidth = (widths[i - 1] + widths[i]) / 2;
       for (const ox of [-size, 0, size]) {
         for (const oy of [-size, 0, size]) {
           ctx.beginPath();
@@ -425,8 +451,20 @@ function getStoneTex() {
         }
       }
     }
+    // forks: thinner cracks splitting off sharply, which show a little later
+    if (depth >= 2) return;
+    const forks = Math.floor(r() * (depth ? 2 : 4));
+    for (let f = 0; f < forks; f++) {
+      const i = 1 + Math.floor(r() * (pts.length - 2));
+      const [fx, fy] = pts[i];
+      const along = Math.atan2(fy - pts[i - 1][1], fx - pts[i - 1][0]);
+      const t = i / (pts.length - 1);
+      crack(fx, fy, along + (r() < 0.5 ? -1 : 1) * (0.45 + r() * 0.7), len * (1 - t) * (0.35 + r() * 0.45), widths[i] * 0.7, level * (0.8 + r() * 0.15), depth + 1);
+    }
   };
-  for (let i = 0; i < 60; i++) crack(r() * size, r() * size, r() * Math.PI * 2, 120 + r() * 260, 3.5 + r() * 3.5, 0.1 + r() * 0.9, 0);
+  for (let i = 0; i < 42; i++) crack(r() * size, r() * size, r() * Math.PI * 2, 140 + r() * 320, 3 + r() * 4, 0.15 + r() * 0.85, 0);
+  // hairlines: short, faint and only once the slider's well up
+  for (let i = 0; i < 70; i++) crack(r() * size, r() * size, r() * Math.PI * 2, 30 + r() * 70, 1 + r() * 0.8, 0.05 + r() * 0.3, 2);
   const px = ctx.getImageData(0, 0, size, size).data;
   const cracks = new Float32Array(size * size);
   for (let i = 0; i < cracks.length; i++) cracks[i] = px[i * 4] / 255;

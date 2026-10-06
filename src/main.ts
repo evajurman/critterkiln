@@ -941,7 +941,17 @@ canvas.addEventListener('pointerdown', (e) => {
   pointer.downY = e.clientY;
   pointer.moved = false;
   pointer.touch = e.pointerType !== 'mouse';
-  if (e.button !== 0 || pickingFocus || !handlesVisible()) return;
+  if (e.button !== 0 || pickingFocus) return;
+  // pressing on an eye: dragging slides the pair over the surface (a click still opens its settings)
+  const onHandle = (handlesVisible() && pickHandle(e.clientX, e.clientY)) || gizmo.dragging || gizmo.axis !== null;
+  const eye = !onHandle && mode !== 'stuff' && !drawState && !idle ? pickEyeHit(e.clientX, e.clientY) : null;
+  if (eye) {
+    eyeDrag = { pair: eye.pair, sgn: eye.sgn };
+    controls.enabled = false;
+    canvas.setPointerCapture(e.pointerId);
+    return;
+  }
+  if (!handlesVisible()) return;
   const h = pickHandle(e.clientX, e.clientY);
   if (!h) return;
   controls.enabled = false;
@@ -995,6 +1005,10 @@ canvas.addEventListener('pointerdown', (e) => {
 
 canvas.addEventListener('pointermove', (e) => {
   if (Math.hypot(e.clientX - pointer.downX, e.clientY - pointer.downY) > 5) pointer.moved = true;
+  if (eyeDrag) {
+    if (pointer.moved) moveEyesTo(eyeDrag.pair, eyeDrag.sgn, e.clientX, e.clientY);
+    return;
+  }
   if (drag) {
     setRay(e.clientX, e.clientY);
     const hit = raycaster.ray.intersectPlane(drag.plane, new THREE.Vector3());
@@ -1085,6 +1099,17 @@ function doubleTapped(e: PointerEvent): boolean {
 }
 
 canvas.addEventListener('pointerup', (e) => {
+  if (eyeDrag) {
+    const d = eyeDrag;
+    eyeDrag = null;
+    controls.enabled = true;
+    if (pointer.moved) {
+      commit();
+      showEyes(d.pair);
+      return;
+    }
+    // not moved: a click, which opens the eye settings below
+  }
   if (drag) {
     const d = drag;
     drag = null;
@@ -1242,12 +1267,51 @@ function pickPart(x: number, y: number): string | null {
   return hit ? (hit.object.userData.boneId as string) : null;
 }
 
-/** The eye pair under the pointer, if an eye is in front of every part there. */
-function pickEye(x: number, y: number): number | null {
+/** The eye under the pointer, if it's in front of every part there: its pair, and which of the two it is. */
+function pickEyeHit(x: number, y: number): { pair: number; sgn: number } | null {
   setRay(x, y);
   const part = raycaster.intersectObjects(creature.meshes(), false)[0];
   const eye = creature.pickEye(raycaster.ray);
-  return eye && (!part || eye.distance <= part.distance) ? eye.pair : null;
+  return eye && (!part || eye.distance <= part.distance) ? eye : null;
+}
+
+/** The eye pair under the pointer, if an eye is in front of every part there. */
+function pickEye(x: number, y: number): number | null {
+  return pickEyeHit(x, y)?.pair ?? null;
+}
+
+/** an eye being dragged over the surface: its pair, and which of the two (-1 = the mirrored one) */
+let eyeDrag: { pair: number; sgn: number } | null = null;
+
+const round4 = (v: THREE.Vector3) => v.toArray().map((x) => Math.round(x * 1e4) / 1e4) as V3;
+
+/**
+ * Put an eye where the pointer is on the creature (on whichever part is
+ * there): the pair becomes hand-placed, its other eye mirrored across the
+ * part's own middle. Says whether it landed on the creature.
+ */
+function moveEyesTo(index: number, sgn: number, x: number, y: number): boolean {
+  const pair = state.eyes.pairs[index];
+  if (!pair) return false;
+  setRay(x, y);
+  const hit = creature.surfaceAt(raycaster);
+  if (!hit) return false;
+  const at = hit.local, n = hit.localNormal;
+  // undo the pair's Facing, then (for the mirrored eye) the mirroring, as the eyes are laid out
+  const spin = pair.turn ?? state.eyes.turn ?? 0;
+  const Y = new THREE.Vector3(0, 1, 0);
+  at.applyAxisAngle(Y, -spin);
+  n.applyAxisAngle(Y, -spin);
+  if (sgn === -1) {
+    at.x = 2 * creature.partMid(hit.bone) - at.x;
+    n.x = -n.x;
+  }
+  pair.at = round4(at);
+  pair.n = round4(n.normalize());
+  pair.bone = hit.bone.src;
+  state.eyes.enabled = true;
+  creature.sync();
+  return true;
 }
 
 /** Picks the part these eyes are on, with its eye settings open at this pair. */
@@ -2926,6 +2990,10 @@ function renderCollection() {
         if (forAttach) attachThing(t);
         else if (t.id !== current) openOnBench(t);
       });
+      if (forAttach) {
+        c.classList.add('carry');
+        carryFrom(c, () => t, () => (t.thumb ? `<img src="${t.thumb}" alt="" />` : fa('box')));
+      }
       if (!forAttach) c.classList.toggle('current', t.id === current);
     }
   }
@@ -3338,6 +3406,172 @@ function attachThing(t: Thing) {
   selectAttachment(a.id);
   hintOnce('Drag the arrows to place it; switch to rotate or scale in the top bar', 3000);
 }
+
+// ---------------------------------------------------------------------------
+// carrying eyes or stuff from a menu onto the creature: while it's over the
+// creature it's really there (exactly where it would land), and letting go
+// keeps it
+
+let carry: {
+  what: 'eyes' | Thing;
+  ghost: HTMLElement;
+  /** the eye pair (index) or attachment (id) standing in while over the creature */
+  preview: number | string | null;
+  /** the thing's extent in its own frame, to sit it on the surface */
+  box?: THREE.Box3;
+} | null = null;
+/** when a carry ended: the click that follows it isn't a click */
+let carriedAt = 0;
+
+/** Press and drag `el` to carry what it stands for onto the creature; a plain click still works as before. */
+function carryFrom(el: HTMLElement, what: () => 'eyes' | Thing | null, ghost: () => string) {
+  // the browser's own drag (of a thumbnail picture) would cancel the pointer and end the carry
+  el.addEventListener('dragstart', (e) => e.preventDefault());
+  el.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    const x0 = e.clientX, y0 = e.clientY;
+    const move = (ev: PointerEvent) => {
+      if (!carry) {
+        if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < 6) return;
+        const w = what();
+        if (!w) return;
+        const g = document.createElement('div');
+        g.className = 'carry-ghost';
+        g.innerHTML = ghost();
+        document.body.append(g);
+        carry = { what: w, ghost: g, preview: null };
+        document.body.classList.add('carrying');
+      }
+      carryTo(ev.clientX, ev.clientY);
+    };
+    const up = (ev: PointerEvent) => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+      if (!carry) return;
+      endCarry(ev.type === 'pointerup');
+      carriedAt = performance.now();
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+  });
+  el.addEventListener(
+    'click',
+    (e) => {
+      if (performance.now() - carriedAt > 300) return;
+      e.stopImmediatePropagation();
+      e.preventDefault();
+    },
+    true,
+  );
+}
+
+/** Where a carried thing's middle goes, and how it's turned, to sit on the surface at `hit` (in its part's frame). */
+function sitOnSurface(hit: NonNullable<ReturnType<Creature['surfaceAt']>>, box: THREE.Box3): { position: V3; quaternion: [number, number, number, number] } {
+  const rootQ = creature.root.getWorldQuaternion(new THREE.Quaternion());
+  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(rootQ);
+  // upright, facing out from the surface (on top of something: facing the creature's front)
+  const face = hit.normal.clone().addScaledVector(up, -hit.normal.dot(up));
+  if (face.lengthSq() < 0.1) face.set(0, 0, 1).applyQuaternion(rootQ);
+  face.normalize();
+  const side = new THREE.Vector3().crossVectors(up, face);
+  const turn = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(side, up, face));
+  // pushed out until it rests on the surface, just sunk in a little
+  const out = hit.normal.clone().applyQuaternion(turn.clone().invert()).negate();
+  let reach = 0;
+  for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) reach = Math.max(reach, out.x * x + out.y * y + out.z * z);
+  const scale = creature.root.getWorldScale(new THREE.Vector3()).x;
+  const at = hit.point.clone().addScaledVector(hit.normal, reach * scale * 0.85);
+  const pivotQ = hit.bone.pivot.getWorldQuaternion(new THREE.Quaternion());
+  const q = pivotQ.invert().multiply(turn);
+  return { position: round4(hit.bone.pivot.worldToLocal(at)), quaternion: q.toArray().map((v) => Math.round(v * 1e5) / 1e5) as [number, number, number, number] };
+}
+
+/** The extent of something, in its own frame. */
+function ownBox(obj: THREE.Object3D): THREE.Box3 {
+  obj.updateWorldMatrix(true, true);
+  const inv = obj.matrixWorld.clone().invert();
+  const box = new THREE.Box3();
+  const m = new THREE.Matrix4();
+  obj.traverse((o) => {
+    if (!(o instanceof THREE.Mesh)) return;
+    if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+    box.union(o.geometry.boundingBox!.clone().applyMatrix4(m.multiplyMatrices(inv, o.matrixWorld)));
+  });
+  return box;
+}
+
+/** Take the stand-in off the creature (the pointer has left it). */
+function dropPreview() {
+  if (!carry || carry.preview === null) return;
+  const p = carry.preview;
+  if (typeof p === 'number') state.eyes.pairs.splice(p, 1);
+  else state.attachments = (state.attachments ?? []).filter((a) => a.id !== p);
+  carry.preview = null;
+  creature.sync();
+}
+
+function carryTo(x: number, y: number) {
+  if (!carry) return;
+  carry.ghost.style.transform = `translate(${x}px, ${y}px)`;
+  // only over the 3D view itself (not a menu on top of it)
+  setRay(x, y);
+  const hit = document.elementFromPoint(x, y) === canvas && !idle ? creature.surfaceAt(raycaster) : null;
+  carry.ghost.classList.toggle('landing', !!hit);
+  if (!hit) return dropPreview();
+  if (carry.what === 'eyes') {
+    if (carry.preview === null) {
+      state.eyes.pairs.push({ size: 0.5, spacing: 0.5, height: 0.55 });
+      carry.preview = state.eyes.pairs.length - 1;
+    }
+    const pair = state.eyes.pairs[carry.preview as number];
+    // a limb (one of a mirrored pair, or a stalk) gets a single eye; the head gets a pair
+    const b = hit.bone;
+    const single = b.def.baseId !== state.rig.headId && (b.def.sideSign !== 0 || b.length > 1.6 * b.def.width);
+    if (!!pair.single !== single) pair.single = single || undefined;
+    moveEyesTo(carry.preview as number, 1, x, y);
+    return;
+  }
+  const thing = carry.what;
+  const id = carry.preview;
+  let a = state.attachments?.find((x) => x.id === id);
+  if (!a || a.bone !== hit.bone.def.id) {
+    // a different part: start over on it, so it rides that part
+    dropPreview();
+    a = { id: uid(), bone: hit.bone.def.id, thing: stripThumb(thing), position: [0, 0, 0], quaternion: [0, 0, 0, 1], scale: [1, 1, 1], mirror: !!creature.twinOf(hit.bone) };
+    state.attachments = [...(state.attachments ?? []), a];
+    carry.preview = a.id;
+    creature.sync();
+    const obj = creature.attachmentObject(a.id);
+    if (!carry.box && obj) carry.box = ownBox(obj);
+  }
+  Object.assign(a, sitOnSurface(hit, carry.box ?? new THREE.Box3(new THREE.Vector3(), new THREE.Vector3())));
+  creature.sync();
+}
+
+function endCarry(drop: boolean) {
+  if (!carry) return;
+  const c = carry;
+  if (!drop) dropPreview();
+  carry = null;
+  c.ghost.remove();
+  document.body.classList.remove('carrying');
+  if (c.preview === null) {
+    if (drop) hint(c.what === 'eyes' ? 'Drop the eyes onto your critter' : 'Drop it onto your critter to put it on', 1800);
+    return;
+  }
+  commit();
+  if (typeof c.preview === 'number') {
+    showEyes(c.preview);
+    hint('Drag the eyes to move them', 1800);
+  } else {
+    $('#attach-pop').hidden = true;
+    pickStuff(c.preview);
+  }
+}
+
+carryFrom($('#eyes-add'), () => 'eyes', () => fa('eye'));
 
 /** Everything the creature is wearing, under Parts: picking one goes to Look with it selected, as clicking it would. */
 function renderCreatureStuff() {
@@ -4447,7 +4681,7 @@ function renderEyes() {
   e.style ??= 'googly';
   // the picked part's eyes get the card; a part without any gets an Add button
   const mine = idle ? [] : partEyes();
-  $('#eyes-add').hidden = idle || mine.length > 0;
+  $('#eyes-add').hidden = idle;
   $('#eyes-card').hidden = !mine.length;
   $('#eyes-card').classList.toggle('folded', eyesFolded);
   if (!mine.length) return;
@@ -4522,6 +4756,9 @@ function renderEyes() {
   $<HTMLInputElement>('#eye-spacing').value = String(pair.spacing);
   $<HTMLInputElement>('#eye-spacing').disabled = !!pair.single;
   $<HTMLInputElement>('#eye-height').value = String(pair.height);
+  // placed by hand: dragging them replaces Spacing and Height
+  $('#eye-spacing-row').hidden = $('#eye-height-row').hidden = !!pair.at;
+  $('#eye-placed').hidden = !pair.at;
   $('#eye-sliders').style.opacity = e.enabled ? '1' : '.4';
   $<HTMLInputElement>('#eye-lift').value = String(pair.lift ?? e.lift ?? 0);
   $<HTMLInputElement>('#eye-turn').value = String(Math.round(((pair.turn ?? e.turn ?? 0) * 180) / Math.PI));
@@ -5596,6 +5833,15 @@ $<HTMLInputElement>('#eye-turn').oninput = (ev) => {
   creature.sync();
 };
 $<HTMLInputElement>('#eye-turn').onchange = () => commit();
+$('#eye-unplace').onclick = () => {
+  const pair = state.eyes.pairs[eyePair];
+  if (!pair) return;
+  delete pair.at;
+  delete pair.n;
+  creature.sync();
+  commit();
+  renderEyes();
+};
 $('#eye-front').onclick = () => {
   // undo their part's roll too, so the eyes look where the creature faces
   const pair = state.eyes.pairs[eyePair];

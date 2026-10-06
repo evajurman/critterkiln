@@ -227,7 +227,7 @@
               <button id="rig-mirror" class="pill-toggle" hidden></button>
               <button id="rig-unlink" class="pill-toggle" hidden><i class="fa-regular fa-link-slash" aria-hidden="true"></i> Unlink pair</button>
             </div>
-            <button id="eyes-add" class="pill-toggle" title="Add eyes to this part (on a mirrored part, both sides get them)"><i class="fa-slab fa-regular fa-eye" aria-hidden="true"></i> Add eyes</button>
+            <button id="eyes-add" class="pill-toggle carry" title="Drag onto your critter to put eyes right there, or click to add them to this part"><i class="fa-slab fa-regular fa-eye" aria-hidden="true"></i> Add eyes</button>
             <div id="eyes-card" class="eyes-card" hidden>
               <button id="eyes-fold" class="eyes-head" title="Show or hide the eye settings"><i class="fa-slab fa-regular fa-eye" aria-hidden="true"></i> Eyes <i class="fa-regular fa-chevron-down fold-icon" aria-hidden="true"></i></button>
               <div class="eyes-body">
@@ -238,8 +238,9 @@
                 </div>
                 <div id="eye-sliders">
                   <label class="slider"><span>Size</span><input id="eye-size" type="range" min="0" max="1" step="0.01" /></label>
-                  <label class="slider"><span>Spacing</span><input id="eye-spacing" type="range" min="0" max="1" step="0.01" /></label>
-                  <label class="slider"><span>Height</span><input id="eye-height" type="range" min="0.05" max="0.95" step="0.01" /></label>
+                  <label class="slider" id="eye-spacing-row"><span>Spacing</span><input id="eye-spacing" type="range" min="0" max="1" step="0.01" /></label>
+                  <label class="slider" id="eye-height-row"><span>Height</span><input id="eye-height" type="range" min="0.05" max="0.95" step="0.01" /></label>
+                  <p id="eye-placed" class="muted small eye-placed" hidden>Placed by hand: drag an eye to move them. <button id="eye-unplace" class="link" title="Go back to placing them with Spacing and Height">Use sliders</button></p>
                   <label class="slider" title="How far this pair stands off the face"><span>Stand-off</span><input id="eye-lift" type="range" min="0" max="1" step="0.01" />
                     <span class="ends"><em>on the face</em><em>lifted</em></span></label>
                   <label class="slider" title="Turn the eyes round their part. They stick to it, so rolling the part turns them too"><span>Facing</span><input id="eye-turn" type="range" min="-180" max="180" step="1" />
