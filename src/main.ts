@@ -978,7 +978,8 @@ canvas.addEventListener('pointerdown', (e) => {
   let roll: NonNullable<typeof drag>['roll'];
   if (b && kind === 'roll') {
     // which way the ring travels on screen as the part rolls a little (about its own length)
-    const at = h.position.clone();
+    // which way the ring runs where it was grabbed (it circles the line from base to tip, which is the bone's Y)
+    const at = (h.userData.grab as THREE.Vector3 | undefined)?.clone() ?? h.position.clone().add(new THREE.Vector3(h.userData.ring, 0, 0));
     const eps = 0.02;
     const moved = toScreen(b.pivot, at.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), eps)).sub(toScreen(b.pivot, at));
     const pxPerRad = moved.length() / eps;
@@ -986,14 +987,16 @@ canvas.addEventListener('pointerdown', (e) => {
     const visible = pxPerRad > 40;
     const dir = visible ? moved.normalize() : new THREE.Vector2(1, 0);
     const rest = new Map(creature.linked(id).map((l) => [l.def.id, l.restQuat.clone()] as const));
+    creature.rolling = true;
     roll = { start: new THREE.Vector2(e.clientX, e.clientY), dir, pxPerRad: visible ? pxPerRad : 120, rest, pose: structuredClone(state.pose), eyes: structuredClone(state.eyes) };
   }
   if (b && (kind === 'len' || kind === 'wid' || kind === 'size')) {
     // measure the grab against the bone's base (length), its centre line (width) or both
-    const at = h.position;
+    // (measured round the part as it's bent, the way its frame is drawn)
+    const at = h.userData.at as THREE.Vector3;
     const from = kind === 'len' ? new THREE.Vector3(at.x, 0, 0) : kind === 'wid' ? new THREE.Vector3(0, at.y, 0) : new THREE.Vector3();
-    const anchor = toScreen(b.pivot, from);
-    const reach = toScreen(b.pivot, at.clone()).sub(anchor);
+    const anchor = toScreen(b.pivot, creature.sizerPoint(b, from));
+    const reach = toScreen(b.pivot, creature.sizerPoint(b, at)).sub(anchor);
     const meshX = new Map<THREE.Mesh, number>();
     for (const l of creature.linked(id)) if (l.mesh) meshX.set(l.mesh, l.mesh.scale.x);
     if (reach.lengthSq() > 4) sizer = { anchor, reach, shapes: state.parts[b.src] ? structuredClone(partShapes(state.parts[b.src])) : [], meshX };
@@ -1114,6 +1117,7 @@ canvas.addEventListener('pointerup', (e) => {
     const d = drag;
     drag = null;
     controls.enabled = true;
+    creature.rolling = false;
     $('#viewport').style.cursor = '';
     if (d.rigBase) {
       if (d.moved) {
@@ -1331,13 +1335,29 @@ function pickHandle(x: number, y: number): THREE.Object3D | null {
   // fingers are less exact than a mouse
   let bestD = pointer.touch ? 28 : 16;
   const v = new THREE.Vector3();
+  const near = (h: THREE.Object3D, at: THREE.Vector3) => {
+    h.localToWorld(v.copy(at)).project(camera);
+    if (v.z > 1) return Infinity;
+    return Math.hypot(r.left + ((v.x + 1) / 2) * r.width - x, r.top + ((1 - v.y) / 2) * r.height - y);
+  };
   for (const h of creature.handles()) {
     if (!h.visible) continue;
-    h.getWorldPosition(v).project(camera);
-    if (v.z > 1) continue;
-    const sx = r.left + ((v.x + 1) / 2) * r.width;
-    const sy = r.top + ((1 - v.y) / 2) * r.height;
-    const d = Math.hypot(sx - x, sy - y);
+    if (h.userData.ring !== undefined) {
+      // the roll ring is grabbed anywhere round its hoop: remember where (in the bone's frame)
+      const rr = h.userData.ring as number;
+      for (let i = 0; i < 48; i++) {
+        const a = (i / 48) * Math.PI * 2;
+        const at = new THREE.Vector3(rr * Math.cos(a), 0, rr * Math.sin(a));
+        const d = near(h, at);
+        if (d < bestD) {
+          bestD = d;
+          best = h;
+          h.userData.grab = at.add(h.position);
+        }
+      }
+      continue;
+    }
+    const d = near(h, new THREE.Vector3());
     if (d < bestD) {
       bestD = d;
       best = h;
