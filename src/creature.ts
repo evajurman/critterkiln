@@ -1967,6 +1967,10 @@ export class Creature {
       }
     }
     this.mergeDirty = true;
+    // turning the body itself: the legs it stands on keep hanging the way they
+    // were, so it rears up or leans over its feet instead of tipping the whole critter
+    const legs = b.parent ? [] : this.list.filter((c) => c.parent === b && this.reachesFloor(c));
+    const legQ = legs.map((c) => c.pivot.getWorldQuaternion(new THREE.Quaternion()));
     const iterations = chain.length > 1 ? 12 : 1;
     const tipPos = new THREE.Vector3();
     for (let it = 0; it < iterations; it++) {
@@ -1974,6 +1978,13 @@ export class Creature {
         b.tip.getWorldPosition(tipPos);
         this.aimBone(j, tipPos, target);
       }
+    }
+    if (legs.length) {
+      const bodyQ = b.pivot.getWorldQuaternion(new THREE.Quaternion()).invert();
+      legs.forEach((c, i) => {
+        c.pivot.quaternion.copy(bodyQ.clone().multiply(legQ[i]));
+        c.pivot.updateMatrixWorld(true);
+      });
     }
     // turning the parts it hangs from (or the head itself) doesn't tip the head over
     const head = this.bones.get(this.rig.headId);
@@ -1983,6 +1994,17 @@ export class Creature {
       break;
     }
     return chain;
+  }
+
+  /** A limb that (as drawn) reaches down to the floor, itself or through the parts hanging off it. */
+  private reachesFloor(b: BoneRT): boolean {
+    // by where its far end is: a neck can start low on a serpent and still rise
+    const low = (d: ExpandedBone) => d.end[1];
+    const floor = Math.min(...this.list.map((o) => low(o.def)));
+    const top = Math.max(...this.list.map((o) => Math.max(o.def.start[1], o.def.end[1])));
+    const near = floor + (top - floor) * 0.12;
+    const under = (o: BoneRT): boolean => low(o.def) < near || this.list.some((c) => c.parent === o && under(c));
+    return under(b);
   }
 
   /**
