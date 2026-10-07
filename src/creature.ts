@@ -257,6 +257,9 @@ function seamlessOn(s: CreatureState): boolean {
   return seamlessMode === 'creature' ? (s.seamless ?? true) : seamlessMode === 'on';
 }
 
+// how long one frame may spend fusing parts (see updateMerge)
+const MERGE_BUDGET_MS = 8;
+
 const geoCache = new Map<string, THREE.BufferGeometry>();
 function cachedGeometry(key: string, make: () => THREE.BufferGeometry) {
   let g = geoCache.get(key);
@@ -517,6 +520,8 @@ export class Creature {
   /** the part in drawFocus is being drawn from the side */
   private drawSide = false;
   private mergeDirty = true;
+  /** where the next frame's fusing picks up (see updateMerge) */
+  private mergeCursor = 0;
   // seamless skins: built when idle, thrown away on any change
   private skins: SkinEntry[] = [];
   /** shape the current (or pending) skin was built for; see skinShapeKey */
@@ -1023,33 +1028,51 @@ export class Creature {
 
     // parts under a finished skin are hidden: fused again once the skin goes
     const skinned = new Set(this.skinState === 'ready' ? this.skins.flatMap((sk) => sk.members) : []);
-    for (const [, members] of groups) {
-      for (const b of members) {
-        if (skinned.has(b)) continue;
-        // a part re-bent live while it's resized shows just that, unfused, until it's rebuilt
-        const live = b.mesh!.userData.liveGeo as THREE.BufferGeometry | undefined;
-        if (live) {
-          this.setMeshGeometry(b, live, false);
-          continue;
-        }
-        const base = b.mesh!.userData.baseGeo as THREE.BufferGeometry;
-        const nbrs = on && members.length > 1 ? members.filter((o) => o !== b && !o.mesh!.userData.liveGeo && this.near(b, o, Math.max(k, kc))) : [];
-        if (nbrs.length === 0) {
-          this.setMeshGeometry(b, base, false);
-          continue;
-        }
-        let g = b.mesh!.userData.mergeGeo as THREE.BufferGeometry | undefined;
-        if (!g || g.userData.base !== base) {
-          g?.dispose();
-          g = base.clone();
-          g.userData = { base };
-          b.mesh!.userData.mergeGeo = g;
-        }
-        // only paint colors when a neighbour actually has a different color
-        const myColor = s.parts[b.src].color.toLowerCase();
-        const paint = blend && nbrs.some((o) => s.parts[o.src].color.toLowerCase() !== myColor);
-        this.fuse(b, base, g, nbrs, k, paint ? kc : 0);
-        this.setMeshGeometry(b, g, paint);
+    // A frame only spends so long fusing (a creature with many touching parts
+    // would otherwise make a drag stutter): the rest carry on next frame,
+    // taking turns so every part catches up. Parts already follow their bones;
+    // only a join's fillet can trail a frame or two.
+    const work = [...groups.values()].flatMap((members) => members.map((b) => [b, members] as const));
+    const start = performance.now();
+    for (let w = 0; w < work.length; w++) {
+      const at = (this.mergeCursor + w) % work.length;
+      const deadline = start + MERGE_BUDGET_MS;
+      if (w > 0 && performance.now() > deadline) {
+        this.mergeCursor = at;
+        this.mergeDirty = true;
+        break;
+      }
+      const [b, members] = work[at];
+      if (skinned.has(b)) continue;
+      // a part re-bent live while it's resized shows just that, unfused, until it's rebuilt
+      const live = b.mesh!.userData.liveGeo as THREE.BufferGeometry | undefined;
+      if (live) {
+        this.setMeshGeometry(b, live, false);
+        continue;
+      }
+      const base = b.mesh!.userData.baseGeo as THREE.BufferGeometry;
+      const nbrs = on && members.length > 1 ? members.filter((o) => o !== b && !o.mesh!.userData.liveGeo && this.near(b, o, Math.max(k, kc))) : [];
+      if (nbrs.length === 0) {
+        this.setMeshGeometry(b, base, false);
+        continue;
+      }
+      let g = b.mesh!.userData.mergeGeo as THREE.BufferGeometry | undefined;
+      if (!g || g.userData.base !== base) {
+        g?.dispose();
+        g = base.clone();
+        g.userData = { base };
+        b.mesh!.userData.mergeGeo = g;
+      }
+      // only paint colors when a neighbour actually has a different color
+      const myColor = s.parts[b.src].color.toLowerCase();
+      const paint = blend && nbrs.some((o) => s.parts[o.src].color.toLowerCase() !== myColor);
+      const done = this.fuse(b, base, g, nbrs, k, paint ? kc : 0, deadline);
+      this.setMeshGeometry(b, g, paint);
+      if (!done) {
+        // out of time partway through this part: it goes first next frame
+        this.mergeCursor = at;
+        this.mergeDirty = true;
+        break;
       }
     }
     return true;
@@ -1375,7 +1398,7 @@ export class Creature {
    * Fuse this part's surface into its neighbours (smooth-min fillet) and,
    * when `kc` > 0, bake a color gradient that meets 50/50 at the seam.
    */
-  private fuse(b: BoneRT, base: THREE.BufferGeometry, out: THREE.BufferGeometry, nbrs: BoneRT[], kMax: number, kc: number) {
+  private fuse(b: BoneRT, base: THREE.BufferGeometry, out: THREE.BufferGeometry, nbrs: BoneRT[], kMax: number, kc: number, deadline = Infinity): boolean {
     const solidA = base.userData.solid as Solid;
     const maxR = (sol: Solid) => {
       let m = 0;
@@ -1391,31 +1414,38 @@ export class Creature {
     // "world" here is the creature's own placement space (see rel)
     const toWorld = this.rel(b.mesh!);
     const toLocal = toWorld.clone().invert();
+
     const rotW = new THREE.Matrix3().setFromMatrix4(toWorld);
     const rotL = new THREE.Matrix3().setFromMatrix4(toLocal);
     const myKey = this.state.parts[b.src].color.toLowerCase();
+    const r6 = (v: number) => v.toFixed(6);
     const others = nbrs.map((o) => {
       const g = o.mesh!.userData.baseGeo as THREE.BufferGeometry;
       const solid = g.userData.solid as Solid;
       // keep fillets in proportion: a thin antenna shouldn't get a huge blob
       const k = Math.max(0.005, Math.min(kMax, 0.6 * Math.min(rA, maxR(solid))));
       const oWorld = this.rel(o.mesh!);
-      const inv = oWorld.clone().invert();
+      // from this part's own space into the neighbour's
+      const toO = oWorld.clone().invert().multiply(toWorld);
       const colorKey = this.state.parts[o.src].color.toLowerCase();
       return {
-        solid,
+        id: o.def.id,
         geo: g,
-        bvh: bvhFor(g),
-        normals: sharedNormals(g),
         k,
-        inv,
+        toO,
         rot: new THREE.Matrix3().setFromMatrix4(oWorld),
-        box: g.boundingBox!.clone().expandByScalar(Math.max(k, reach)),
+        // what this neighbour's distances depend on: its shape and where it sits relative to us
+        fieldKey: [g.uuid, ...toO.elements.map(r6)].join(','),
         color: this.shownColor(o),
         // same-colored neighbours don't tint
         tints: kc > 0 && colorKey !== myKey,
       };
     });
+
+    // Nothing this part's fused shape depends on has changed (posing a leg
+    // leaves every join it isn't in as it was): keep it.
+    const relKey = [base.uuid, kMax, kc, own.getHex(), ...others.flatMap((o) => [o.id, o.fieldKey, o.color.getHex()])].join(';');
+    if (out.userData.relKey === relKey) return true;
 
     const p0 = base.getAttribute('position') as THREE.BufferAttribute;
     // shared-corner normals so split (low-poly) vertices all move the same way
@@ -1433,21 +1463,51 @@ export class Creature {
     const grad = new THREE.Vector3(), gw = new THREE.Vector3(), gsum = new THREE.Vector3();
     const col = new THREE.Color();
 
-    // What the fused shape depends on: if only the color fade changed since
-    // last time, just repaint from the remembered distances.
-    const r6 = (v: number) => v.toFixed(6);
-    const shapeKey = [
-      base.uuid, kMax, ...toWorld.elements.map(r6),
-      ...nbrs.flatMap((o) => [o.def.id, (o.mesh!.userData.baseGeo as THREE.BufferGeometry).uuid, ...this.rel(o.mesh!).elements.map(r6)]),
+    // Each neighbour's distance field over this part's vertices is remembered,
+    // and only worked out again when that neighbour moved relative to us (or
+    // the color fade reaches further than it was measured). Gradients are kept
+    // in this part's own space, so they hold however the pair is carried round.
+    type Field = { key: string; maxD: number; f: Float32Array; g: Float32Array };
+    const old = (out.userData.fields as Map<string, Field> | undefined) ?? new Map<string, Field>();
+    const fields = new Map<string, Field>();
+    const rel = new THREE.Matrix3();
+    let complete = true;
+    for (const o of others) {
+      // only a neighbour that tints needs measuring out to the fade's reach
+      // (anything deeper inside than k is left as it is either way)
+      const maxD = o.tints ? Math.max(o.k, reach) : o.k;
+      let fld = old.get(o.id);
+      const stale = !fld || fld.key !== o.fieldKey || fld.maxD < maxD;
+      if (stale && fld && performance.now() > deadline) {
+        // out of time: last frame's field stands in until it's measured again
+        complete = false;
+      } else if (stale) {
+        fld = { key: o.fieldKey, maxD, f: new Float32Array(p0.count).fill(Infinity), g: new Float32Array(p0.count * 3) };
+        const box = o.geo.boundingBox!.clone().expandByScalar(maxD);
+        const bvh = bvhFor(o.geo);
+        const normals = sharedNormals(o.geo);
+        // neighbour's directions into ours
+        rel.copy(rotL).multiply(o.rot);
+        for (let i = 0; i < p0.count; i++) {
+          q.fromBufferAttribute(p0, i).applyMatrix4(o.toO);
+          if (!box.containsPoint(q)) continue;
+          // exact signed distance to the neighbour's real surface, so both sides build the same fillet
+          const f = exactDistance(o.geo, bvh, normals, q, maxD, grad);
+          fld.f[i] = f;
+          if (f < Infinity) grad.applyMatrix3(rel).toArray(fld.g, i * 3);
+        }
+      }
+      fields.set(o.id, fld!);
+    }
+    out.userData.fields = fields;
+    const F = others.map((o) => fields.get(o.id)!);
 
-    ].join(',');
-    const cache = out.userData.fade as { key: string; reach: number; f: Float32Array } | undefined;
     const n = others.length;
-    const paint = (i: number, fAt: (j: number) => number) => {
+    const paint = (i: number) => {
       col.copy(own);
       for (let j = 0; j < n; j++) {
         const o = others[j];
-        const f = fAt(j);
+        const f = F[j].f[i];
         if (o.tints && f < kc) {
           // 50/50 at the seam, fading to our own color kc away from it
           const t = Math.min(1, Math.max(0, 1 - f / kc));
@@ -1457,13 +1517,6 @@ export class Creature {
       const jv = jitter ? jitter.getX(i) : 1;
       c1!.setXYZ(i, col.r * jv, col.g * jv, col.b * jv);
     };
-    if (kc > 0 && c1 && cache?.key === shapeKey && kc <= cache.reach) {
-      for (let i = 0; i < p0.count; i++) paint(i, (j) => cache.f[i * n + j]);
-      c1.needsUpdate = true;
-      return;
-    }
-    const fs = kc > 0 ? new Float32Array(p0.count * n).fill(Infinity) : null;
-
 
     for (let i = 0; i < p0.count; i++) {
       pw.fromBufferAttribute(p0, i).applyMatrix4(toWorld);
@@ -1474,20 +1527,16 @@ export class Creature {
       let touched = false;
       for (let j = 0; j < n; j++) {
         const o = others[j];
-        q.copy(pw).applyMatrix4(o.inv);
-        if (!o.box.containsPoint(q)) continue;
-        // exact signed distance to the neighbour's real surface, so both sides build the same fillet
-        const f = exactDistance(o.geo, o.bvh, o.normals, q, Math.max(o.k, reach), grad);
-        if (fs) fs[i * n + j] = f;
+        const f = F[j].f[i];
         if (f >= o.k) continue;
-        gw.copy(grad).applyMatrix3(o.rot).normalize();
+        gw.fromArray(F[j].g, i * 3).applyMatrix3(rotW).normalize();
         const h = Math.min(1, Math.max(0, 0.5 + (0.5 * (f - d)) / o.k));
         d = f * (1 - h) + d * h - o.k * h * (1 - h);
         gsum.multiplyScalar(h).addScaledVector(gw, 1 - h);
         touched = true;
       }
       if (c1) {
-        if (fs) paint(i, (j) => fs[i * n + j]);
+        if (kc > 0) paint(i);
         else {
           const jv = jitter ? jitter.getX(i) : 1;
           c1.setXYZ(i, jv, jv, jv);
@@ -1515,8 +1564,9 @@ export class Creature {
     p1.needsUpdate = true;
     n1.needsUpdate = true;
     if (c1) c1.needsUpdate = true;
-    out.userData.fade = fs ? { key: shapeKey, reach, f: fs } : undefined;
     out.computeBoundingSphere();
+    out.userData.relKey = complete ? relKey : undefined;
+    return complete;
   }
 
   // -------------------------------------------------------------------------
