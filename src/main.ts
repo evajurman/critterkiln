@@ -12,6 +12,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { FullScreenQuad, Pass } from 'three/examples/jsm/postprocessing/Pass.js';
 import {
   bendFromMid,
+  type Bend,
   Creature,
   defaultState,
   EYE_STYLES,
@@ -799,8 +800,22 @@ let drag: {
    * own bend.
    */
   toDef?: THREE.Matrix3;
-  /** size gizmo: what it's measured against on screen, and the drawing before the drag */
-  sizer?: { anchor: THREE.Vector2; reach: THREE.Vector2; shapes: PartShape[]; meshX: Map<THREE.Mesh, number> };
+  /**
+   * size gizmo: the grip (where it's laid out and the point on the part it
+   * stands for), the part's bend and on-screen frame before the drag, how far
+   * from the grip the press was, the sizes found so far, and the drawing before the drag
+   */
+  sizer?: {
+    at: THREE.Vector3;
+    inner: THREE.Vector3;
+    bend: Bend;
+    view: THREE.Matrix4;
+    grab: THREE.Vector2;
+    /** along, across (free corners and arrows), and both at once (Shift on a corner) */
+    k: { len: number; wid: number; both: number };
+    shapes: PartShape[];
+    meshX: Map<THREE.Mesh, number>;
+  };
   /** roll ring: where the press was, which way on screen the ring moves as the part rolls, and how many pixels per radian */
   roll?: {
     start: THREE.Vector2;
@@ -904,9 +919,52 @@ function resetBend(id: string) {
 
 /** Where a point in a bone's own space lands on screen, in client pixels. */
 function toScreen(obj: THREE.Object3D, local: THREE.Vector3): THREE.Vector2 {
+  return toScreenFrom(obj.matrixWorld, local);
+}
+
+/** Where a point in a frame (given by its world matrix) is on screen. */
+function toScreenFrom(frame: THREE.Matrix4, local: THREE.Vector3): THREE.Vector2 {
   const r = canvas.getBoundingClientRect();
-  const v = obj.localToWorld(local.clone()).project(camera);
+  const v = local.clone().applyMatrix4(frame).project(camera);
   return new THREE.Vector2(r.left + ((v.x + 1) / 2) * r.width, r.top + ((1 - v.y) / 2) * r.height);
+}
+
+/**
+ * The values (one or two, each kept within lo..hi) that bring `at(values)`
+ * closest to the screen point `target`, starting from `start` (damped
+ * Gauss-Newton, so a drag carries on smoothly from where it was).
+ */
+function fitToScreen(start: number[], target: THREE.Vector2, at: (p: number[]) => THREE.Vector2, lo: number, hi: number): number[] {
+  const clamp = (p: number[]) => p.map((v) => THREE.MathUtils.clamp(v, lo, hi));
+  let p = clamp(start);
+  let err = at(p).distanceToSquared(target);
+  let damp = 1e-3;
+  for (let it = 0; it < 12 && err > 0.25; it++) {
+    const here = at(p);
+    const r = here.clone().sub(target);
+    // how the point moves on screen per unit of each value
+    const eps = 1e-3;
+    const J = p.map((_, i) => at(p.map((v, j) => (j === i ? v + eps : v))).sub(here).divideScalar(eps));
+    // solve (J'J + damping) step = -J'r
+    const a = J.map((ji) => J.map((jj) => ji.dot(jj)));
+    const g = J.map((ji) => -ji.dot(r));
+    const big = Math.max(1e-6, ...a.map((row, i) => row[i]));
+    a.forEach((row, i) => (row[i] += damp * big));
+    let step: number[];
+    if (p.length === 1) step = [g[0] / a[0][0]];
+    else {
+      const det = a[0][0] * a[1][1] - a[0][1] * a[1][0];
+      step = [(g[0] * a[1][1] - g[1] * a[0][1]) / det, (a[0][0] * g[1] - a[1][0] * g[0]) / det];
+    }
+    const next = clamp(p.map((v, i) => v + step[i]));
+    const e2 = at(next).distanceToSquared(target);
+    if (e2 < err) {
+      p = next;
+      err = e2;
+      damp = Math.max(1e-6, damp / 3);
+    } else damp *= 8;
+  }
+  return p;
 }
 
 /** Height of the creature's lowest point above the floor. */
@@ -991,15 +1049,23 @@ canvas.addEventListener('pointerdown', (e) => {
     roll = { start: new THREE.Vector2(e.clientX, e.clientY), dir, pxPerRad: visible ? pxPerRad : 120, rest, pose: structuredClone(state.pose), eyes: structuredClone(state.eyes) };
   }
   if (b && (kind === 'len' || kind === 'wid' || kind === 'size')) {
-    // measure the grab against the bone's base (length), its centre line (width) or both
-    // (measured round the part as it's bent, the way its frame is drawn)
-    const at = h.userData.at as THREE.Vector3;
-    const from = kind === 'len' ? new THREE.Vector3(at.x, 0, 0) : kind === 'wid' ? new THREE.Vector3(0, at.y, 0) : new THREE.Vector3();
-    const anchor = toScreen(b.pivot, creature.sizerPoint(b, from));
-    const reach = toScreen(b.pivot, creature.sizerPoint(b, at)).sub(anchor);
+    // the grip follows the pointer: each move finds the size that puts it there
+    b.pivot.updateMatrixWorld(true);
+    const at = (h.userData.at as THREE.Vector3).clone();
+    const view = b.pivot.matrixWorld.clone();
+    const grab = toScreenFrom(view, creature.sizerPoint(b, at)).sub(new THREE.Vector2(e.clientX, e.clientY));
     const meshX = new Map<THREE.Mesh, number>();
     for (const l of creature.linked(id)) if (l.mesh) meshX.set(l.mesh, l.mesh.scale.x);
-    if (reach.lengthSq() > 4) sizer = { anchor, reach, shapes: state.parts[b.src] ? structuredClone(partShapes(state.parts[b.src])) : [], meshX };
+    sizer = {
+      at,
+      inner: (h.userData.inner as THREE.Vector3).clone(),
+      bend: creature.bendNow(b),
+      view,
+      grab,
+      k: { len: 1, wid: 1, both: 1 },
+      shapes: state.parts[b.src] ? structuredClone(partShapes(state.parts[b.src])) : [],
+      meshX,
+    };
     creature.invalidateSkin();
   }
   if (kind === 'root') gapBefore = floorGap();
@@ -1048,19 +1114,28 @@ canvas.addEventListener('pointermove', (e) => {
       const sz = drag.sizer;
       const b = creature.bones.get(drag.id);
       if (!b) return;
-      // how far along the grip's own direction the pointer has gone: 1 = where it started
-      const k = THREE.MathUtils.clamp(new THREE.Vector2(e.clientX, e.clientY).sub(sz.anchor).dot(sz.reach) / sz.reach.lengthSq(), 0.2, 5);
-      const kLen = drag.kind === 'wid' ? 1 : k;
-      const kWid = drag.kind === 'len' ? 1 : k;
+      // the arrows stretch one way (a bent part's curve carrying on); corners stretch freely, or keep the part's proportions with Shift
+      const how = drag.kind === 'size' ? (e.shiftKey ? 'both' : 'free') : drag.kind === 'len' ? 'len' : 'wid';
+      const sizes = (p: number[]): [number, number, boolean] =>
+        how === 'len' ? [p[0], 1, true] : how === 'wid' ? [1, p[0], true] : how === 'free' ? [p[0], p[1], true] : [p[0], p[0], false];
+      const from = how === 'len' ? [sz.k.len] : how === 'wid' ? [sz.k.wid] : how === 'free' ? [sz.k.len, sz.k.wid] : [sz.k.both];
+      const target = new THREE.Vector2(e.clientX, e.clientY).add(sz.grab);
+      const p = fitToScreen(from, target, (q) => toScreenFrom(sz.view, creature.sizerAfter(sz.bend, sz.at, sz.inner, ...sizes(q))), 0.2, 5);
+      if (how === 'len') sz.k.len = p[0];
+      else if (how === 'wid') sz.k.wid = p[0];
+      else if (how === 'free') [sz.k.len, sz.k.wid] = p;
+      else sz.k.both = p[0];
+      const [kLen, kWid, alongBend] = sizes(p);
       state.rig = JSON.parse(drag.rigBase!) as RigState;
-      scaleBone(state.rig, drag.id, kLen, kWid);
+      const kY = scaleBone(state.rig, drag.id, kLen, kWid, alongBend);
       const part = state.parts[b.src];
       // (a side drawing's depth goes with the width, so the whole part grows together)
       const r4 = (v: number) => Math.round(v * 1e4) / 1e4;
-      if (part && sz.shapes.length) setPartShapes(part, sz.shapes.map((sh) => ({ ...sh, outline: sh.outline.map(([x, y]) => [r4(x * kWid), r4(y * kLen)] as Vec2) })));
+      if (part && sz.shapes.length) setPartShapes(part, sz.shapes.map((sh) => ({ ...sh, outline: sh.outline.map(([x, y]) => [r4(x * kWid), r4(y * kY)] as Vec2) })));
       creature.relayout(state.rig);
-      // the meshes stretch to fit until they're rebuilt on letting go
+      // the meshes stretch to fit (a bent one re-bent) until they're rebuilt on letting go
       for (const [m, x] of sz.meshX) m.scale.x = x * kWid;
+      creature.previewBend(drag.id);
       creature.updateSizer();
       invalidate();
     } else if (drag.rigBase && drag.kind === 'start') {

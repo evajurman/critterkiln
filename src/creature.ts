@@ -19,7 +19,7 @@ import {
   type FuzzSpot,
   type StyleSettings,
 } from './materials';
-import { expandRig, type ExpandedBone, type ExpandedRig, type RigState, type V3 } from './rigs';
+import { MAX_BEND, expandRig, stretchBend, type ExpandedBone, type ExpandedRig, type RigState, type V3 } from './rigs';
 import { buildThing, disposeThing, type Thing } from './stuff';
 
 /** One drawn shape of a part, puffed up on its own: drawn from the front (the default) or from the side. */
@@ -466,8 +466,6 @@ function bendMid(bd: Bend): THREE.Vector3 {
   return new THREE.Vector3(x, y, z);
 }
 
-/** the most a bone bends: three quarters of a full circle */
-const MAX_BEND = 1.5;
 
 /**
  * The bend that puts a bone's middle at local point `p`: direction from where
@@ -809,6 +807,9 @@ export class Creature {
       });
       mesh.userData.straightBox = straightBox;
       mesh.userData.bend = bd;
+      // the part unbent, for re-bending it live while it's resized
+      mesh.userData.straightGeo = () =>
+        shapes.length === 1 ? straightGeo(shapes[0], 0, geoOpts).geo : cachedGeometry(geoKey + 'straight', () => joinShapes(shapes.map((sh, i) => straightGeo(sh, i, geoOpts).geo)));
       // The seamless skin is built from each shape on its own (shapes of one
       // part overlap, which would confuse inside/outside on the joined mesh),
       // and from the smooth (un-lumped) shapes: lumps can fold thin parts over themselves
@@ -1865,7 +1866,7 @@ export class Creature {
     const y1 = box.max.y * sc.y + pad;
     const corners = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
     const pts: THREE.Vector3[] = [];
-    const bent = !!(b.mesh!.userData.bend as Bend | undefined)?.theta;
+    const bent = !!((b.mesh!.userData.liveBend ?? b.mesh!.userData.bend) as Bend | undefined)?.theta;
     corners.forEach(([ax, ay], i) => {
       const [bx, by] = corners[(i + 1) % 4];
       // the long sides follow the curve
@@ -1900,6 +1901,12 @@ export class Creature {
       else if (h.userData.kind === 'wid') at.set(sign < 0 ? x0 - 0.06 : x1 + 0.06, cy, 0);
       else at.set(sign < 0 ? x0 : x1, y1, 0);
       h.userData.at = at;
+      // the point on the part itself it stands for (without the frame's padding), which resizing moves
+      h.userData.inner = new THREE.Vector3(
+        h.userData.kind === 'len' ? ((box.min.x + box.max.x) / 2) * sc.x : (sign < 0 ? box.min.x : box.max.x) * sc.x,
+        h.userData.kind === 'wid' ? (((box.min.y + box.max.y) / 2) * sc.y) : box.max.y * sc.y,
+        0,
+      );
       h.position.copy(this.sizerPoint(b, at));
       // turned with the curve where it sits
       const turn = (h.userData.turn ??= h.quaternion.clone()) as THREE.Quaternion;
@@ -1909,6 +1916,12 @@ export class Creature {
 
   /** Where a point laid out round the straight part sits on it as it's bent (in the bone's frame). */
   sizerPoint(b: BoneRT, at: THREE.Vector3): THREE.Vector3 {
+    // being resized: re-bent already, in the bone's own units
+    const live = b.mesh?.userData.liveBend as Bend | undefined;
+    if (live) {
+      const [x, y, z] = bendPoint(live, at.x, at.y, at.z);
+      return new THREE.Vector3(x, y, z);
+    }
     const bd = b.mesh?.userData.bend as Bend | undefined;
     if (!bd?.theta) return at.clone();
     const sc = b.mesh!.scale;
@@ -1919,11 +1932,68 @@ export class Creature {
 
   /** How far the bend turns things at a point laid out round the straight part. */
   private sizerTurn(b: BoneRT, at: THREE.Vector3): THREE.Quaternion {
-    const bd = b.mesh?.userData.bend as Bend | undefined;
+    const live = b.mesh?.userData.liveBend as Bend | undefined;
+    const bd = live ?? (b.mesh?.userData.bend as Bend | undefined);
     if (!bd?.theta) return new THREE.Quaternion();
-    const phi = bendPoint(bd, at.x / b.mesh!.scale.x, at.y / b.mesh!.scale.y, at.z / b.mesh!.scale.z)[3];
+    const sc = live ? new THREE.Vector3(1, 1, 1) : b.mesh!.scale;
+    const phi = bendPoint(bd, at.x / sc.x, at.y / sc.y, at.z / sc.z)[3];
     // the bend turns its direction toward -Y by phi, about the axis square to both
     return new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(-Math.sin(bd.dir), 0, Math.cos(bd.dir)), -phi);
+  }
+
+  /**
+   * The part's bend as it's shown now, in the bone's own units (what sizerAfter
+   * works from).
+   */
+  bendNow(b: BoneRT): Bend {
+    return bendOf(b.def, b.length * (b.mesh?.scale.y ?? 1));
+  }
+
+  /**
+   * Where a size grip (laid out at `at`, standing for the point `inner` on the
+   * part) would be after resizing by `kLen` along and `kWid` across, in the
+   * bone's frame from before, when it was bent `bd`. With `alongBend` a bent
+   * part's curve carries on (the bone turning to keep its start where it was);
+   * without, the whole part grows, curve and all.
+   */
+  sizerAfter(bd: Bend, at: THREE.Vector3, inner: THREE.Vector3, kLen: number, kWid: number, alongBend: boolean): THREE.Vector3 {
+    const len = bd.len;
+    const st = alongBend ? stretchBend(len, bd.theta, kLen) : { len: len * kLen, theta: bd.theta, turn: 0 };
+    const c = st.len / len;
+    const p = new THREE.Vector3(inner.x * kWid + at.x - inner.x, inner.y * c + at.y - inner.y, at.z);
+    const [x, y, z] = bendPoint({ len: st.len, theta: st.theta, dir: bd.dir }, p.x, p.y, p.z);
+    const q = new THREE.Vector3(x, y, z);
+    return st.turn ? q.applyAxisAngle(new THREE.Vector3(-Math.sin(bd.dir), 0, Math.cos(bd.dir)), st.turn) : q;
+  }
+
+  /**
+   * While a bent part is resized (its bend may change too), re-bend its mesh
+   * to the new shape rather than just stretching the old curve. It's rebuilt
+   * properly on letting go.
+   */
+  previewBend(id: string) {
+    for (const b of this.linked(id)) {
+      const m = b.mesh;
+      const straight = m?.userData.straightGeo as (() => THREE.BufferGeometry) | undefined;
+      if (!m || !straight) continue;
+      const s = m.scale;
+      const bd = bendOf(b.def, b.length * s.y);
+      if (!bd.theta && !(m.userData.bend as Bend).theta) continue;
+      // bent at its new size, then shrunk back by the mesh's stretch (which the frame is laid out with)
+      const sized = straight().clone().scale(s.x, s.y, s.z);
+      sized.userData = {};
+      const g = bendGeometry(sized, bd).scale(1 / s.x, 1 / s.y, 1 / s.z);
+      sized.dispose();
+      const old = m.geometry;
+      m.geometry = g;
+      // the toon ink shares the shape; fuzz and hairs are left out until it's rebuilt
+      for (const o of m.children) {
+        if (o instanceof THREE.Mesh && (o.geometry === old || o.geometry === m.userData.baseGeo)) o.geometry = g;
+        else o.visible = false;
+      }
+      if (old !== m.userData.baseGeo) old.dispose();
+      m.userData.liveBend = bd;
+    }
   }
 
   setHandleHover(obj: THREE.Object3D | null) {
