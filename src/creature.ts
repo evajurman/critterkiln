@@ -1026,8 +1026,14 @@ export class Creature {
     for (const [, members] of groups) {
       for (const b of members) {
         if (skinned.has(b)) continue;
+        // a part re-bent live while it's resized shows just that, unfused, until it's rebuilt
+        const live = b.mesh!.userData.liveGeo as THREE.BufferGeometry | undefined;
+        if (live) {
+          this.setMeshGeometry(b, live, false);
+          continue;
+        }
         const base = b.mesh!.userData.baseGeo as THREE.BufferGeometry;
-        const nbrs = on && members.length > 1 ? members.filter((o) => o !== b && this.near(b, o, Math.max(k, kc))) : [];
+        const nbrs = on && members.length > 1 ? members.filter((o) => o !== b && !o.mesh!.userData.liveGeo && this.near(b, o, Math.max(k, kc))) : [];
         if (nbrs.length === 0) {
           this.setMeshGeometry(b, base, false);
           continue;
@@ -1984,16 +1990,15 @@ export class Creature {
       sized.userData = {};
       const g = bendGeometry(sized, bd).scale(1 / s.x, 1 / s.y, 1 / s.z);
       sized.dispose();
-      const old = m.geometry;
-      m.geometry = g;
-      // the toon ink shares the shape; fuzz and hairs are left out until it's rebuilt
-      for (const o of m.children) {
-        if (o instanceof THREE.Mesh && (o.geometry === old || o.geometry === m.userData.baseGeo)) o.geometry = g;
-        else o.visible = false;
-      }
-      if (old !== m.userData.baseGeo) old.dispose();
+      (m.userData.liveGeo as THREE.BufferGeometry | undefined)?.dispose();
+      m.userData.liveGeo = g;
       m.userData.liveBend = bd;
+      // (the toon ink follows it; fuzz shells and hairs are left out until it's rebuilt)
+      for (const o of m.children) if (!(o instanceof THREE.Mesh) || o.userData.boneId === undefined) o.visible = false;
+      this.setMeshGeometry(b, g, false);
     }
+    // the merge would otherwise put the old shape back
+    this.mergeDirty = true;
   }
 
   setHandleHover(obj: THREE.Object3D | null) {
