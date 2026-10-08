@@ -539,6 +539,18 @@ export class Creature {
   private rollAxis: THREE.Line;
   /** a roll is being dragged: keep its axis showing */
   rolling = false;
+  private dragging = false;
+  /**
+   * Something on this creature is being dragged. Joins that move meanwhile
+   * fade their colors only across the fillet (no wider measuring than the
+   * shape needs, which is what makes wide color fades slow); letting go
+   * brings the full fade back.
+   */
+  setDragging(on: boolean) {
+    if (on === this.dragging) return;
+    this.dragging = on;
+    if (!on) this.mergeDirty = true;
+  }
   private attached = new Map<string, { key: string; main: THREE.Group; twin: THREE.Group | null; bone: BoneRT; twinBone: BoneRT | null }>();
 
   constructor(state: CreatureState) {
@@ -1443,9 +1455,10 @@ export class Creature {
     });
 
     // Nothing this part's fused shape depends on has changed (posing a leg
-    // leaves every join it isn't in as it was): keep it.
+    // leaves every join it isn't in as it was): keep it. Narrowed fades from
+    // a drag are widened again once it's over.
     const relKey = [base.uuid, kMax, kc, own.getHex(), ...others.flatMap((o) => [o.id, o.fieldKey, o.color.getHex()])].join(';');
-    if (out.userData.relKey === relKey) return true;
+    if (out.userData.relKey === relKey && !(out.userData.narrow && !this.dragging)) return true;
 
     const p0 = base.getAttribute('position') as THREE.BufferAttribute;
     // shared-corner normals so split (low-poly) vertices all move the same way
@@ -1468,6 +1481,8 @@ export class Creature {
     // the color fade reaches further than it was measured). Gradients are kept
     // in this part's own space, so they hold however the pair is carried round.
     type Field = { key: string; maxD: number; f: Float32Array; g: Float32Array };
+    // per neighbour: how wide its color fade is this time
+    const fades: number[] = [];
     const old = (out.userData.fields as Map<string, Field> | undefined) ?? new Map<string, Field>();
     const fields = new Map<string, Field>();
     const rel = new THREE.Matrix3();
@@ -1475,8 +1490,12 @@ export class Creature {
     for (const o of others) {
       // only a neighbour that tints needs measuring out to the fade's reach
       // (anything deeper inside than k is left as it is either way)
-      const maxD = o.tints ? Math.max(o.k, reach) : o.k;
+      let maxD = o.tints ? Math.max(o.k, reach) : o.k;
       let fld = old.get(o.id);
+      // mid-drag, a join that moved (or was already narrowed) is measured
+      // only as far as its fillet, and its colors fade across just that
+      if (this.dragging && o.tints && (!fld || fld.key !== o.fieldKey || fld.maxD < maxD)) maxD = o.k;
+      fades.push(o.tints ? Math.min(kc, maxD) : 0);
       const stale = !fld || fld.key !== o.fieldKey || fld.maxD < maxD;
       if (stale && fld && performance.now() > deadline) {
         // out of time: last frame's field stands in until it's measured again
@@ -1508,9 +1527,10 @@ export class Creature {
       for (let j = 0; j < n; j++) {
         const o = others[j];
         const f = F[j].f[i];
-        if (o.tints && f < kc) {
+        const fade = fades[j];
+        if (o.tints && f < fade) {
           // 50/50 at the seam, fading to our own color kc away from it
-          const t = Math.min(1, Math.max(0, 1 - f / kc));
+          const t = Math.min(1, Math.max(0, 1 - f / fade));
           col.lerp(o.color, 0.5 * t * t * (3 - 2 * t));
         }
       }
@@ -1566,6 +1586,7 @@ export class Creature {
     if (c1) c1.needsUpdate = true;
     out.computeBoundingSphere();
     out.userData.relKey = complete ? relKey : undefined;
+    out.userData.narrow = fades.some((fd, j) => others[j].tints && fd < kc);
     return complete;
   }
 

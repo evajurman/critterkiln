@@ -6284,6 +6284,9 @@ function loop(now: number) {
   if (mode === 'stuff') flashPiece(drawState ? 0 : Math.max(0, f));
   else creature.flash(drawState ? null : selected, Math.max(0, f));
   if (creature.tickBoing(now)) invalidate(1);
+  // while something's dragged, moving joins blend colors more cheaply (see setDragging)
+  const dragging = !!drag || gizmo.dragging;
+  for (const c of creatures) c.setDragging(dragging);
   for (const c of creatures) if (c.updateMerge()) invalidate();
   settleWhenIdle(now);
   // skins finish building asynchronously, between frames
