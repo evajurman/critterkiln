@@ -4939,6 +4939,9 @@ function renderEyes() {
     $<HTMLInputElement>('#eye-look-x').value = String(e.lookX ?? 0);
     // a sticker's loose pupil has fallen to the bottom
     $<HTMLInputElement>('#eye-look-y').value = String(e.lookY ?? (e.style === 'flat' ? -1 : 0));
+    // one eye in the middle has nothing to cross with
+    $('#eye-cross-row').hidden = e.pairs.every((p) => p.single);
+    $<HTMLInputElement>('#eye-cross').value = String(e.cross ?? 0);
   }
   const shaped = e.enabled && (e.style === 'bead' || e.style === 'dot' || e.style === 'button');
   $('#eye-look').hidden = !shaped;
@@ -5974,7 +5977,7 @@ function setEyeLook(fn: (e: CreatureState['eyes']) => void) {
   commit();
   renderEyes();
 }
-for (const [id, key] of [['#eye-shine', 'shine'], ['#eye-pupil', 'pupil'], ['#eye-look-x', 'lookX'], ['#eye-look-y', 'lookY']] as const) {
+for (const [id, key] of [['#eye-shine', 'shine'], ['#eye-pupil', 'pupil'], ['#eye-look-x', 'lookX'], ['#eye-look-y', 'lookY'], ['#eye-cross', 'cross']] as const) {
   const input = $<HTMLInputElement>(id);
   input.oninput = () => {
     state.eyes[key] = parseFloat(input.value);

@@ -118,6 +118,8 @@ export interface EyesState {
    */
   lookX?: number;
   lookY?: number;
+  /** googly / sticker: -1 the pupils look away from each other .. 1 they meet in front of the nose */
+  cross?: number;
   /** legacy: one stand-off for every pair (now per pair) */
   lift?: number;
   /** legacy: radians every pair is turned round the head (now per pair) */
@@ -238,7 +240,8 @@ export function defaultState(rig: RigState, color?: string): CreatureState {
     rootOffset: [0, 0, 0],
     merge: true,
     mergeRadius: 0.1,
-    eyes: { enabled: true, style: 'bead', pairs: [{ size: 0.5, spacing: 0.5, height: 0.55 }] },
+    // googly eyes start matte (saves without a shine stay glossy, as they were made)
+    eyes: { enabled: true, style: 'bead', shine: 0, pairs: [{ size: 0.5, spacing: 0.5, height: 0.55 }] },
   };
 }
 
@@ -1768,7 +1771,7 @@ export class Creature {
       // stand-off: lift the eye out along its facing direction
       eye.position.copy(hit.point).addScaledVector(z, (pair.lift ?? e.lift ?? 0) * r * 1.2);
       const style = EYE_STYLES.some((o) => o.id === e.style) ? e.style : 'googly';
-      eye.add(buildEye(style, r, sgn || 1, partStyle, this.settingsFor(partStyle), e));
+      eye.add(buildEye(style, r, sgn, partStyle, this.settingsFor(partStyle), e));
       eye.traverse((m) => {
         m.raycast = () => {};
         // glass casts no shadow, as with the body (see castsShadow): a glass
@@ -2317,8 +2320,14 @@ function pupilScale(e: EyesState): number {
   return 0.5 + (e.pupil ?? 0.5);
 }
 
+/**
+ * `sgn` is which side the eye is on: 1 the creature's left (+X), -1 its right,
+ * 0 a single eye in the middle (which has no other eye to cross with).
+ */
 function buildEye(style: EyeStyle, r: number, sgn: number, headStyle: StyleId, headSettings: StyleSettings, e: EyesState): THREE.Object3D {
   const g = new THREE.Group();
+  // crossing turns each pupil toward the middle (-X on the left eye, +X on the right)
+  const crossX = -sgn * (e.cross ?? 0);
   const finish = e.finish ?? 'body';
   const add = (geo: THREE.BufferGeometry, mat: THREE.Material, pos: V3, scale: V3) => {
     const m = new THREE.Mesh(geo, mat);
@@ -2341,7 +2350,8 @@ function buildEye(style: EyeStyle, r: number, sgn: number, headStyle: StyleId, h
       // the pupil rolls round the eyeball's centre to look about
       const roll = new THREE.Group();
       roll.position.set(0, 0, -r * 0.35);
-      roll.rotation.set(-(e.lookY ?? 0) * 0.7, (e.lookX ?? 0) * 0.7, 0, 'YXZ');
+      const across = THREE.MathUtils.clamp((e.lookX ?? 0) + crossX, -1.5, 1.5);
+      roll.rotation.set(-(e.lookY ?? 0) * 0.7, across * 0.7, 0, 'YXZ');
       g.add(roll);
       const k = pupilScale(e);
       const pupil = new THREE.Mesh(sphereGeo, black);
@@ -2365,10 +2375,11 @@ function buildEye(style: EyeStyle, r: number, sgn: number, headStyle: StyleId, h
       // how far the pupil can roll before it reaches the rim
       const travel = Math.max(0, 0.94 - pr);
       // left alone, it has fallen to the bottom, each side jiggled a little differently
-      const px = e.lookX !== undefined ? e.lookX * travel : Math.max(-travel, Math.min(travel, sgn * 0.13 + 0.05));
+      const loose = Math.max(-travel, Math.min(travel, (sgn || 1) * 0.13 + 0.05));
+      const px = (e.lookX !== undefined ? e.lookX * travel : loose) + crossX * travel;
       const py = (e.lookY ?? -1) * travel;
       // kept inside the disc when pushed into a corner (the loose one is as it always was)
-      const placed = e.lookX !== undefined || e.lookY !== undefined;
+      const placed = e.lookX !== undefined || e.lookY !== undefined || !!e.cross;
       const d = Math.hypot(px, py), k = placed && d > travel && d > 0 ? travel / d : 1;
       add(disc, new THREE.MeshStandardMaterial({ color: 0x151216, roughness: 0.4 }), [px * k * R, py * k * R, R * 0.14], [R * pr, R * pr, R * 0.04]);
       const dome = new THREE.SphereGeometry(1, 40, 16, 0, Math.PI * 2, 0, Math.PI / 2);
