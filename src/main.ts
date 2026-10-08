@@ -917,6 +917,34 @@ function resetBend(id: string) {
   hint('Bend straightened', 1400);
 }
 
+/** Double-clicking a joint's tip: unbend that joint (and its twin, with Mirror on). */
+function resetJoint(id: string) {
+  const b = creature.bones.get(id);
+  if (!b) return;
+  const twin = rigLocked() ? creature.twinOf(b) : null;
+  const ids = [id, ...(twin ? [twin.def.id] : [])].filter((i) => state.pose[i]);
+  if (!ids.length) {
+    hint('Already straight', 1200);
+    return;
+  }
+  for (const i of ids) delete state.pose[i];
+  creature.applyPose();
+  settleOnFloor();
+  creature.boing(id);
+  commit();
+  hint('Joint straightened', 1400);
+}
+
+/** Double-clicking the root grip: the creature back where it was placed, feet on the floor. */
+function resetRoot() {
+  creature.group.position.set(0, 0, 0);
+  creature.capturePose();
+  setKeepFloor(true);
+  settleOnFloor();
+  commit();
+  hint('Back in place, feet on the floor', 1600);
+}
+
 /** Where a point in a bone's own space lands on screen, in client pixels. */
 function toScreen(obj: THREE.Object3D, local: THREE.Vector3): THREE.Vector2 {
   return toScreenFrom(obj.matrixWorld, local);
@@ -1209,6 +1237,8 @@ canvas.addEventListener('pointerup', (e) => {
       return;
     }
     creature.capturePose();
+    // a double tap on the grip resets it (see onDoubleClick)
+    if (!d.moved && doubleTapped(e)) return;
     if (d.moved) {
       // lifting the whole creature up means it's meant to float
       if (d.kind === 'root') {
@@ -1283,6 +1313,17 @@ function onDoubleClick(x: number, y: number) {
       resetBend(h.userData.handle as string);
       return;
     }
+    if (h?.userData.handle === 'root') {
+      resetRoot();
+      return;
+    }
+    if (h?.userData.kind === 'end') {
+      resetJoint(h.userData.handle as string);
+      return;
+    }
+    // the other grips (sizes, sliding the base) have nothing to go back to:
+    // a double-click on one just shouldn't start drawing the part underneath
+    if (h) return;
   }
   if (mode === 'stuff') {
     const id = drawState ? null : pickPiece(x, y);
