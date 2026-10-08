@@ -30,6 +30,7 @@ import {
   type Placement,
   type SeamlessMode,
 } from './creature';
+import { bump, checkScene, collect, reach, renderTrophies, setTrophyHandlers, unlock } from './achievements';
 import { bounds, clipLoop, combineLoops, getMeshDetail, pointInPolygon, setMeshDetail, signedArea, smoothLoop, symmetrize, type Vec2 } from './inflate';
 import {
   buildThing,
@@ -661,6 +662,7 @@ function commit() {
   updateUndo();
   fitShadows();
   if (mode === 'stuff') autosaveThing();
+  checkScene(world.creatures, world.workbench);
 }
 
 function restore(snap: string) {
@@ -697,6 +699,7 @@ function undo() {
   if (drawState) exitDraw(); // a shape waiting for Done isn't in the history yet
   restore(history[--hIndex]);
   updateUndo();
+  bump('undo');
 }
 
 function redo() {
@@ -1946,6 +1949,7 @@ function toggleSymmetry() {
   if (drawState?.side) drawState.sideSym = !drawState.sideSym;
   else if (drawState?.target.kind === 'piece') drawPrefs.pieceSymmetry = !drawPrefs.pieceSymmetry;
   else drawPrefs.symmetry = !drawPrefs.symmetry;
+  if (!symOn()) unlock('wonky');
   saveDrawPrefs();
   syncDrawBar();
   drawHint();
@@ -2259,6 +2263,7 @@ function schedulePreview() {
 function finishDraw() {
   const ds = drawState;
   if (!ds?.pending && !ds?.other.length) return;
+  if (!symOn()) unlock('wonky');
   if (ds.target.kind === 'piece' && ds.target.redraw) {
     replacePiece(ds.target.redraw, pendingPieces(ds));
     return;
@@ -2893,6 +2898,7 @@ function addPieces(shapes: { outline: Vec2[]; holes: Vec2[][] }[]) {
   const made = shapes.map((sh) => ({ ...newPiece(sh.outline, piece()), holes: sh.holes }));
   wb.pieces.push(...made);
   selectedPiece = made[0].id;
+  unlock('piece');
   exitDraw(true);
   syncWorkbench();
   commit();
@@ -3790,7 +3796,7 @@ $('#attach-done').onclick = () => deselectAttachment();
 // files
 
 // The top-bar menus share the same corner of the viewport, so only one is open at a time.
-const POPOVERS: [button: string, pop: string][] = [['#library-btn', '#library-pop'], ['#file-btn', '#file-pop'], ['#backdrop-btn', '#backdrop'], ['#settings-btn', '#settings-pop']];
+const POPOVERS: [button: string, pop: string][] = [['#trophy-btn', '#trophy-pop'], ['#library-btn', '#library-pop'], ['#file-btn', '#file-pop'], ['#backdrop-btn', '#backdrop'], ['#settings-btn', '#settings-pop']];
 /** Open (or, if it's already open, close) one top-bar menu. Returns whether it's now open. */
 function togglePopover(pop: string): boolean {
   const open = $(pop).hidden !== false;
@@ -3847,6 +3853,7 @@ function currentLook(): SceneLook {
 }
 
 function saveBundle(b: Bundle, name: string) {
+  unlock('save');
   downloadText(`${safeFileName(name, 'my-creatures')}.creature`, JSON.stringify(envelope('creature', b)));
 }
 
@@ -4236,6 +4243,8 @@ function newCreation() {
   replaceWorld({ ...freshWorld(), workbench: world.workbench });
   beginCreation(null, false);
   commit();
+  unlock('new');
+  listCreations().then((l) => reach('prolific', l.length), () => {});
   renderUI();
   frameCreature(true);
   hint(kept ? 'Fresh start! The last one is in My creations' : 'Fresh start!', 2200);
@@ -4281,6 +4290,24 @@ $('#library-btn').onclick = () => {
 };
 $('#library-close').onclick = closeLibrary;
 
+// ---------------------------------------------------------------------------
+// trophies
+
+function renderTrophyList() {
+  if (!$('#trophy-pop').hidden) renderTrophies($('#trophy-list'), $('#trophy-count'));
+}
+function openTrophies() {
+  if ($('#trophy-pop').hidden) togglePopover('#trophy-pop');
+  renderTrophyList();
+}
+$('#trophy-btn').onclick = () => {
+  if (togglePopover('#trophy-pop')) renderTrophyList();
+};
+$('#trophy-close').onclick = () => {
+  if (!$('#trophy-pop').hidden) togglePopover('#trophy-pop');
+};
+setTrophyHandlers({ open: openTrophies, changed: renderTrophyList });
+
 async function renderLibrary() {
   const grid = $('#creation-grid');
   // the open scene's latest changes go in first, so its card is up to date
@@ -4293,6 +4320,7 @@ async function renderLibrary() {
     grid.innerHTML = `<p class="muted small">My creations can't be kept in this browser (a private window, or site storage is blocked). Use File › Save to keep your work.</p>`;
     return;
   }
+  reach('prolific', list.length);
   grid.innerHTML = '';
   const fresh = document.createElement('button');
   fresh.className = 'creation-card creation-new';
@@ -4456,6 +4484,7 @@ async function backupCreations() {
     if (!creations.length) return hint('Nothing in My creations yet', 1800);
     const day = new Date().toISOString().slice(0, 10);
     downloadText(`CritterKiln creations ${day}.creature`, JSON.stringify(envelope('library', { creations } satisfies LibraryFile)));
+    unlock('backup');
   } catch {
     hint("Couldn't read My creations", 2000, true);
   }
@@ -4965,6 +4994,7 @@ function setStyle(id: StyleId) {
     state.style = id;
     for (const p of Object.values(state.parts)) delete p.style;
   }
+  collect('materials', id);
   creature.sync();
   creature.markMergeDirty();
   commit();
@@ -4988,6 +5018,7 @@ function switchRig(base: string) {
   // picking the plan it already has only does something if its skeleton is
   // out of date (made before the template changed)
   if (base === state.rig.base && JSON.stringify(rig.bones) === JSON.stringify(state.rig.bones)) return;
+  if (base !== state.rig.base) unlock('body-plan');
   // no confirm: switching clears drawn shapes and pose, but it's one undo away
   const body = state.parts[creature.list[0].src].color;
   const next = defaultState(rig, body);
@@ -5010,6 +5041,7 @@ function setMode(m: Mode) {
   // leaving the workbench: keep what's on it (while it's still there to photograph)
   if (mode === 'stuff' && m !== 'stuff') saveWorkbenchNow();
   mode = m;
+  if (m !== 'shape') unlock(m);
   document.querySelectorAll<HTMLButtonElement>('.modes button').forEach((b) => b.classList.toggle('active', b.dataset.mode === m));
   $('#parts-sec').hidden = m === 'stuff';
   $('#plan-sec').hidden = m !== 'shape';
@@ -5149,13 +5181,17 @@ function renderRigPanel() {
   if (!list.children.length) list.innerHTML = '<p class="muted small">No saved rigs yet.</p>';
 }
 
-$('#rig-bone').onclick = () => rigEdit((rig) => addLimb(rig, selected, rigLocked(), 1), false);
+$('#rig-bone').onclick = () => {
+  rigEdit((rig) => addLimb(rig, selected, rigLocked(), 1), false);
+  unlock('limb');
+};
 $('#rig-split').onclick = () => {
   const r = splitBone(state.rig, selected);
   if (!r) {
     hint('This bone is too short to split', 1800, true);
     return;
   }
+  unlock('split');
   // cut any drawing in two at the split so each half keeps its piece
   for (const [lo, hi] of r.pairs) {
     const p = state.parts[lo];
@@ -5350,6 +5386,7 @@ $('#rig-save').onclick = () => {
     return;
   }
   saveRig(state.rig, name);
+  unlock('rig-save');
   state.rig.base = 'saved:' + name;
   state.rig.name = name;
   input.value = '';
@@ -5668,6 +5705,7 @@ $('#paint-all').onclick = () => {
   for (const p of Object.values(state.parts)) p.color = c;
   creature.sync();
   commit();
+  unlock('paint-all');
   renderUI();
 };
 $<HTMLInputElement>('#style-part').onchange = () => renderStyles();
@@ -5682,6 +5720,7 @@ function renderBackdrops() {
     btn.classList.toggle('active', c === backdrop);
     btn.onclick = () => {
       setBackdrop(c);
+      if (c !== BACKDROPS[0]) unlock('backdrop');
       renderBackdrops();
     };
     el.append(btn);
@@ -5705,6 +5744,7 @@ $<HTMLInputElement>('#light-turn').oninput = (e) => {
 };
 $<HTMLInputElement>('#backdrop-color').oninput = (e) => {
   setBackdrop((e.target as HTMLInputElement).value);
+  unlock('backdrop');
   renderBackdrops();
 };
 
@@ -5838,6 +5878,7 @@ function focusAt(x: number, y: number) {
   const depth = point.clone().sub(camera.position).dot(camera.getWorldDirection(new THREE.Vector3()));
   dof.offset = THREE.MathUtils.clamp(depth - camera.position.distanceTo(controls.target), -3, 3);
   dof.enabled = true;
+  unlock('dof');
   pickingFocus = false;
   saveDof();
   applyDof();
@@ -5848,6 +5889,7 @@ function focusAt(x: number, y: number) {
 
 $<HTMLInputElement>('#dof').onchange = (e) => {
   dof.enabled = (e.target as HTMLInputElement).checked;
+  if (dof.enabled) unlock('dof');
   saveDof();
   applyDof();
   if (dof.enabled) showFocusMarker();
@@ -6013,6 +6055,7 @@ $('#redo').onclick = redo;
 $('#spin').onclick = () => {
   controls.autoRotate = !controls.autoRotate;
   $('#spin').classList.toggle('on', controls.autoRotate);
+  if (controls.autoRotate) unlock('spin');
 };
 $('#new').onclick = () => newCreation();
 
@@ -6109,9 +6152,12 @@ $('#shot').onclick = () => {
   // named after who's in the scene
   const name = sceneFileName();
   download(url, `${safeFileName(name, 'creature')}.png`);
+  unlock('photo');
+  if (clear) unlock('clear-photo');
 };
 
 $('#export').onclick = () => {
+  unlock('glb');
   const inks: THREE.Object3D[] = [];
   const roots = creatures.map((c) => c.root);
   for (const root of roots) {

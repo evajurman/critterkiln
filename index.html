@@ -47,6 +47,7 @@
         </div>
         <div class="spacer"></div>
         <div class="tools">
+          <button id="trophy-btn" title="Trophies: little goals for exploring CritterKiln" aria-label="Trophies"><i class="fa-slab fa-regular fa-trophy" aria-hidden="true"></i></button>
           <button id="library-btn" title="My creations: everything you've made"><i class="fa-slab fa-regular fa-images" aria-hidden="true"></i><span class="lbl"> Creations</span></button>
           <button id="file-btn" title="Save and open files"><i class="fa-slab fa-regular fa-folder" aria-hidden="true"></i><span class="lbl"> File</span></button>
           <button id="undo" title="Undo (Ctrl+Z)"><i class="fa-slab fa-regular fa-arrow-rotate-left" aria-hidden="true"></i></button>
@@ -324,15 +325,15 @@
           <button id="attach-done">Done</button>
         </div>
         <div id="attach-mat-pop" class="popover attach-mat-pop" hidden>
-          <div class="pop-title">Item material <button id="attach-mat-close" class="link">close</button></div>
+          <div class="pop-title">Item material <button id="attach-mat-close" class="pop-close" title="Close" aria-label="Close"><i class="fa-regular fa-xmark" aria-hidden="true"></i></button></div>
           <div id="attach-mat-body"></div>
         </div>
         <div id="attach-pop" class="popover attach-pop" hidden>
-          <div class="pop-title">Attach from your collection <button id="attach-pop-close" class="link">close</button></div>
+          <div class="pop-title">Attach from your collection <button id="attach-pop-close" class="pop-close" title="Close" aria-label="Close"><i class="fa-regular fa-xmark" aria-hidden="true"></i></button></div>
           <div id="attach-options" class="thing-list"></div>
         </div>
         <div id="library-pop" class="popover library-pop" hidden>
-          <div class="pop-title">My creations <button id="library-close" class="link">close</button></div>
+          <div class="pop-title">My creations <button id="library-close" class="pop-close" title="Close" aria-label="Close"><i class="fa-regular fa-xmark" aria-hidden="true"></i></button></div>
           <div id="creation-grid" class="creation-grid"></div>
           <div class="library-foot">
             <p class="muted small">Everything you make is kept in this browser as you go. Back it up now and then: clearing your browser's site data would erase it.</p>
@@ -342,6 +343,10 @@
               <button id="install-app" class="ghost" title="Its own window, works offline, and your browser takes better care of your creations" hidden><i class="fa-regular fa-arrow-down-to-square" aria-hidden="true"></i> Install as an app</button>
             </div>
           </div>
+        </div>
+        <div id="trophy-pop" class="popover trophy-pop" hidden>
+          <div class="pop-title"><span>Trophies <span id="trophy-count" class="muted"></span></span> <button id="trophy-close" class="pop-close" title="Close" aria-label="Close"><i class="fa-regular fa-xmark" aria-hidden="true"></i></button></div>
+          <div id="trophy-list" class="trophy-list"></div>
         </div>
         <div id="file-pop" class="popover" hidden>
           <div class="pop-title">Files</div>
@@ -353,7 +358,7 @@
           <input id="file-input" type="file" accept=".creature,.scene,.stuff,.collection,.json" hidden />
         </div>
         <div id="load-pop" class="popover load-pop" hidden>
-          <div class="pop-title"><span id="load-title">Open</span> <button id="load-close" class="link">close</button></div>
+          <div class="pop-title"><span id="load-title">Open</span> <button id="load-close" class="pop-close" title="Close" aria-label="Close"><i class="fa-regular fa-xmark" aria-hidden="true"></i></button></div>
           <p class="muted small" id="load-note" hidden>Add it to your scene, or replace everything in the scene with it?</p>
           <label class="check load-all" id="load-all-row"><input id="load-all" type="checkbox" checked /> Everything</label>
           <div id="load-list" class="load-list"></div>
