@@ -540,15 +540,18 @@ export class Creature {
   /** a roll is being dragged: keep its axis showing */
   rolling = false;
   private dragging = false;
+  private dragUnfused = false;
   /**
    * Something on this creature is being dragged. Joins that move meanwhile
    * fade their colors only across the fillet (no wider measuring than the
-   * shape needs, which is what makes wide color fades slow); letting go
-   * brings the full fade back.
+   * shape needs, which is what makes wide color fades slow), or, when
+   * `unfused` (the fast setting), aren't fused at all: the parts just
+   * overlap. Letting go brings the full join back.
    */
-  setDragging(on: boolean) {
-    if (on === this.dragging) return;
+  setDragging(on: boolean, unfused = false) {
+    if (on === this.dragging && unfused === this.dragUnfused) return;
     this.dragging = on;
+    this.dragUnfused = on && unfused;
     if (!on) this.mergeDirty = true;
   }
   private attached = new Map<string, { key: string; main: THREE.Group; twin: THREE.Group | null; bone: BoneRT; twinBone: BoneRT | null }>();
@@ -1431,7 +1434,7 @@ export class Creature {
     const rotL = new THREE.Matrix3().setFromMatrix4(toLocal);
     const myKey = this.state.parts[b.src].color.toLowerCase();
     const r6 = (v: number) => v.toFixed(6);
-    const others = nbrs.map((o) => {
+    const all = nbrs.map((o) => {
       const g = o.mesh!.userData.baseGeo as THREE.BufferGeometry;
       const solid = g.userData.solid as Solid;
       // keep fillets in proportion: a thin antenna shouldn't get a huge blob
@@ -1454,9 +1457,20 @@ export class Creature {
       };
     });
 
+    // Each neighbour's distance field over this part's vertices is remembered,
+    // and only worked out again when that neighbour moved relative to us (or
+    // the color fade reaches further than it was measured). Gradients are kept
+    // in this part's own space, so they hold however the pair is carried round.
+    type Field = { key: string; maxD: number; f: Float32Array; g: Float32Array };
+    const old = (out.userData.fields as Map<string, Field> | undefined) ?? new Map<string, Field>();
+    // fast setting, mid-drag: joins that moved are left unfused until it's over
+    const dragUnfused = this.dragging && this.dragUnfused;
+    const others = dragUnfused ? all.filter((o) => old.get(o.id)?.key === o.fieldKey) : all;
+    const skipped = others.length < all.length;
+
     // Nothing this part's fused shape depends on has changed (posing a leg
-    // leaves every join it isn't in as it was): keep it. Narrowed fades from
-    // a drag are widened again once it's over.
+    // leaves every join it isn't in as it was): keep it. Narrowed fades and
+    // unfused joins from a drag are put back once it's over.
     const relKey = [base.uuid, kMax, kc, own.getHex(), ...others.flatMap((o) => [o.id, o.fieldKey, o.color.getHex()])].join(';');
     if (out.userData.relKey === relKey && !(out.userData.narrow && !this.dragging)) return true;
 
@@ -1476,14 +1490,8 @@ export class Creature {
     const grad = new THREE.Vector3(), gw = new THREE.Vector3(), gsum = new THREE.Vector3();
     const col = new THREE.Color();
 
-    // Each neighbour's distance field over this part's vertices is remembered,
-    // and only worked out again when that neighbour moved relative to us (or
-    // the color fade reaches further than it was measured). Gradients are kept
-    // in this part's own space, so they hold however the pair is carried round.
-    type Field = { key: string; maxD: number; f: Float32Array; g: Float32Array };
     // per neighbour: how wide its color fade is this time
     const fades: number[] = [];
-    const old = (out.userData.fields as Map<string, Field> | undefined) ?? new Map<string, Field>();
     const fields = new Map<string, Field>();
     const rel = new THREE.Matrix3();
     let complete = true;
@@ -1586,7 +1594,7 @@ export class Creature {
     if (c1) c1.needsUpdate = true;
     out.computeBoundingSphere();
     out.userData.relKey = complete ? relKey : undefined;
-    out.userData.narrow = fades.some((fd, j) => others[j].tints && fd < kc);
+    out.userData.narrow = skipped || fades.some((fd, j) => others[j].tints && fd < kc);
     return complete;
   }
 
