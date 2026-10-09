@@ -99,6 +99,8 @@ export const STYLE_PARAMS: Record<StyleId, StyleParam[]> = {
     { key: 'shadow', label: 'Shadow depth', min: 0, max: 0.95, step: 0.01, value: 0.55 },
     // the pencil sliders: together they turn the cel look into a hand-drawn sketch
     { key: 'hatch', label: 'Pencil hatching', min: 0, max: 1, step: 0.01, value: 0 },
+    // the strokes: a deep shade of the part's own color (colored pencil) through to black ink
+    { key: 'hatchDark', label: 'Hatch darkness', min: 0, max: 1, step: 0.01, value: 0.35 },
     { key: 'grain', label: 'Paper grain', min: 0, max: 1, step: 0.01, value: 0 },
     { key: 'wobble', label: 'Line wobble', min: 0, max: 1, step: 0.01, value: 0 },
   ],
@@ -899,7 +901,7 @@ const SKETCH_GLSL = /* glsl */ `
 `;
 
 const HATCH_GLSL = /* glsl */ `
-  uniform float sketchHatch;
+  uniform float sketchHatch, sketchHatchDark;
   // one set of parallel pencil strokes across the screen, 'spacing' CSS pixels apart
   float hatchLayer(vec2 p, float ang, float spacing, float seed) {
     vec2 d = vec2(cos(ang), sin(ang));
@@ -932,6 +934,7 @@ function sketchToon(m: THREE.MeshToonMaterial, k: StyleSettings): THREE.Material
     Object.assign(shader.uniforms, {
       sketchPx,
       sketchHatch: { value: hatch },
+      sketchHatchDark: { value: k.hatchDark ?? 0.35 },
       sketchGrain: { value: grain },
       sketchWobble: { value: 0 },
     });
@@ -953,8 +956,10 @@ function sketchToon(m: THREE.MeshToonMaterial, k: StyleSettings): THREE.Material
              float ink = 1.0 - (1.0 - s1) * (1.0 - s2) * (1.0 - s3);
              // graphite skips over the paper's tooth
              ink *= mix(1.0, smoothstep(0.1, 0.6, tooth), sketchGrain);
-             // colored pencil: strokes in a deep shade of the part's own color
-             vec3 lead = mix(lit * 0.3, vec3(0.16, 0.15, 0.17), 0.35);
+             // colored pencil (a deep shade of the part's own color) through to black ink
+             vec3 lead = sketchHatchDark < 0.5
+               ? mix(lit * 0.3, vec3(0.16, 0.15, 0.17), sketchHatchDark)
+               : mix(mix(lit * 0.3, vec3(0.16, 0.15, 0.17), 0.5), vec3(0.02, 0.018, 0.022), (sketchHatchDark - 0.5) * 2.0);
              outgoingLight = mix(outgoingLight, mix(lit, lead, ink * 0.92), sketchHatch);
            }
            outgoingLight *= 1.0 - sketchGrain * 0.16 * (1.0 - tooth);
