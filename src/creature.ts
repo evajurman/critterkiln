@@ -1896,18 +1896,23 @@ export class Creature {
   }
 
   private skeletonShown = false;
+  /** Gizmos: handles on every part, or only on the picked part (and its twin) */
+  static handleScope: 'all' | 'part' = 'all';
 
   setSkeletonVisible(v: boolean) {
     this.skeletonShown = v;
     const sel = this.selected ? this.bones.get(this.selected) : null;
+    const only = Creature.handleScope === 'part' && sel ? new Set(this.linked(sel.def.id)) : null;
     for (const b of this.list) {
-      b.tip.visible = v;
-      b.line.visible = v;
+      const show = v && (!only || only.has(b));
+      b.tip.visible = show;
+      b.line.visible = show;
       // the slide and bend grips only on the selected bone (the twin follows by symmetry)
       b.startHandle.visible = v && b === sel && b.attach;
       b.bendHandle.visible = v && b === sel;
     }
-    this.rootHandle.visible = v;
+    // the move-everything square belongs to the first part
+    this.rootHandle.visible = v && (!only || !sel!.parent);
     this.updateSizer();
   }
 

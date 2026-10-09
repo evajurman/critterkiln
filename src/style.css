@@ -329,7 +329,8 @@ input[type=range] { accent-color: var(--accent); width: 100%; }
 .eye-styles button.active { border-color: var(--accent); background: var(--accent-soft); }
 
 .popover {
-  position: absolute; top: 12px; right: 12px; width: 240px; background: var(--panel);
+  /* above the sections pinned to the corners (.ck-dock) */
+  position: absolute; z-index: 5; top: 12px; right: 12px; width: 240px; background: var(--panel);
   border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px;
   box-shadow: 0 8px 30px rgba(0,0,0,.12);
   /* never taller than the viewport: the rest scrolls */
@@ -345,7 +346,7 @@ input[type=range] { accent-color: var(--accent); width: 100%; }
 .popover .swatches button { border-radius: 10px; aspect-ratio: 1.4; }
 
 .draw-bar {
-  position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+  position: absolute; z-index: 5; top: 12px; left: 50%; transform: translateX(-50%);
   display: flex; align-items: center; gap: 10px; padding: 6px 8px;
   background: var(--panel); border: 1px solid var(--line); border-radius: 999px;
   box-shadow: 0 6px 24px rgba(0,0,0,.12); font-size: 13px; font-weight: var(--w-bold); white-space: nowrap;
@@ -442,7 +443,8 @@ button.primary.slim { width: auto; flex: 1; padding: 8px 10px; font-size: 14px; 
 .inherit-note { margin: 4px 0 8px; }
 .viewport.space-pan, .viewport.space-pan canvas { cursor: grab; }
 
-.attach-pop { width: 300px; max-height: 70%; overflow-y: auto; right: auto; left: 12px; }
+/* top middle: Attach stuff can sit in any corner (or the sidebar), so it opens clear of them all */
+.attach-pop { width: 300px; max-height: 70%; overflow-y: auto; left: 0; right: 0; margin-inline: auto; }
 .pop-title { display: flex; justify-content: space-between; align-items: center; }
 
 .attach-bar .seg-btn {
@@ -460,7 +462,7 @@ button.primary.slim { width: auto; flex: 1; padding: 8px 10px; font-size: 14px; 
 #dof-pick.on { background: var(--sel-bg); border-color: var(--blue); color: var(--sel-ink); }
 
 .view-bar {
-  position: absolute; right: 12px; bottom: 14px; display: flex; gap: 2px; padding: 3px;
+  display: flex; gap: 2px; padding: 3px;
   background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
   box-shadow: 0 4px 16px rgba(0,0,0,.08);
 }
@@ -489,11 +491,10 @@ button.primary.slim { width: auto; flex: 1; padding: 8px 10px; font-size: 14px; 
 .creature-row .chip-name { flex: 1; min-width: 0; padding: 4px 8px; font-weight: var(--w-heavy); font-size: 13px; border: 1.5px solid var(--accent); border-radius: 8px; }
 .piece-icon:disabled { opacity: .25; background: none; }
 .creature-new { margin-top: 6px; padding: 4px 10px; font-size: 12px; }
-/* nothing picked yet: no part editor, just a nudge */
-.panel.idle #plan-sec, .panel.idle #parts-sec, .panel.idle #shape-panel, .panel.idle #look-panel { display: none; }
+/* nothing picked yet: no part editor (src/layout.ts hides the tools), just a nudge */
 .idle-note { display: none; font-size: 13px; margin: 14px 2px; }
 .panel.idle .idle-note { display: block; }
-.shape-bar.idle { display: none; }
+body.ck-editing .panel.idle .idle-note { display: none; }
 
 .rig-sub { margin: 12px 0 2px; }
 .dot.green { background: #22c55e; }
@@ -505,7 +506,8 @@ button.primary.slim { width: auto; flex: 1; padding: 8px 10px; font-size: 14px; 
 .eye-swatches { grid-template-columns: repeat(8, 1fr); margin: 6px 0; }
 
 .settle-badge {
-  position: absolute; left: 12px; bottom: 14px; padding: 5px 10px; border-radius: 999px;
+  /* bottom middle, under the hint: clear of whatever is pinned to the bottom corners */
+  position: absolute; z-index: 2; left: 50%; translate: -50% 0; bottom: 14px; white-space: nowrap; padding: 5px 10px; border-radius: 999px;
   background: rgba(47, 40, 51, .72); color: #fff; font-size: 12px; font-weight: var(--w-bold); pointer-events: none;
 }
 .settle-badge[hidden] { display: none; }
@@ -555,18 +557,10 @@ body.show-nums .slider input.num, body.show-nums .bar-slider input.num { display
 .mini-styles[hidden] { display: none; }
 .slider[hidden] { display: none; }
 
-/* ---- Shape mode: on-screen mirror toggle and handle legend ---- */
-.shape-bar {
-  position: absolute; left: 12px; top: 12px; display: flex; align-items: flex-start; gap: 10px;
-  pointer-events: none;
-}
-/* Arrange, with Mirror under it; in Look mode only Arrange applies */
-.shape-pills { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
-.shape-bar.look .mirror-row, .shape-bar.look .legend, .shape-bar.look #ik-pill { display: none; }
-.mirror-row, .pill-row { display: flex; gap: 6px; }
-.shape-bar .pill-toggle[hidden], .eyes-card[hidden] { display: none; }
-.shape-bar button.pill-toggle { font-family: inherit; color: var(--ink); }
-.shape-bar button.pill-toggle:disabled { opacity: .45; cursor: var(--cursor); transform: none; }
+/* ---- the on-screen toggles (Arrange, Mirror, eyes…), wherever their section is ---- */
+.ck-tool .pill-toggle[hidden], .eyes-card[hidden] { display: none; }
+.ck-tool button.pill-toggle { font-family: inherit; color: var(--ink); }
+.ck-tool button.pill-toggle:disabled { opacity: .45; cursor: var(--cursor); transform: none; }
 /* the picked part's eyes: a card under Mirror, foldable to just its title */
 .eyes-card {
   width: 250px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
@@ -587,17 +581,19 @@ body.show-nums .slider input.num, body.show-nums .bar-slider input.num { display
 .eyes-card .eye-styles button { font-size: 11px; padding: 4px 2px; }
 .eyes-card .eye-styles button span { font-size: 15px; }
 .eyes-card .slider { margin: 6px 0; }
-.shape-bar[hidden] { display: none; }
-.shape-bar > * { pointer-events: auto; }
-.shape-bar .pill-toggle {
-  background: var(--panel); font-size: 13px; font-weight: var(--w-heavy); box-shadow: 0 4px 16px rgba(0,0,0,.1);
+.ck-tool .pill-toggle {
+  background: var(--card); font-size: 13px; font-weight: var(--w-heavy);
   transition: transform .15s cubic-bezier(.3, 1.6, .5, 1), background .15s;
 }
-.shape-bar .pill-toggle:hover { transform: scale(1.06); }
-.shape-bar .pill-toggle:active { transform: scale(.94); }
-.shape-bar .pill-toggle.on { background: var(--teal-bg); border-color: #14b8a6; color: var(--teal-ink); }
-.shape-bar kbd { font: inherit; font-size: 10px; background: var(--bg); border-radius: 5px; padding: 0 5px; color: var(--muted); }
+.ck-dock .ck-sec:not(.ck-carded) .pill-toggle { background: var(--panel); box-shadow: 0 4px 16px rgba(0,0,0,.1); }
+.ck-tool .pill-toggle:hover { transform: scale(1.06); }
+.ck-tool .pill-toggle:active { transform: scale(.94); }
+.ck-tool .pill-toggle.on { background: var(--teal-bg); border-color: #14b8a6; color: var(--teal-ink); }
+.ck-tool kbd { font: inherit; font-size: 10px; background: var(--bg); border-radius: 5px; padding: 0 5px; color: var(--muted); }
+.ck-tool button.primary kbd { background: rgba(255,255,255,.25); color: inherit; }
+/* top middle of the view, over the corner sections (z 1) and under popups and bars (z 5), which may cover it */
 .legend {
+  position: absolute; z-index: 2; top: 12px; left: 50%; translate: -50% 0;
   display: flex; gap: 10px; padding: 5px 12px; border-radius: 999px; font-size: 12px; font-weight: var(--w-bold);
   color: var(--muted); background: color-mix(in srgb, var(--panel) 85%, transparent); border: 1px solid var(--line);
   pointer-events: none;
@@ -614,7 +610,7 @@ details.fine > summary {
 details.fine > summary::before { content: '▸ '; display: inline-block; transition: transform .15s; }
 details.fine[open] > summary::before { transform: rotate(90deg); }
 details.fine[open] > summary { margin-bottom: 6px; }
-.legend[hidden] { display: none; }
+.legend[hidden], .legend.off { display: none; }
 
 /* ---- My creations ---- */
 .popover.library-pop {
@@ -835,13 +831,11 @@ button.piece-icon { padding: 0; border: 0; background: transparent; }
   .bar-slider input { width: 80px; }
   .attach-name { max-width: 90px; }
   /* while a bar is up, it owns the top edge */
-  .viewport:has(.draw-bar:not([hidden])) .shape-bar { display: none; }
-  .shape-bar { left: 8px; top: 8px; }
+  .viewport:has(.draw-bar:not([hidden])) .ck-dock:is([data-corner="tl"], [data-corner="tr"]) { display: none; }
   .eyes-card { width: min(250px, calc(100vw - 16px)); max-height: 45vh; }
 
-  .view-bar { right: 8px; bottom: 8px; }
   .view-bar button { padding: 6px 8px; }
-  .settle-badge { left: 8px; bottom: 50px; }
+  .settle-badge { bottom: 10px; }
   .hint {
     bottom: 52px; white-space: normal; text-align: center; width: max-content;
     max-width: calc(100% - 24px); font-size: 13px; border-radius: 16px;
@@ -890,7 +884,8 @@ body.carrying, body.carrying * { cursor: grabbing !important; }
   .popover:not([hidden]), .eyes-card:not([hidden]), .draw-bar:not([hidden]) { opacity: 0; scale: .92; translate: 0 -6px; }
 }
 /* the ones on the left grow from their left corner, the centred ones from their middle */
-.attach-pop, .eyes-card { transform-origin: top left; }
+.eyes-card { transform-origin: top left; }
+.attach-pop { transform-origin: top center; }
 /* (their translate(-50%, -50%) centring runs before scale, which puts their middle at the box's corner) */
 .popover:is(.library-pop, .trophy-pop, .load-pop) { transform-origin: 0 0; }
 /* the floating bars (drawing, Arrange, attaching) drop in from their top middle; same translate(-50%) story */
@@ -964,3 +959,203 @@ html.theme-color :is(.fa-triangle, .fa-square, .fa-circle, .fa-rectangle-wide) {
 html.theme-color :is(button.primary, .parts button.active, .eye-pairs button.active, .piece-row.active, .cancel,
   .draw-bar button:not(.seg-btn), .seg-btn.on, .pill-toggle.on, .tools button.on, .hint,
   .trophy-icon, .toast-icon, .creation-badge) [class*="fa-"] { --ic: initial; color: inherit; }
+
+/* ---------- sections: each tab's tools in the sidebar, on the view's corners, or hidden (src/layout.ts) ---------- */
+.creature-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; }
+.creature-foot .creature-new { margin-top: 0; }
+.ck-menu-btn[hidden] { display: none; }
+.ck-menu-btn.on { opacity: 1; background: rgba(127,127,127,.18); }
+#ck-pool, .ck-chip, .ck-head, .ck-fold-btn, .ck-empty-note, .ck-dock .ck-title { display: none; }
+/* nothing to show right now (nothing picked, no handles, or it hid itself): out of the way */
+body:not(.ck-editing) :is(.ck-tool.ck-off, .ck-sec.ck-empty) { display: none; }
+body:not(.ck-editing) .ck-tray { display: none; }
+/* a section's or tab's own color fills its icon in the Color theme, like every icon (Light and Dark keep them plain);
+   where you pick that color (the icon picker, and the icon buttons while arranging) it always shows */
+html.theme-color .ck-ic, :is(.ck-picker, .ck-head, .ck-tab-row) .ck-ic { --fa-secondary-color: var(--ic); --fa-secondary-opacity: .85; }
+
+/* sidebar: a title, then the tools; buttons two to a row */
+.ck-body { display: flex; flex-wrap: wrap; column-gap: 6px; }
+.ck-side .ck-tool { flex: 1 1 100%; min-width: 0; }
+.ck-side .ck-tool[data-kind="button"] { flex: 1 1 calc(50% - 3px); margin: 3px 0; }
+.ck-side .ck-tool[data-kind="button"] > :is(button, label) { width: 100%; height: 100%; text-align: left; }
+/* Custom sits beside Paint whole creature at its own size */
+.ck-body .ck-tool[data-tool="custom-color"] { flex: 0 1 auto; }
+.ck-side .ck-tool[data-kind="pill"] { flex: 0 1 auto; display: flex; flex-wrap: wrap; gap: 6px; margin: 3px 0; }
+.ck-side .ck-tool[data-kind="own"] { margin: 3px 0; }
+.ck-side .ck-tool > .primary { margin-top: 2px; }
+.ck-side .eyes-card { width: auto; max-height: none; box-shadow: none; background: var(--card); }
+.ck-side .view-bar { box-shadow: none; justify-content: space-between; }
+.ck-tool[data-tool="eyes"] { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.ck-side .ck-tool[data-tool="eyes"] { align-items: stretch; }
+.ck-side .ck-tool[data-tool="eyes"] > #eyes-add { align-self: flex-start; }
+
+/* on the view: floating pills, or a card when the section has sliders or lists */
+/* Each side of the view is a column: its top corner and its bottom corner. Both rows grow to fit what's in
+   them; when the two don't fit, the height is shared out evenly but never past what one needs, so a short
+   corner keeps its full size and the tall one gets all the rest (and scrolls). */
+.ck-col {
+  position: absolute; z-index: 1; top: 6px; bottom: 8px; pointer-events: none;
+  display: grid; grid-template-rows: minmax(0, auto) minmax(0, auto); align-content: space-between; row-gap: 10px;
+  max-width: min(392px, calc(50% - 12px));
+}
+.ck-col[data-side="left"] { left: 6px; justify-items: start; }
+.ck-col[data-side="right"] { right: 6px; justify-items: end; }
+/* a crowded corner scrolls (src/scrollbars.ts draws its thumb); the padding leaves the pills' shadows room inside it */
+.ck-dock {
+  display: flex; flex-direction: column; gap: 6px; pointer-events: none; min-height: 0; max-width: 100%;
+  padding: 6px; overflow-y: auto; overscroll-behavior: contain;
+}
+.ck-col[data-side="left"] .ck-dock { align-items: flex-start; }
+.ck-col[data-side="right"] .ck-dock { align-items: flex-end; }
+.ck-dock:is([data-corner="bl"], [data-corner="br"]) { align-self: end; }
+/* an empty corner takes no room from the one above or below it */
+body:not(.ck-editing) .ck-dock:not(:has(> .ck-sec:not(.ck-empty))) { padding: 0; }
+/* sections keep their size and the corner scrolls, rather than squashing them into each other */
+.ck-dock .ck-sec { display: flex; flex-direction: column; flex: none; }
+/* and fades out at whichever edge has more beyond it (a corner that fits has no scroll timeline: no fade) */
+@property --ck-fade-top { syntax: '<length>'; inherits: false; initial-value: 0px; }
+@property --ck-fade-bottom { syntax: '<length>'; inherits: false; initial-value: 0px; }
+@supports (animation-timeline: scroll()) {
+  .ck-dock {
+    mask-image: linear-gradient(to bottom, transparent, #000 var(--ck-fade-top), #000 calc(100% - var(--ck-fade-bottom)), transparent);
+    animation: ck-dock-fade linear both;
+    animation-timeline: scroll(self);
+  }
+}
+@keyframes ck-dock-fade {
+  0% { --ck-fade-top: 0px; --ck-fade-bottom: 28px; }
+  6%, 94% { --ck-fade-top: 28px; --ck-fade-bottom: 28px; }
+  100% { --ck-fade-top: 28px; --ck-fade-bottom: 0px; }
+}
+.ck-dock:is([data-corner="tr"], [data-corner="br"]) .ck-sec { align-items: flex-end; }
+.ck-dock .ck-body { gap: 6px; align-items: flex-start; }
+.ck-dock:is([data-corner="tr"], [data-corner="br"]) .ck-body { justify-content: flex-end; }
+.ck-dock .ck-tool { display: flex; flex-wrap: wrap; gap: 6px; }
+.ck-dock .ck-tool > *, .ck-dock .ck-fold-btn { pointer-events: auto; }
+.ck-dock .ck-tool[data-kind="wide"] { display: block; flex: 1 1 100%; }
+.ck-dock .ck-sec:not(.ck-carded) .ck-tool[data-kind="button"] > :is(button, label) {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px;
+  box-shadow: 0 4px 16px rgba(0,0,0,.1); font-size: 13px;
+}
+.ck-dock .ck-sec:not(.ck-carded) .view-bar { box-shadow: 0 4px 16px rgba(0,0,0,.08); }
+.ck-dock :is(.ck-carded, .ck-folded) > .ck-body {
+  /* no scroll of its own: the corner scrolls (one scroller, so the wheel never stops inside a card short of the end) */
+  width: 270px; max-width: 100%; pointer-events: auto;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 6px 12px;
+  box-shadow: 0 8px 30px rgba(0,0,0,.12);
+}
+.ck-dock .ck-carded .ck-tool[data-kind="button"] { flex: 1 1 calc(50% - 3px); }
+.ck-dock .ck-carded .ck-tool[data-kind="button"] > :is(button, label) { width: 100%; text-align: left; }
+.ck-dock .ck-carded .eyes-card { width: 100%; box-shadow: none; }
+/* the corner scrolls the eye settings too, rather than the card scrolling inside it */
+.ck-dock .eyes-card { max-height: none; }
+/* folded: one button with the section's icon, opening it */
+.ck-dock .ck-folded > .ck-fold-btn {
+  display: flex; background: var(--panel); box-shadow: 0 4px 16px rgba(0,0,0,.1); font: inherit; font-size: 13px;
+  font-weight: var(--w-heavy); color: var(--ink);
+}
+.ck-dock .ck-folded.ck-open > .ck-fold-btn { background: var(--teal-bg); border-color: #14b8a6; color: var(--teal-ink); }
+.ck-dock .ck-folded:not(.ck-open) > .ck-body { display: none; }
+.ck-dock .ck-folded > .ck-body { margin-top: 6px; }
+
+/* the … menu and the icon picker */
+.popover.ck-pop { position: fixed; right: auto; z-index: 3000; width: 250px; max-height: calc(100vh - 16px); }
+.ck-menu .seg button { font-size: 12px; padding: 6px 2px; }
+.ck-hidden-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.ck-menu-row {
+  display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--card); font-weight: var(--w-bold); font-size: 13px; text-align: left; cursor: var(--cursor-click);
+}
+.ck-menu-row span { flex: 1; }
+.ck-menu-row:hover { background: var(--bg); }
+.ck-menu .wide { margin: 4px 0 6px; }
+.ck-icon-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; margin: 2px 0 4px; }
+.ck-icon-grid .piece-icon { width: auto; height: 34px; font-size: 17px; opacity: 1; border-radius: 9px; }
+.ck-icon-grid .piece-icon.active { outline: 2px solid var(--ink); }
+.popover .ck-colors { grid-template-columns: repeat(8, 1fr); margin-bottom: 6px; }
+.popover .ck-colors button { aspect-ratio: 1; border-radius: 50%; }
+
+/* arranging: every section a card with its handle, every tool a name to drag */
+.ck-banner { margin: 10px 0 2px; padding: 10px 12px; border-radius: 12px; background: var(--sel-bg); color: var(--sel-ink); }
+.ck-banner[hidden] { display: none; }
+.ck-banner-text { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.ck-banner-text .small { margin: 0; color: inherit; opacity: .8; }
+.ck-banner-actions { display: flex; gap: 8px; margin-top: 8px; }
+.ck-banner-actions .ghost { flex: 1; background: var(--card); color: var(--ink); }
+body.ck-editing .ck-title, body.ck-editing .ck-fold-btn { display: none !important; }
+body.ck-editing .ck-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 2px; margin-bottom: 6px; }
+.ck-head .piece-icon { flex: none; width: 26px; opacity: 1; }
+.ck-grip { cursor: grab !important; touch-action: none; }
+.ck-head .ck-name { flex: 1 1 100px; min-width: 0; padding: 4px 8px; font-size: 13px; }
+.ck-place {
+  flex: 1 0 auto; max-width: 110px; border: 1px solid var(--line); border-radius: 8px; padding: 3px 2px; background: var(--card);
+  font-size: 12px; font-weight: var(--w-bold);
+}
+.ck-fold.on { background: var(--teal-bg); color: var(--teal-ink); }
+body.ck-editing .ck-sec {
+  display: block; margin: 10px 0; padding: 6px 8px 8px; border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--panel); pointer-events: auto;
+}
+body.ck-editing .ck-dock .ck-sec { width: 260px; margin: 0; box-shadow: 0 8px 30px rgba(0,0,0,.12); }
+body.ck-editing .ck-body {
+  display: flex; flex-direction: column; gap: 4px; width: auto; max-height: none; overflow: visible;
+  padding: 0; border: 0; box-shadow: none; background: none; margin: 0;
+}
+body.ck-editing .ck-tool { display: block !important; margin: 0 !important; }
+body.ck-editing .ck-tool > :not(.ck-chip) { display: none !important; }
+body.ck-editing .ck-chip {
+  display: flex; align-items: center; gap: 8px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 9px;
+  background: var(--card); font-size: 13px; font-weight: var(--w-bold); cursor: grab; touch-action: none;
+}
+.ck-chip .ck-grab { color: var(--muted); }
+body.ck-editing .ck-chip:hover { border-color: var(--blue); }
+body.ck-editing .ck-body:not(:has(.ck-tool)) .ck-empty-note {
+  display: block; margin: 0; padding: 8px; border: 2px dashed var(--line); border-radius: 9px; text-align: center;
+}
+body.ck-editing .ck-dock {
+  pointer-events: auto; min-width: 170px; min-height: 70px; overflow-y: auto; padding: 6px; border-radius: 18px;
+  outline: 2px dashed color-mix(in srgb, var(--muted) 60%, transparent); outline-offset: -2px;
+  background: color-mix(in srgb, var(--panel) 45%, transparent);
+}
+body.ck-editing .ck-dock:not(:has(.ck-sec))::before {
+  content: attr(data-label); margin: auto; color: var(--muted); font-size: 12px; font-weight: var(--w-heavy);
+}
+body.ck-editing .ck-tray {
+  margin-top: 18px; padding: 8px; border: 2px dashed var(--line); border-radius: var(--radius); min-height: 60px;
+}
+.ck-tray-title { font-size: 12px; font-weight: var(--w-heavy); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.ck-tray-title .muted { text-transform: none; letter-spacing: 0; font-weight: var(--w-semi); }
+.ck-tray .ck-sec { opacity: .8; }
+body.ck-editing .ck-side { min-height: 80px; }
+.ck-over { outline: 2px solid var(--blue) !important; outline-offset: -2px; }
+.ck-mark { position: fixed; z-index: 3001; height: 4px; border-radius: 2px; background: var(--blue); pointer-events: none; }
+.ck-mark[hidden] { display: none; }
+.ck-ghost {
+  position: fixed; left: 0; top: 0; z-index: 3002; pointer-events: none; display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border-radius: 10px; background: var(--card); border: 1px solid var(--blue); color: var(--ink);
+  font-size: 13px; font-weight: var(--w-bold); box-shadow: 0 8px 24px rgba(0,0,0,.25); rotate: -2deg;
+}
+.ck-lifted { opacity: .35; }
+body.ck-dragging, body.ck-dragging * { cursor: grabbing !important; }
+@media (max-width: 760px) {
+  .ck-col { top: 2px; bottom: 2px; }
+  .ck-col[data-side="left"] { left: 2px; }
+  .ck-col[data-side="right"] { right: 2px; }
+  body.ck-editing .ck-dock { min-width: 110px; min-height: 50px; }
+  body.ck-editing .ck-dock .ck-sec { width: min(240px, calc(100vw - 32px)); }
+}
+
+/* ---------- tabs people made (src/layout.ts): between Look and Stuff ---------- */
+/* … › Show tab names off: every tab is just its icon (the name shows on hover) */
+.topbar.tab-icons .modes .lbl { display: none; }
+.topbar.tab-icons:not(.compact) .modes button { padding: 6px 12px; }
+/* Color theme: a made tab tints the panels with its own color */
+html.theme-color[data-mode="custom"] {
+  --panel: color-mix(in srgb, var(--tab-color) 8%, #fff);
+  --bg: color-mix(in srgb, var(--tab-color) 20%, #fff);
+  --line: color-mix(in srgb, var(--tab-color) 30%, #fff);
+}
+.ck-tab-row { display: flex; align-items: center; gap: 4px; margin-top: 8px; }
+.ck-tab-row .piece-icon { flex: none; width: 30px; height: 30px; opacity: 1; background: var(--card); border-radius: 8px; }
+.ck-tab-row .ck-tab-name { color: var(--ink); }
+.ck-menu-links { display: flex; justify-content: space-between; gap: 8px; margin-top: 10px; }

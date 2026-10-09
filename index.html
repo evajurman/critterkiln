@@ -54,7 +54,6 @@
           <button id="file-btn" title="Save and open files"><i class="fa-slab-duo fa-regular fa-folder" aria-hidden="true"></i><span class="lbl"> File</span></button>
           <button id="undo" title="Undo (Ctrl+Z)"><i class="fa-slab-duo fa-regular fa-arrow-rotate-left" aria-hidden="true"></i></button>
           <button id="redo" title="Redo (Ctrl+Shift+Z)"><i class="fa-slab-duo fa-regular fa-arrow-rotate-right" aria-hidden="true"></i></button>
-          <button id="backdrop-btn" title="Backdrop, lighting &amp; photo"><i class="fa-slab-duo fa-regular fa-image" aria-hidden="true"></i><span class="lbl"> Backdrop</span></button>
           <button id="spin" title="Turntable"><i class="fa-slab-duo fa-regular fa-arrows-rotate" aria-hidden="true"></i><span class="lbl"> Spin</span></button>
           <button id="new" title="New creation (the one you're on stays in My creations)"><i class="fa-slab-duo fa-regular fa-wand-magic-sparkles" aria-hidden="true"></i><span class="lbl"> New</span></button>
           <button id="settings-btn" title="Settings"><i class="fa-slab-duo fa-regular fa-gear" aria-hidden="true"></i></button>
@@ -66,94 +65,201 @@
       <aside class="panel">
         <div id="creature-bar" class="creature-bar">
           <div id="creature-rows" class="creature-rows"></div>
-          <button id="cr-add" class="ghost creature-new" title="Add a new creature to the scene"><i class="fa-duotone fa-regular fa-plus" aria-hidden="true"></i> New</button>
+          <div class="creature-foot">
+            <button id="cr-add" class="ghost creature-new" title="Add a new creature to the scene"><i class="fa-duotone fa-regular fa-plus" aria-hidden="true"></i> New</button>
+            <button id="ck-menu-btn" class="piece-icon ck-menu-btn" title="Sections: bring back hidden ones, gizmos, and arranging this tab" aria-label="Sections"><i class="fa-duotone fa-regular fa-ellipsis" aria-hidden="true"></i></button>
+          </div>
+          <div id="ck-banner" class="ck-banner" hidden></div>
         </div>
         <p class="idle-note muted">Click a creature to start shaping it, or pick one above.</p>
-        <section id="plan-sec">
-          <h3>Body plan</h3>
-          <div id="rigs" class="rigs"></div>
-          <details class="fine">
-            <summary>Save this body plan</summary>
-            <div class="row">
-              <input id="rig-name" class="text" type="text" placeholder="Name" maxlength="40" />
-              <button id="rig-save" class="ghost"><i class="fa-duotone fa-regular fa-floppy-disk" aria-hidden="true"></i> Save</button>
-            </div>
-            <div id="saved-rig-list" class="saved-rigs"></div>
-          </details>
-        </section>
-
-        <section id="parts-sec">
-          <h3>Parts</h3>
-          <div id="parts" class="parts"></div>
-          <div class="parts-blend">
+        <!-- each tab's sections: src/layout.ts moves the tools below into them, or onto the view's corners -->
+        <div id="ck-side" class="ck-side"></div>
+        <div id="ck-hidden" class="ck-tray"></div>
+        <div id="ck-pool" hidden>
+          <div class="ck-tool" data-tool="plan">
+            <div id="rigs" class="rigs"></div>
+            <details class="fine">
+              <summary>Save this body plan</summary>
+              <div class="row">
+                <input id="rig-name" class="text" type="text" placeholder="Name" maxlength="40" />
+                <button id="rig-save" class="ghost"><i class="fa-duotone fa-regular fa-floppy-disk" aria-hidden="true"></i> Save</button>
+              </div>
+              <div id="saved-rig-list" class="saved-rigs"></div>
+            </details>
+          </div>
+          <div class="ck-tool" data-tool="parts"><div id="parts" class="parts"></div></div>
+          <div class="ck-tool" data-tool="blend">
             <label class="slider wide-label" title="How smoothly touching parts of the same material flow into each other. 0 keeps them separate.">
               <span>Blend parts</span><input id="merge-radius" type="range" min="0" max="0.25" step="0.005" />
               <span class="ends"><em>off</em><em>smooth</em></span></label>
+          </div>
+          <div class="ck-tool" data-tool="opacity">
             <label class="slider wide-label" title="How see-through the picked part is. Parts blended into it are one surface, so they fade with it.">
               <span>Opacity</span><input id="opacity" type="range" min="0.05" max="1" step="0.01" />
               <span class="ends"><em>see-through</em><em>solid</em></span></label>
+          </div>
+          <div class="ck-tool" data-tool="seamless">
             <label class="check seamless-row" id="seamless-row" title="For this creature: after you stop changing its shape, blended parts are rebuilt as one continuous skin with no seams">
               <input id="seamless" type="checkbox" checked /> <span><i class="fa-slab-duo fa-regular fa-wand-magic-sparkles" aria-hidden="true"></i> Seamless joins <span class="muted">(smooths blended parts when idle)</span></span>
             </label>
           </div>
-          <div id="creature-stuff-sec" class="attach-sec" hidden>
-            <div class="sub-title">Stuff on this creature</div>
-            <div id="creature-stuff" class="parts"></div>
+          <div class="ck-tool" data-tool="worn">
+            <div id="creature-stuff-sec" class="attach-sec" hidden>
+              <div class="sub-title">Stuff on this creature</div>
+              <div id="creature-stuff" class="parts"></div>
+            </div>
           </div>
-        </section>
-
-        <section id="shape-panel">
-          <div class="card" id="part-card">
+          <div class="ck-tool" data-tool="name">
             <input id="rig-title" class="text wide card-title-input" type="text" maxlength="40" placeholder="Part name" title="Rename this part" />
             <p class="muted small" id="rig-pair-note"></p>
+          </div>
+          <div class="ck-tool" data-tool="draw">
             <button id="draw" class="primary"><i class="fa-slab-duo fa-regular fa-pencil" aria-hidden="true"></i> Draw shape <kbd>D</kbd></button>
             <p class="muted small">Or <span class="mouse-only">double-click</span><span class="touch-only">double-tap</span> a part. Draw a closed outline; it puffs up like a balloon.</p>
+          </div>
+          <div class="ck-tool" data-tool="thickness">
             <label class="slider">
               <span>Thickness</span>
               <input id="thickness" type="range" min="0.1" max="4.5" step="0.01" />
               <span class="ends"><em>flat</em><em>chubby</em></span>
             </label>
-            <label class="slider" id="rig-w0-row"><span>Base width</span><input id="rig-w0" type="range" min="0.02" max="1.2" step="0.005" /></label>
-            <label class="slider" id="rig-w1-row"><span>Tip width</span><input id="rig-w1" type="range" min="0.02" max="1.2" step="0.005" /></label>
-            <button id="reset-shape" class="ghost">Reset shape</button>
-
-            <div class="sub-title rig-sub">Grow</div>
-            <div class="rig-actions">
-              <button id="rig-bone" class="ghost" title="Sprout a single piece from the side of this part"><i class="fa-duotone fa-regular fa-bone" aria-hidden="true"></i> Bone</button>
-              <button id="rig-extend" class="ghost" title="Add a segment on the end of this part"><i class="fa-duotone fa-regular fa-arrow-up-right" aria-hidden="true"></i> Extend</button>
-              <button id="rig-split" class="ghost" title="Split this part in the middle into two jointed halves"><i class="fa-slab-duo fa-regular fa-scissors" aria-hidden="true"></i> Split</button>
-              <button id="rig-detach" class="ghost"></button>
-              <button id="rig-dup" class="ghost" title="Copy this limb and everything attached to it"><i class="fa-slab-duo fa-regular fa-copy" aria-hidden="true"></i> Copy</button>
-              <button id="rig-del" class="ghost" title="Remove this part and everything attached to it (Backspace)"><i class="fa-slab-duo fa-regular fa-trash" aria-hidden="true"></i> Delete</button>
+          </div>
+          <div class="ck-tool" data-tool="width0"><label class="slider" id="rig-w0-row"><span>Base width</span><input id="rig-w0" type="range" min="0.02" max="1.2" step="0.005" /></label></div>
+          <div class="ck-tool" data-tool="width1"><label class="slider" id="rig-w1-row"><span>Tip width</span><input id="rig-w1" type="range" min="0.02" max="1.2" step="0.005" /></label></div>
+          <div class="ck-tool" data-tool="reset-shape"><button id="reset-shape" class="ghost">Reset shape</button></div>
+          <div class="ck-tool" data-tool="bone"><button id="rig-bone" class="ghost" title="Sprout a single piece from the side of this part"><i class="fa-duotone fa-regular fa-bone" aria-hidden="true"></i> Bone</button></div>
+          <div class="ck-tool" data-tool="extend"><button id="rig-extend" class="ghost" title="Add a segment on the end of this part"><i class="fa-duotone fa-regular fa-arrow-up-right" aria-hidden="true"></i> Extend</button></div>
+          <div class="ck-tool" data-tool="split"><button id="rig-split" class="ghost" title="Split this part in the middle into two jointed halves"><i class="fa-slab-duo fa-regular fa-scissors" aria-hidden="true"></i> Split</button></div>
+          <div class="ck-tool" data-tool="detach"><button id="rig-detach" class="ghost"></button></div>
+          <div class="ck-tool" data-tool="dup"><button id="rig-dup" class="ghost" title="Copy this limb and everything attached to it"><i class="fa-slab-duo fa-regular fa-copy" aria-hidden="true"></i> Copy</button></div>
+          <div class="ck-tool" data-tool="del"><button id="rig-del" class="ghost" title="Remove this part and everything attached to it (Backspace)"><i class="fa-slab-duo fa-regular fa-trash" aria-hidden="true"></i> Delete</button></div>
+          <div class="ck-tool" data-tool="stand"><button id="reset-pose" class="ghost" title="Straighten every joint back out"><i class="fa-duotone fa-regular fa-person" aria-hidden="true"></i> Stand up straight</button></div>
+          <div class="ck-tool" data-tool="floor"><button id="drop-floor" class="ghost" title="Move the whole creature so its lowest point touches the floor"><i class="fa-slab-duo fa-regular fa-arrow-down-to-line" aria-hidden="true"></i> Floor</button></div>
+          <div class="ck-tool" data-tool="keep-floor"><label class="check" title="After you bend or resize something, the creature settles back onto the floor (if it was standing on it)"><input id="keep-floor" type="checkbox" checked /> Keep feet on the floor</label></div>
+          <div class="ck-tool" data-tool="swatches"><div id="swatches" class="swatches"></div></div>
+          <div class="ck-tool" data-tool="custom-color"><label class="color-pick"><input id="color" type="color" /> Custom</label></div>
+          <div class="ck-tool" data-tool="paint-all"><button id="paint-all" class="ghost"><i class="fa-duotone fa-regular fa-fill-drip" aria-hidden="true"></i> Paint whole creature</button></div>
+          <div class="ck-tool" data-tool="color-blend">
+            <label class="slider wide-label" id="color-blend-row" title="Also merge touching parts of different colors, fading one color into the other. 0 keeps colors apart.">
+              <span>Blend colors</span><input id="color-blend" type="range" min="0" max="0.4" step="0.005" />
+              <span class="ends"><em>off</em><em>soft fade</em></span></label>
+          </div>
+          <div class="ck-tool" data-tool="materials"><div id="styles" class="styles"></div></div>
+          <div class="ck-tool" data-tool="material-params"><div id="style-params" class="style-params"></div></div>
+          <div class="ck-tool" data-tool="style-part"><label class="check"><input id="style-part" type="checkbox" /> Only the selected part</label></div>
+          <div class="ck-tool" data-tool="arrange"><button id="cr-place" class="pill-toggle" title="Move, turn or resize this creature anywhere in the scene"><i class="fa-duotone fa-regular fa-arrows-up-down-left-right" aria-hidden="true"></i> Arrange</button></div>
+          <div class="ck-tool" data-tool="pull">
+            <label id="ik-pill" class="pill-toggle" title="Dragging a hand bends the elbow and shoulder too">
+              <input id="ik" type="checkbox" /> <i class="fa-duotone fa-regular fa-hand-back-fist" aria-hidden="true"></i> Pull limbs
+            </label>
+          </div>
+          <div class="ck-tool" data-tool="mirror">
+            <label id="mirror-pill" class="pill-toggle" title="Both sides change together: shaping and posing (M)">
+              <input id="rig-sym" type="checkbox" checked /> <i class="fa-slab-duo fa-regular fa-arrow-right-arrow-left" aria-hidden="true"></i> Mirror <kbd>M</kbd>
+            </label>
+            <button id="rig-mirror" class="pill-toggle" hidden></button>
+            <button id="rig-unlink" class="pill-toggle" hidden><i class="fa-duotone fa-regular fa-link-slash" aria-hidden="true"></i> Unlink pair</button>
+          </div>
+          <div class="ck-tool" data-tool="eyes">
+            <button id="eyes-add" class="pill-toggle carry" title="Drag onto your critter to put eyes right there, or click to add them to this part"><i class="fa-slab-duo fa-regular fa-eye" aria-hidden="true"></i> Add eyes</button>
+            <div id="eyes-card" class="eyes-card" hidden>
+              <button id="eyes-fold" class="eyes-head" title="Show or hide the eye settings"><i class="fa-slab-duo fa-regular fa-eye" aria-hidden="true"></i> Eyes <i class="fa-duotone fa-regular fa-chevron-down fold-icon" aria-hidden="true"></i></button>
+              <div class="eyes-body">
+                <div id="eye-styles" class="eye-styles"></div>
+                <div id="eye-pairs" class="eye-pairs"></div>
+                <div class="eye-on">
+                  <label class="check" title="One eye in the middle instead of a pair"><input id="eye-single" type="checkbox" /> One eye</label>
+                </div>
+                <div id="eye-sliders">
+                  <label class="slider"><span>Size</span><input id="eye-size" type="range" min="0" max="1" step="0.01" /></label>
+                  <label class="slider" id="eye-spacing-row"><span>Spacing</span><input id="eye-spacing" type="range" min="0" max="1" step="0.01" /></label>
+                  <label class="slider" id="eye-height-row"><span>Height</span><input id="eye-height" type="range" min="0.05" max="0.95" step="0.01" /></label>
+                  <p id="eye-placed" class="muted small eye-placed" hidden>Placed by hand: drag an eye to move them. <button id="eye-unplace" class="link" title="Go back to placing them with Spacing and Height">Use sliders</button></p>
+                  <label class="slider" title="How far this pair stands off the face"><span>Stand-off</span><input id="eye-lift" type="range" min="0" max="1" step="0.01" />
+                    <span class="ends"><em>on the face</em><em>lifted</em></span></label>
+                  <label class="slider" title="Turn the eyes round their part. They stick to it, so rolling the part turns them too"><span>Facing</span><input id="eye-turn" type="range" min="-180" max="180" step="1" />
+                    <span class="ends"><em>one way</em><em>the other</em></span></label>
+                  <button id="eye-front" class="ghost" title="Turn the eyes back to the creature's front, even if their part is rolled"><i class="fa-slab-duo fa-regular fa-face-smile" aria-hidden="true"></i> Face front</button>
+                </div>
+                <div id="eye-pupil-look">
+                  <div class="sub-title" id="eye-pupil-title">Googly look</div>
+                  <label class="slider" id="eye-shine-row" title="A shiny plastic eyeball, or a soft matte one"><span>Shine</span><input id="eye-shine" type="range" min="0" max="1" step="0.01" />
+                    <span class="ends"><em>matte</em><em>glossy</em></span></label>
+                  <label class="slider"><span>Pupil</span><input id="eye-pupil" type="range" min="0" max="1" step="0.01" />
+                    <span class="ends"><em>small</em><em>big</em></span></label>
+                  <label class="slider" title="Where the pupils point, side to side"><span>Look</span><input id="eye-look-x" type="range" min="-1" max="1" step="0.01" />
+                    <span class="ends"><em>one way</em><em>the other</em></span></label>
+                  <label class="slider" title="Where the pupils point, up and down"><span>Look up</span><input id="eye-look-y" type="range" min="-1" max="1" step="0.01" />
+                    <span class="ends"><em>down</em><em>up</em></span></label>
+                  <label class="slider" id="eye-cross-row" title="Pupils looking away from each other, or meeting in front of the nose"><span>Crossed</span><input id="eye-cross" type="range" min="-1" max="1" step="0.01" />
+                    <span class="ends"><em>apart</em><em>crossed</em></span></label>
+                </div>
+                <div id="eye-look">
+                  <div class="sub-title">Bead, dot &amp; button look</div>
+                  <div class="seg" id="eye-finish">
+                    <button data-finish="body" title="The head's own material">Body</button>
+                    <button data-finish="gloss">Glossy</button>
+                    <button data-finish="matte">Matte</button>
+                    <button data-finish="glass">Glass</button>
+                  </div>
+                  <div class="swatches eye-swatches" id="eye-swatches"></div>
+                  <label class="color-pick"><input id="eye-color" type="color" /> Eye color</label>
+                </div>
+              </div>
             </div>
-
           </div>
-
-          <h3>Pose</h3>
-          <div class="row">
-            <button id="reset-pose" class="ghost" title="Straighten every joint back out"><i class="fa-duotone fa-regular fa-person" aria-hidden="true"></i> Stand up straight</button>
-            <button id="drop-floor" class="ghost" title="Move the whole creature so its lowest point touches the floor"><i class="fa-slab-duo fa-regular fa-arrow-down-to-line" aria-hidden="true"></i> Floor</button>
+          <div class="ck-tool" data-tool="attach"><button id="rig-attach" class="pill-toggle" title="Put something from My stuff on this part"><i class="fa-slab-duo fa-regular fa-paperclip" aria-hidden="true"></i> Attach stuff…</button></div>
+          <div class="ck-tool" data-tool="backdrop-color">
+            <div id="backdrops" class="swatches"></div>
+            <label class="color-pick"><input id="backdrop-color" type="color" /> Custom color</label>
           </div>
-          <label class="check" title="After you bend or resize something, the creature settles back onto the floor (if it was standing on it)"><input id="keep-floor" type="checkbox" checked /> Keep feet on the floor</label>
-
-        </section>
-
-        <section id="look-panel" hidden>
-          <h3>Color</h3>
-          <div id="swatches" class="swatches"></div>
-          <div class="row">
-            <label class="color-pick"><input id="color" type="color" /> Custom</label>
-            <button id="paint-all" class="ghost"><i class="fa-duotone fa-regular fa-fill-drip" aria-hidden="true"></i> Paint whole creature</button>
+          <div class="ck-tool" data-tool="ground">
+            <div class="sub-title">Floor</div>
+            <div class="seg" id="floor-mode">
+              <button data-floor="none" title="No floor: the creature floats">None</button>
+              <button data-floor="shadow" title="Invisible floor that only shows shadows">Backdrop</button>
+              <button data-floor="mirror" title="Reflective floor">Mirror</button>
+              <button data-floor="material" title="A real floor in one of the materials">Material</button>
+            </div>
+            <div id="floor-mirror-opts" hidden>
+              <label class="slider dof-slider"><span>Reflect</span><input id="floor-reflect" type="range" min="0.05" max="1" step="0.01" /></label>
+            </div>
+            <div id="floor-material-opts" hidden>
+              <div class="mini-styles" id="floor-styles"></div>
+              <div class="swatches floor-swatches" id="floor-swatches"></div>
+              <label class="color-pick"><input id="floor-color" type="color" /> Floor color</label>
+            </div>
           </div>
-          <label class="slider wide-label" id="color-blend-row" title="Also merge touching parts of different colors, fading one color into the other. 0 keeps colors apart.">
-            <span>Blend colors</span><input id="color-blend" type="range" min="0" max="0.4" step="0.005" />
-            <span class="ends"><em>off</em><em>soft fade</em></span></label>
-
-          <h3>Material</h3>
-          <div id="styles" class="styles"></div>
-          <div id="style-params" class="style-params"></div>
-          <label class="check"><input id="style-part" type="checkbox" /> Only the selected part</label>
-        </section>
+          <div class="ck-tool" data-tool="light-turn">
+            <label class="slider" title="Turn the lights around the scene"><span>Lights</span><input id="light-turn" type="range" min="-180" max="180" step="1" />
+              <span class="ends"><em>left</em><em>right</em></span></label>
+          </div>
+          <div class="ck-tool" data-tool="ao"><label class="check"><input id="ao" type="checkbox" checked /> Ambient occlusion</label></div>
+          <div class="ck-tool" data-tool="dof">
+            <label class="check"><input id="dof" type="checkbox" /> Depth of field (photo look)</label>
+            <div id="dof-controls">
+              <label class="slider dof-slider"><span>Focus</span><input id="dof-focus" type="range" min="-3" max="3" step="0.01" />
+                <span class="ends"><em>nearer</em><em>farther</em></span></label>
+              <label class="slider dof-slider"><span>Blur</span><input id="dof-blur" type="range" min="0" max="1" step="0.01" /></label>
+              <div class="row">
+                <button id="dof-pick" class="ghost" title="Then click the spot that should be sharp"><i class="fa-duotone fa-regular fa-crosshairs" aria-hidden="true"></i> Click to focus</button>
+                <button id="dof-reset" class="link" title="Focus on the orbit centre">Reset</button>
+              </div>
+            </div>
+          </div>
+          <div class="ck-tool" data-tool="photo-clear"><label class="check" title="Leave the backdrop out of the picture: just the creatures (and their shadows)"><input id="shot-clear" type="checkbox" /> Transparent background</label></div>
+          <div class="ck-tool" data-tool="photo"><button id="shot" class="primary" title="Save a picture of the scene"><i class="fa-slab-duo fa-regular fa-camera" aria-hidden="true"></i> Take photo</button></div>
+          <div class="ck-tool" data-tool="views">
+        <div id="view-bar" class="view-bar" aria-label="Camera views">
+          <button data-view="front" title="View from the front">Front</button>
+          <button data-view="left" title="View from the left">Left</button>
+          <button data-view="right" title="View from the right">Right</button>
+          <button data-view="top" title="View from above">Top</button>
+          <button data-view="quarter" title="Three-quarter view">¾</button>
+          <button data-view="all" title="Frame everyone (Shift+A)">All</button>
+        </div>
+          </div>
+        </div>
 
         <section id="stuff-panel" hidden>
           <h3>My stuff</h3>
@@ -204,6 +310,23 @@
       <main class="viewport" id="viewport">
         <canvas id="gl"></canvas>
         <canvas id="overlay"></canvas>
+        <!-- sections pinned to the view's corners (src/layout.ts) -->
+        <div class="ck-col" data-side="left">
+          <div class="ck-dock" data-corner="tl"></div>
+          <div class="ck-dock" data-corner="bl"></div>
+        </div>
+        <div class="ck-col" data-side="right">
+          <div class="ck-dock" data-corner="tr"></div>
+          <div class="ck-dock" data-corner="br"></div>
+        </div>
+        <!-- what each handle does: top middle, while handles show (Gizmos: Full or Selected part) -->
+        <div class="legend" id="shape-legend">
+          <span><b class="dot orange"></b> bend</span>
+          <span><b class="dot teal tri"></b> stretch</span>
+          <span><b class="dot purple square"></b> slide</span>
+          <span title="Drag to curve the part; double-click to straighten it"><b class="dot green diamond"></b> curve</span>
+          <span><b class="dot blue square"></b> move</span>
+        </div>
         <div id="hint" class="hint">
           <span class="hint-text"></span>
           <button class="hint-close" title="Close" aria-label="Close">
@@ -212,85 +335,6 @@
           </button>
         </div>
         <div id="settle-badge" class="settle-badge" hidden>Smoothing joins…</div>
-        <div id="shape-bar" class="shape-bar">
-          <div class="shape-pills">
-            <div class="pill-row">
-              <button id="cr-place" class="pill-toggle" title="Move, turn or resize this creature anywhere in the scene"><i class="fa-duotone fa-regular fa-arrows-up-down-left-right" aria-hidden="true"></i> Arrange</button>
-              <label id="ik-pill" class="pill-toggle" title="Dragging a hand bends the elbow and shoulder too">
-                <input id="ik" type="checkbox" /> <i class="fa-duotone fa-regular fa-hand-back-fist" aria-hidden="true"></i> Pull limbs
-              </label>
-            </div>
-            <div class="mirror-row">
-              <label id="mirror-pill" class="pill-toggle" title="Both sides change together: shaping and posing (M)">
-                <input id="rig-sym" type="checkbox" checked /> <i class="fa-slab-duo fa-regular fa-arrow-right-arrow-left" aria-hidden="true"></i> Mirror <kbd>M</kbd>
-              </label>
-              <button id="rig-mirror" class="pill-toggle" hidden></button>
-              <button id="rig-unlink" class="pill-toggle" hidden><i class="fa-duotone fa-regular fa-link-slash" aria-hidden="true"></i> Unlink pair</button>
-            </div>
-            <button id="eyes-add" class="pill-toggle carry" title="Drag onto your critter to put eyes right there, or click to add them to this part"><i class="fa-slab-duo fa-regular fa-eye" aria-hidden="true"></i> Add eyes</button>
-            <div id="eyes-card" class="eyes-card" hidden>
-              <button id="eyes-fold" class="eyes-head" title="Show or hide the eye settings"><i class="fa-slab-duo fa-regular fa-eye" aria-hidden="true"></i> Eyes <i class="fa-duotone fa-regular fa-chevron-down fold-icon" aria-hidden="true"></i></button>
-              <div class="eyes-body">
-                <div id="eye-styles" class="eye-styles"></div>
-                <div id="eye-pairs" class="eye-pairs"></div>
-                <div class="eye-on">
-                  <label class="check" title="One eye in the middle instead of a pair"><input id="eye-single" type="checkbox" /> One eye</label>
-                </div>
-                <div id="eye-sliders">
-                  <label class="slider"><span>Size</span><input id="eye-size" type="range" min="0" max="1" step="0.01" /></label>
-                  <label class="slider" id="eye-spacing-row"><span>Spacing</span><input id="eye-spacing" type="range" min="0" max="1" step="0.01" /></label>
-                  <label class="slider" id="eye-height-row"><span>Height</span><input id="eye-height" type="range" min="0.05" max="0.95" step="0.01" /></label>
-                  <p id="eye-placed" class="muted small eye-placed" hidden>Placed by hand: drag an eye to move them. <button id="eye-unplace" class="link" title="Go back to placing them with Spacing and Height">Use sliders</button></p>
-                  <label class="slider" title="How far this pair stands off the face"><span>Stand-off</span><input id="eye-lift" type="range" min="0" max="1" step="0.01" />
-                    <span class="ends"><em>on the face</em><em>lifted</em></span></label>
-                  <label class="slider" title="Turn the eyes round their part. They stick to it, so rolling the part turns them too"><span>Facing</span><input id="eye-turn" type="range" min="-180" max="180" step="1" />
-                    <span class="ends"><em>one way</em><em>the other</em></span></label>
-                  <button id="eye-front" class="ghost" title="Turn the eyes back to the creature's front, even if their part is rolled"><i class="fa-slab-duo fa-regular fa-face-smile" aria-hidden="true"></i> Face front</button>
-                </div>
-                <div id="eye-pupil-look">
-                  <div class="sub-title" id="eye-pupil-title">Googly look</div>
-                  <label class="slider" id="eye-shine-row" title="A shiny plastic eyeball, or a soft matte one"><span>Shine</span><input id="eye-shine" type="range" min="0" max="1" step="0.01" />
-                    <span class="ends"><em>matte</em><em>glossy</em></span></label>
-                  <label class="slider"><span>Pupil</span><input id="eye-pupil" type="range" min="0" max="1" step="0.01" />
-                    <span class="ends"><em>small</em><em>big</em></span></label>
-                  <label class="slider" title="Where the pupils point, side to side"><span>Look</span><input id="eye-look-x" type="range" min="-1" max="1" step="0.01" />
-                    <span class="ends"><em>one way</em><em>the other</em></span></label>
-                  <label class="slider" title="Where the pupils point, up and down"><span>Look up</span><input id="eye-look-y" type="range" min="-1" max="1" step="0.01" />
-                    <span class="ends"><em>down</em><em>up</em></span></label>
-                  <label class="slider" id="eye-cross-row" title="Pupils looking away from each other, or meeting in front of the nose"><span>Crossed</span><input id="eye-cross" type="range" min="-1" max="1" step="0.01" />
-                    <span class="ends"><em>apart</em><em>crossed</em></span></label>
-                </div>
-                <div id="eye-look">
-                  <div class="sub-title">Bead, dot &amp; button look</div>
-                  <div class="seg" id="eye-finish">
-                    <button data-finish="body" title="The head's own material">Body</button>
-                    <button data-finish="gloss">Glossy</button>
-                    <button data-finish="matte">Matte</button>
-                    <button data-finish="glass">Glass</button>
-                  </div>
-                  <div class="swatches eye-swatches" id="eye-swatches"></div>
-                  <label class="color-pick"><input id="eye-color" type="color" /> Eye color</label>
-                </div>
-              </div>
-            </div>
-            <button id="rig-attach" class="pill-toggle" title="Put something from My stuff on this part"><i class="fa-slab-duo fa-regular fa-paperclip" aria-hidden="true"></i> Attach stuff…</button>
-          </div>
-          <div class="legend" id="shape-legend">
-            <span><b class="dot orange"></b> bend</span>
-            <span><b class="dot teal tri"></b> stretch</span>
-            <span><b class="dot purple square"></b> slide</span>
-            <span title="Drag to curve the part; double-click to straighten it"><b class="dot green diamond"></b> curve</span>
-            <span><b class="dot blue square"></b> move</span>
-          </div>
-        </div>
-        <div id="view-bar" class="view-bar" aria-label="Camera views">
-          <button data-view="front" title="View from the front">Front</button>
-          <button data-view="left" title="View from the left">Left</button>
-          <button data-view="right" title="View from the right">Right</button>
-          <button data-view="top" title="View from above">Top</button>
-          <button data-view="quarter" title="Three-quarter view">¾</button>
-          <button data-view="all" title="Frame everyone (Shift+A)">All</button>
-        </div>
         <div id="place-bar" class="draw-bar attach-bar" hidden>
           <span id="place-name" class="attach-name"></span>
           <button data-place="translate" class="seg-btn" title="Move anywhere: along the floor or up into the air (W)"><i class="fa-duotone fa-regular fa-arrows-up-down-left-right" aria-hidden="true"></i> Move</button>
@@ -395,45 +439,6 @@
           <p class="muted small">If dragging and posing feel slow or jumpy, try Fast.</p>
         </div>
 
-        <div id="backdrop" class="popover" hidden>
-          <div class="pop-title">Backdrop</div>
-          <div id="backdrops" class="swatches"></div>
-          <label class="color-pick"><input id="backdrop-color" type="color" /> Custom color</label>
-          <div class="pop-sub">Floor</div>
-          <div class="seg" id="floor-mode">
-            <button data-floor="none" title="No floor: the creature floats">None</button>
-            <button data-floor="shadow" title="Invisible floor that only shows shadows">Backdrop</button>
-            <button data-floor="mirror" title="Reflective floor">Mirror</button>
-            <button data-floor="material" title="A real floor in one of the materials">Material</button>
-          </div>
-          <div id="floor-mirror-opts" hidden>
-            <label class="slider dof-slider"><span>Reflect</span><input id="floor-reflect" type="range" min="0.05" max="1" step="0.01" /></label>
-          </div>
-          <div id="floor-material-opts" hidden>
-            <div class="mini-styles" id="floor-styles"></div>
-            <div class="swatches floor-swatches" id="floor-swatches"></div>
-            <label class="color-pick"><input id="floor-color" type="color" /> Floor color</label>
-          </div>
-          <div class="pop-sub">Lighting</div>
-          <label class="slider dof-slider" title="Turn the lights around the scene"><span>Turn</span><input id="light-turn" type="range" min="-180" max="180" step="1" />
-            <span class="ends"><em>left</em><em>right</em></span></label>
-          <label class="check"><input id="ao" type="checkbox" checked /> Ambient occlusion</label>
-          <label class="check"><input id="dof" type="checkbox" /> Depth of field (photo look)</label>
-          <div id="dof-controls">
-            <label class="slider dof-slider"><span>Focus</span><input id="dof-focus" type="range" min="-3" max="3" step="0.01" />
-              <span class="ends"><em>nearer</em><em>farther</em></span></label>
-            <label class="slider dof-slider"><span>Blur</span><input id="dof-blur" type="range" min="0" max="1" step="0.01" /></label>
-            <div class="row">
-              <button id="dof-pick" class="ghost" title="Then click the spot that should be sharp"><i class="fa-duotone fa-regular fa-crosshairs" aria-hidden="true"></i> Click to focus</button>
-              <button id="dof-reset" class="link" title="Focus on the orbit centre">Reset</button>
-            </div>
-          </div>
-          <div class="pop-foot">
-            <div class="pop-sub">Photo</div>
-            <label class="check" title="Leave the backdrop out of the picture: just the creatures (and their shadows)"><input id="shot-clear" type="checkbox" /> Transparent background</label>
-            <button id="shot" class="primary wide" title="Save a picture of the scene"><i class="fa-slab-duo fa-regular fa-camera" aria-hidden="true"></i> Take photo</button>
-          </div>
-        </div>
         <div id="draw-bar" class="draw-bar" hidden>
           <span class="bar-group" id="draw-view" title="Which way you draw the part: its front, or its side profile (V)">
             <button data-view="front" class="seg-btn" title="Draw the part as seen from the front"><i class="fa-duotone fa-regular fa-user" aria-hidden="true"></i> Front</button>

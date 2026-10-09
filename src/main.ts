@@ -53,6 +53,7 @@ import {
 } from './stuff';
 import { FUR_LAYER, STYLE_PARAMS, STYLES, makeMaterial, setFuzzQuality, setGlassEnvironment, setSketchPixelRatio, styleSettings, type StyleId } from './materials';
 import { installScrollbars } from './scrollbars';
+import { customTabs, gizmos, initLayout, setLayoutIdle, setLayoutTab, type Tab } from './layout';
 import { installCursorPress } from './cursorPress';
 import { deleteCreation, getCreation, keepStorage, listCreations, putCreation, type Creation } from './library';
 import {
@@ -587,7 +588,8 @@ let creature: Creature;
 let selected = '';
 /** Nothing picked: no creature or part shows as selected (no handles, no part editor) until one is clicked. */
 let idle = true;
-type Mode = 'shape' | 'look' | 'stuff';
+/** Shape, Look, a tab people made (src/layout.ts), or Stuff */
+type Mode = Tab | 'stuff';
 let mode: Mode = 'shape';
 let eyePair = 0;
 
@@ -1302,7 +1304,7 @@ canvas.addEventListener('pointerup', (e) => {
   if (id) {
     deselectAttachment();
     selectPart(id);
-  } else if (mode === 'shape' && !idle) deselectAll();
+  } else if (gizmos() !== 'none' && !idle) deselectAll();
 });
 
 canvas.addEventListener('dblclick', (e) => {
@@ -1351,7 +1353,6 @@ function onDoubleClick(x: number, y: number) {
   const id = pickPart(x, y);
   if (!id) return;
   selectPart(id);
-  if (mode !== 'shape') setMode('shape');
   enterDraw();
 }
 
@@ -1498,7 +1499,7 @@ function pickHandle(x: number, y: number): THREE.Object3D | null {
 
 function handlesVisible() {
   // Arrange has its own handles at the creature's feet, and picked stuff its own arrows
-  return !idle && !drawState && !placing && !selectedAttachment && mode === 'shape';
+  return !idle && !drawState && !placing && !selectedAttachment && mode !== 'stuff' && gizmos() !== 'none';
 }
 
 /** Back to nothing picked: clicking empty space in Shape. */
@@ -1514,13 +1515,17 @@ function deselectAll() {
 /** The sidebar's part editor and the on-screen Arrange/Mirror pills only make sense with something picked. */
 function syncIdle() {
   $('.panel').classList.toggle('idle', idle && mode !== 'stuff');
-  $('#shape-bar').classList.toggle('idle', idle);
+  setLayoutIdle(idle);
   // the handles follow the same idle state, so they can't outlive the selection
   updateSkeletonVisibility();
 }
 
 function updateSkeletonVisibility() {
+  // the tab's Gizmos: every part's handles, or just the picked part's
+  Creature.handleScope = gizmos() === 'part' ? 'part' : 'all';
   creature.setSkeletonVisible(handlesVisible());
+  // the key to the handles shows with them
+  $('#shape-legend').classList.toggle('off', !handlesVisible());
 }
 
 // ---------------------------------------------------------------------------
@@ -3384,7 +3389,6 @@ function startPlacing() {
   $('#place-bar').hidden = false;
   $('#place-name').textContent = creatureLabel(world.active);
   $('#cr-place').classList.add('on');
-  $('#shape-legend').hidden = true;
   updateSkeletonVisibility();
 }
 
@@ -3395,7 +3399,6 @@ function stopPlacing() {
   gizmo.setSpace('local');
   $('#place-bar').hidden = true;
   $('#cr-place').classList.remove('on');
-  $('#shape-legend').hidden = false;
   updateSkeletonVisibility();
 }
 
@@ -3792,9 +3795,7 @@ function pickAttachment(x: number, y: number): string | null {
 }
 
 $('#attach-pop-close').onclick = () => ($('#attach-pop').hidden = true);
-// from Shape: stuff is placed and styled in Look, so go there with this part still picked
 $('#rig-attach').onclick = () => {
-  if (mode !== 'look') setMode('look');
   closeTopPopovers();
   $('#attach-pop').hidden = false;
   renderCollection();
@@ -3846,7 +3847,7 @@ $('#attach-done').onclick = () => deselectAttachment();
 // files
 
 // The top-bar menus share the same corner of the viewport, so only one is open at a time.
-const POPOVERS: [button: string, pop: string][] = [['#trophy-btn', '#trophy-pop'], ['#library-btn', '#library-pop'], ['#file-btn', '#file-pop'], ['#backdrop-btn', '#backdrop'], ['#settings-btn', '#settings-pop']];
+const POPOVERS: [button: string, pop: string][] = [['#trophy-btn', '#trophy-pop'], ['#library-btn', '#library-pop'], ['#file-btn', '#file-pop'], ['#settings-btn', '#settings-pop']];
 /** Open (or, if it's already open, close) one top-bar menu. Returns whether it's now open. */
 function togglePopover(pop: string): boolean {
   const open = $(pop).hidden !== false;
@@ -4058,6 +4059,7 @@ function applyLook(l: SceneLook) {
   Object.assign(dof, l.dof);
   saveDof();
   applyDof();
+  renderBackdropUI();
 }
 
 /** The "what do you want from this file?" picker. */
@@ -5140,22 +5142,17 @@ function setMode(m: Mode) {
   // leaving the workbench: keep what's on it (while it's still there to photograph)
   if (mode === 'stuff' && m !== 'stuff') saveWorkbenchNow();
   mode = m;
-  if (m !== 'shape') unlock(m);
+  if (m === 'look' || m === 'stuff') unlock(m);
   document.querySelectorAll<HTMLButtonElement>('.modes button').forEach((b) => b.classList.toggle('active', b.dataset.mode === m));
   placeModePill();
-  // the Color theme tints the panels by mode
-  document.documentElement.dataset.mode = m;
-  $('#parts-sec').hidden = m === 'stuff';
-  $('#plan-sec').hidden = m !== 'shape';
-  $('#shape-panel').hidden = m !== 'shape';
-  $('#look-panel').hidden = m !== 'look';
-  $('#shape-bar').hidden = m === 'stuff';
-  $('#shape-bar').classList.toggle('look', m === 'look');
+  tintMode();
+  // Shape and Look are the same tools, each tab with its own layout (src/layout.ts)
+  setLayoutTab(m === 'stuff' ? null : m);
   $('#stuff-panel').hidden = m !== 'stuff';
   $('#creature-bar').hidden = m === 'stuff';
   if (m === 'stuff') stopPlacing();
   if (m === 'stuff') deselectAttachment();
-  if (m !== 'look') $('#attach-pop').hidden = true;
+  if (m === 'stuff') $('#attach-pop').hidden = true;
   const wasStuff = board.visible;
   board.visible = m === 'stuff';
   for (const c of creatures) c.root.visible = m !== 'stuff';
@@ -5171,12 +5168,21 @@ function setMode(m: Mode) {
   updateSkeletonVisibility();
   syncIdle();
   refreshPieceGizmo();
+  if (m !== 'stuff') renderRigPanel();
   if (m === 'shape') {
     if (idle) hintOnce('Click a part to begin!');
     else shapeTips();
-    renderRigPanel();
   }
   if (m === 'look') hintOnce('Click a part, then pick its color and material', 2200);
+}
+
+/** The Color theme tints the panels by mode; a made tab by its own color. */
+function tintMode() {
+  const h = document.documentElement;
+  const own = customTabs().find((t) => t.id === mode);
+  h.dataset.mode = own ? 'custom' : mode;
+  if (own) h.style.setProperty('--tab-color', own.color);
+  else h.style.removeProperty('--tab-color');
 }
 
 // ---------------------------------------------------------------------------
@@ -5742,7 +5748,11 @@ document.querySelectorAll<HTMLButtonElement>('#set-seamless button').forEach((b)
 });
 
 // wire up static controls
-document.querySelectorAll<HTMLButtonElement>('.modes button').forEach((b) => (b.onclick = () => setMode(b.dataset.mode as Mode)));
+// (one listener for them all: tabs people make come and go)
+$('.modes').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-mode]');
+  if (b) setMode(b.dataset.mode as Mode);
+});
 
 /** Drops the top bar's button labels whenever they'd overflow it (narrow window or zoomed in). */
 function fitTopbar() {
@@ -5769,6 +5779,16 @@ requestAnimationFrame(() => requestAnimationFrame(() => $('.modes').classList.ad
 document.fonts.ready.then(fitTopbar); // the icon font and the text font change the buttons' widths
 installScrollbars();
 installCursorPress();
+initLayout({
+  onGizmos: updateSkeletonVisibility,
+  // a tab made, renamed or deleted: the bar's widths changed (and maybe the open tab's color)
+  onTabs: () => {
+    fitTopbar();
+    placeModePill();
+    tintMode();
+  },
+  switchTo: (t) => setMode(t),
+});
 
 // On a phone the panel is a sheet under the viewport: drag its grip to resize it, tap to fold it away.
 const SHEET_KEY = 'creature-creator/sheet';
@@ -5817,14 +5837,12 @@ const SHEET_KEY = 'creature-creator/sheet';
   });
   grip.addEventListener('pointercancel', () => (drag = null));
   // picking a mode means wanting to see its panel
-  document.querySelectorAll('.modes button').forEach((b) =>
-    b.addEventListener('click', () => {
-      if (!folded) return;
-      folded = false;
-      apply();
-      store();
-    }),
-  );
+  $('.modes').addEventListener('click', (e) => {
+    if (!folded || !(e.target as HTMLElement).closest('button[data-mode]')) return;
+    folded = false;
+    apply();
+    store();
+  });
   new ResizeObserver(apply).observe(app);
 }
 $('#draw').onclick = () => enterDraw({ kind: 'bone', boneId: selected });
@@ -5880,12 +5898,12 @@ function renderBackdrops() {
   }
   $<HTMLInputElement>('#backdrop-color').value = backdrop;
 }
-$('#backdrop-btn').onclick = () => {
-  if (!togglePopover('#backdrop')) return;
+/** The Backdrop section's controls, showing what's set (src/layout.ts puts them wherever the tab has them). */
+function renderBackdropUI() {
   renderBackdrops();
   renderFloorUI();
   $<HTMLInputElement>('#light-turn').value = String(lightTurn);
-};
+}
 $<HTMLInputElement>('#light-turn').oninput = (e) => {
   lightTurn = parseFloat((e.target as HTMLInputElement).value);
   applyLighting();
@@ -6071,6 +6089,8 @@ $('#dof-pick').onclick = () => {
   else hint('');
 };
 applyDof();
+// the Backdrop section is always out (no popup to open first), so it starts showing what is set
+renderBackdropUI();
 
 // Blending: each slider at 0 is the same as that kind of blending being off.
 // The last non-zero amount is kept, so files and undo stay compatible.
@@ -6352,7 +6372,7 @@ function download(url: string, name: string) {
 window.addEventListener('keydown', (e) => {
   const tag = (e.target as HTMLElement).tagName;
   // typing in a text or number box
-  if (tag === 'INPUT' && ['text', 'number'].includes((e.target as HTMLInputElement).type)) return;
+  if (tag === 'INPUT' && ['text', 'number', 'search'].includes((e.target as HTMLInputElement).type)) return;
   const k = e.key.toLowerCase();
   if ((e.ctrlKey || e.metaKey) && k === 'z') {
     e.preventDefault();
@@ -6383,16 +6403,16 @@ window.addEventListener('keydown', (e) => {
     } else if (drawState.frame !== board) focusOnPlane(drawState.frame);
     else focusOnBoard();
   } else if (!e.ctrlKey && !e.metaKey && !e.altKey) {
-    if (k === 'd' && mode === 'shape' && !idle) enterDraw();
+    if (k === 'd' && mode !== 'stuff' && !idle) enterDraw();
     else if (k === 'd' && mode === 'stuff') enterDraw({ kind: 'piece' });
     else if (k === '3') setMode('stuff');
-    else if (k === 'm' && mode === 'shape' && !drawState) setMirror(!rigLock);
+    else if (k === 'm' && mode !== 'stuff' && !drawState) setMirror(!rigLock);
     // picked stuff goes first: its part is picked too, and mustn't go with it
     else if ((k === 'backspace' || k === 'delete') && selectedAttachment && !drawState) {
       e.preventDefault();
       removeAttachment();
     }
-    else if ((k === 'backspace' || k === 'delete') && mode === 'shape' && !idle && !drawState && !placing) {
+    else if ((k === 'backspace' || k === 'delete') && mode !== 'stuff' && !idle && !drawState && !placing) {
       e.preventDefault();
       removePart();
     }
@@ -6404,6 +6424,7 @@ window.addEventListener('keydown', (e) => {
     else if (placing && (k === 'w' || k === 'e' || k === 'r')) setPlaceMode(k === 'w' ? 'translate' : k === 'e' ? 'rotate' : 'scale');
     else if (k === '1') setMode('shape');
     else if (k === '2') setMode('look');
+    else if (k >= '4' && k <= '9' && customTabs()[+k - 4]) setMode(customTabs()[+k - 4].id);
     else if (k === 'f') {
       if (mode === 'stuff') focusOnBoard();
       else frameCreature();
