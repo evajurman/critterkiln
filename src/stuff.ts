@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { TessellateModifier } from 'three/examples/jsm/modifiers/TessellateModifier.js';
 import Delaunator from 'delaunator';
+import { bvhFor, exactDistance, sharedNormals } from './distance';
 import { bounds, buildInflatedGeometry, cleanOutline, getMeshDetail, type Vec2 } from './inflate';
 import {
   castsShadow,
@@ -39,6 +40,10 @@ export interface Piece {
   open?: boolean;
   /** 1 = solid, lower = see-through */
   opacity?: number;
+  /** 0..1: fuse into the pieces it touches with a smooth fillet (0 = hard join) */
+  blendShape?: number;
+  /** 0..1: fade its color into differently colored pieces it touches (0 = hard edge) */
+  blendColor?: number;
   /** flat: how rounded the edges are, 0..1 */
   round: number;
   color: string;
@@ -113,8 +118,28 @@ function tidy(loop: Vec2[]): Vec2[] {
   return cleanOutline(loop, Math.max(b.w, b.h, 0.01) / 90);
 }
 
-export function pieceGeometry(p: Piece): THREE.BufferGeometry {
-  const key = JSON.stringify([p.outline, p.holes, p.kind, p.thickness, p.round, p.z, p.hollow, p.open, p.style === 'lowpoly', p.style === 'clay' || p.style === 'stone', p.kind === 'puffy' ? getMeshDetail() : 1]);
+/** A loop with extra points so no edge is longer than `step` (0 = as it is). */
+function densify(loop: Vec2[], step: number, closed = true): Vec2[] {
+  if (!(step > 0)) return loop;
+  const out: Vec2[] = [];
+  const n = closed ? loop.length : loop.length - 1;
+  for (let i = 0; i < n; i++) {
+    const [ax, ay] = loop[i], [bx, by] = loop[(i + 1) % loop.length];
+    const cuts = Math.min(64, Math.ceil(Math.hypot(bx - ax, by - ay) / step));
+    for (let c = 0; c < cuts; c++) out.push([ax + ((bx - ax) * c) / cuts, ay + ((by - ay) * c) / cuts]);
+  }
+  if (!closed) out.push(loop[loop.length - 1]);
+  return out;
+}
+
+/**
+ * A piece's mesh. With a `step`, flat and turned pieces come out with points
+ * about that far apart all over, fine enough to blend into their neighbours
+ * (puffy pieces already are).
+ */
+export function pieceGeometry(p: Piece, step = 0): THREE.BufferGeometry {
+  if (p.kind === 'puffy') step = 0;
+  const key = JSON.stringify([step, p.outline, p.holes, p.kind, p.thickness, p.round, p.z, p.hollow, p.open, p.style === 'lowpoly', p.style === 'clay' || p.style === 'stone', p.kind === 'puffy' ? getMeshDetail() : 1]);
   const hit = geoCache.get(key);
   if (hit) return hit;
   if (geoCache.size > 120) geoCache.clear();
@@ -123,14 +148,14 @@ export function pieceGeometry(p: Piece): THREE.BufferGeometry {
   if (p.kind === 'puffy') {
     g = buildInflatedGeometry(p.outline, { thickness: p.thickness, lowPoly: p.style === 'lowpoly', lumps: p.style === 'clay' || p.style === 'stone' ? 1 : 0, holes: p.holes });
   } else if (p.kind === 'turned') {
-    g = turnedGeometry(p);
+    g = turnedGeometry(p, step);
     if (p.style === 'lowpoly') {
       const n = g.getAttribute('position').count;
       g.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(n * 3).fill(1), 3));
     }
   } else {
-    const shape = new THREE.Shape(tidy(p.outline).map(([x, y]) => new THREE.Vector2(x, y)));
-    for (const h of p.holes) shape.holes.push(new THREE.Path(tidy(h).map(([x, y]) => new THREE.Vector2(x, y))));
+    const shape = new THREE.Shape(densify(tidy(p.outline), step).map(([x, y]) => new THREE.Vector2(x, y)));
+    for (const h of p.holes) shape.holes.push(new THREE.Path(densify(tidy(h), step).map(([x, y]) => new THREE.Vector2(x, y))));
     const depth = Math.max(0.003, p.thickness);
     const bevel = Math.min(depth * 0.45, 0.03) * p.round;
     const core = Math.max(0.001, depth - 2 * bevel);
@@ -150,6 +175,12 @@ export function pieceGeometry(p: Piece): THREE.BufferGeometry {
     ex.dispose();
     // its faces are group 0: remeshed if the thing gets bent
     g.userData.flatCaps = true;
+    if (step > 0) {
+      // the sides are already that fine: the faces get an even mesh to match
+      const fine = remeshCaps(g, step);
+      g.dispose();
+      g = fine;
+    }
     if (p.style === 'lowpoly') {
       const n = g.getAttribute('position').count;
       g.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(n * 3).fill(1), 3));
@@ -183,13 +214,14 @@ export function pieceLook(thing: Thing, p: Piece, wearer: Wearer): { style: Styl
  */
 export function buildThing(thing: Thing, wearer: Wearer, unit = 1): THREE.Group {
   const group = new THREE.Group();
-  const bend = thingBend(thing);
-  for (const raw of thing.pieces) {
+  const looks = thing.pieces.map((raw) => {
     const { style, k } = pieceLook(thing, raw, wearer);
     // low-poly and clay shape the mesh itself
-    const p = style === raw.style ? raw : { ...raw, style };
-    // bending curves the board; pieces lifted off it in 3D keep their shape
-    const geo = bend && !p.place ? bentGeometry(pieceGeometry(p), bend) : pieceGeometry(p);
+    return { p: style === raw.style ? raw : { ...raw, style }, style, k };
+  });
+  const shapes = blendedGeometries(looks.map((l) => l.p), thingBend(thing));
+  looks.forEach(({ p, style, k }, i) => {
+    const { geo, painted } = shapes[i];
     const mesh = new THREE.Mesh(geo, makeMaterial(style, p.color, k));
     // soft (VSM) shadows draw receivers into the shadow map too: a glass jar
     // would block the light from whatever's inside it
@@ -207,13 +239,24 @@ export function buildThing(thing: Thing, wearer: Wearer, unit = 1): THREE.Group 
       for (const shell of makeFuzzShells(geo, p.color, k, 8, unit)) mesh.add(shell);
       if (k.hairs > 0) mesh.add(makeStrayHairs(geo, p.color, 7, k.hairs * 0.6, false, unit, k.fuzz));
     }
+    if (painted) {
+      // colors come from the blend baked into the geometry: white * vertex color
+      // (body and fuzz shells; stray hairs keep their own per-hair colors)
+      for (const o of [mesh, ...mesh.children]) {
+        const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial;
+        if (!(o instanceof THREE.Mesh) || !m || !('color' in m) || m.userData?.ink) continue;
+        m.vertexColors = true;
+        m.color.setRGB(1, 1, 1);
+        m.needsUpdate = true;
+      }
+    }
     setOpacity(mesh, p.opacity ?? 1);
     if (p.place) {
       mesh.position.set(...p.place.position);
       mesh.quaternion.set(...p.place.quaternion);
     }
     group.add(mesh);
-  }
+  });
   return group;
 }
 
@@ -249,7 +292,11 @@ function thingBend(thing: Thing): ThingBend | null {
  * that long has them cut down. Already-fine meshes (puffy pieces) are left alone.
  */
 function refineForBend(src: THREE.BufferGeometry, bd: ThingBend): THREE.BufferGeometry {
-  const step = Math.min(Math.max(Math.abs(bd.r) * 0.12, bd.reach / 40), bd.reach / 4);
+  return refine(src, Math.min(Math.max(Math.abs(bd.r) * 0.12, bd.reach / 40), bd.reach / 4));
+}
+
+/** A mesh with points no further than about `step` apart (see refineForBend). */
+function refine(src: THREE.BufferGeometry, step: number): THREE.BufferGeometry {
   if (src.userData.flatCaps) src = remeshCaps(src, step);
   // an even mesh's edges run a little over its spacing
   const max = step * 2;
@@ -384,6 +431,10 @@ function bentGeometry(src: THREE.BufferGeometry, bd: ThingBend): THREE.BufferGeo
   if (hit) return hit;
   const refined = refineForBend(src, bd);
   const g = refined === src ? src.clone() : refined;
+  // a clone shares the source's userData: its faces aren't flat any more, and
+  // its ink and shared normals get worked out again for the curved shape
+  g.userData = {};
+  g.deleteAttribute('inkNormal');
   const pos = g.getAttribute('position') as THREE.BufferAttribute;
   const nor = g.getAttribute('normal') as THREE.BufferAttribute | undefined;
   const r0 = bd.r;
@@ -420,6 +471,268 @@ function bentGeometry(src: THREE.BufferGeometry, bd: ThingBend): THREE.BufferGeo
   return g;
 }
 
+// ---------------------------------------------------------------------------
+// blending pieces: like the creature's merged parts (see Creature.fuse), each
+// piece's surface is pulled onto the smooth union with the pieces it touches,
+// and its color fades into theirs from the seam where the two meet.
+
+/** fillet size at a Blend shape of 1 (thing units) */
+const SHAPE_MAX = 0.15;
+/** width of the color fade at a Blend color of 1, either side of the seam */
+const COLOR_MAX = 0.3;
+
+interface BlendLink {
+  other: number;
+  /** fillet size (0 = shape left alone) */
+  k: number;
+  /** color fade width (0 = no tint) */
+  fade: number;
+}
+
+const placeMatrix = (p: Piece) =>
+  p.place
+    ? new THREE.Matrix4().compose(new THREE.Vector3(...p.place.position), new THREE.Quaternion(...p.place.quaternion), new THREE.Vector3(1, 1, 1))
+    : new THREE.Matrix4();
+
+/** Each piece's geometry in its own space, fused and painted where it blends with its neighbours. */
+function blendedGeometries(pieces: Piece[], bend: ThingBend | null): { geo: THREE.BufferGeometry; painted: boolean }[] {
+  const shaped = (p: Piece, g: THREE.BufferGeometry) => (bend && !p.place ? bentGeometry(g, bend) : g);
+  const raw = pieces.map((p) => pieceGeometry(p));
+  let base = pieces.map((p, i) => shaped(p, raw[i]));
+  if (!pieces.some((p) => (p.blendShape ?? 0) > 0 || (p.blendColor ?? 0) > 0)) return base.map((geo) => ({ geo, painted: false }));
+
+  const mats = pieces.map(placeMatrix);
+  const boxes = base.map((g, i) => {
+    if (!g.boundingBox) g.computeBoundingBox();
+    return g.boundingBox!.clone().applyMatrix4(mats[i]);
+  });
+  const extent = (b: THREE.Box3) => b.getSize(new THREE.Vector3());
+  const links: BlendLink[][] = pieces.map(() => []);
+  for (let i = 0; i < pieces.length; i++) {
+    for (let j = i + 1; j < pieces.length; j++) {
+      const a = pieces[i], b = pieces[j];
+      // a piece blends with whatever it touches, whether or not that one asks to
+      const s = Math.max(a.blendShape ?? 0, b.blendShape ?? 0);
+      const c = a.color.toLowerCase() === b.color.toLowerCase() ? 0 : Math.max(a.blendColor ?? 0, b.blendColor ?? 0);
+      if (s < 0.005 && c < 0.005) continue;
+      // keep fillets in proportion: a thin plate shouldn't get a big blob
+      const ea = extent(boxes[i]), eb = extent(boxes[j]);
+      const thin = Math.min(ea.x, ea.y, ea.z, eb.x, eb.y, eb.z);
+      const k = s < 0.005 ? 0 : Math.max(0.003, Math.min(s * SHAPE_MAX, thin));
+      const fade = c < 0.005 ? 0 : c * COLOR_MAX;
+      if (!boxes[i].clone().expandByScalar(Math.max(k, 0.005)).intersectsBox(boxes[j])) continue;
+      links[i].push({ other: j, k, fade });
+      links[j].push({ other: i, k, fade });
+    }
+  }
+
+  // fine enough meshes to carry a fillet and a fade (flat faces are bare slivers)
+  base = base.map((g, i) => {
+    if (!links[i].length || pieces[i].kind === 'puffy') return g;
+    const size = extent(boxes[i]);
+    const finest = Math.max(size.x, size.y, size.z) / 60;
+    const want = Math.min(...links[i].map((l) => Math.min(l.k > 0 ? l.k / 2 : Infinity, l.fade > 0 ? l.fade / 3 : Infinity)));
+    // a few sizes only, so dragging a slider reuses them
+    const step = 2 ** (Math.round(Math.log2(Math.max(finest, Math.min(want, finest * 4))) * 3) / 3);
+    return shaped(pieces[i], pieceGeometry(pieces[i], step));
+  });
+  for (const g of base) if (!g.boundingBox) g.computeBoundingBox();
+
+  return pieces.map((p, i) => {
+    if (!links[i].length) return { geo: base[i], painted: false };
+    const nbrs = links[i].map((l) => ({
+      geo: base[l.other],
+      // from this piece's space into the neighbour's
+      toO: mats[l.other].clone().invert().multiply(mats[i]),
+      k: l.k,
+      fade: l.fade,
+      color: new THREE.Color(pieces[l.other].color),
+    }));
+    return fusePiece(base[i], new THREE.Color(p.color), nbrs);
+  });
+}
+
+interface BlendNeighbour {
+  geo: THREE.BufferGeometry;
+  toO: THREE.Matrix4;
+  k: number;
+  fade: number;
+  color: THREE.Color;
+}
+
+type Field = { f: Float32Array; g: Float32Array };
+const fieldCache = new WeakMap<THREE.BufferGeometry, Map<string, Field>>();
+
+/**
+ * Signed distance from each of this piece's points to a neighbour's surface
+ * (Infinity past `maxD`), with the outward direction in this piece's space.
+ */
+function distanceField(base: THREE.BufferGeometry, o: BlendNeighbour, maxD: number): Field {
+  const key = [o.geo.uuid, maxD, ...o.toO.elements.map((v) => v.toFixed(6))].join(',');
+  let per = fieldCache.get(base);
+  const hit = per?.get(key);
+  if (hit) return hit;
+  const p0 = base.getAttribute('position');
+  const fld: Field = { f: new Float32Array(p0.count).fill(Infinity), g: new Float32Array(p0.count * 3) };
+  const box = o.geo.boundingBox!.clone().expandByScalar(maxD);
+  const bvh = bvhFor(o.geo);
+  const normals = sharedNormals(o.geo);
+  const back = new THREE.Matrix3().setFromMatrix4(o.toO.clone().invert());
+  const q = new THREE.Vector3(), grad = new THREE.Vector3();
+  for (let i = 0; i < p0.count; i++) {
+    q.fromBufferAttribute(p0, i).applyMatrix4(o.toO);
+    if (!box.containsPoint(q)) continue;
+    const f = exactDistance(o.geo, bvh, normals, q, maxD, grad);
+    fld.f[i] = f;
+    if (f < Infinity) grad.applyMatrix3(back).normalize().toArray(fld.g, i * 3);
+  }
+  if (!per) fieldCache.set(base, (per = new Map()));
+  if (per.size > 16) per.clear();
+  per.set(key, fld);
+  return fld;
+}
+
+/**
+ * Where this piece's surface crosses into a neighbour: points along the
+ * edges whose ends sit either side of its surface.
+ */
+function seamPoints(base: THREE.BufferGeometry, f: Float32Array): number[] {
+  const pos = base.getAttribute('position');
+  const index = base.getIndex();
+  const count = index ? index.count : pos.count;
+  const at = (k: number) => (index ? index.getX(k) : k);
+  const out: number[] = [];
+  for (let t = 0; t < count; t += 3) {
+    for (let e = 0; e < 3; e++) {
+      const a = at(t + e), b = at(t + ((e + 1) % 3));
+      const fa = f[a], fb = f[b];
+      if (!(fa < Infinity && fb < Infinity) || fa < 0 === fb < 0) continue;
+      const s = fa / (fa - fb);
+      for (let c = 0; c < 3; c++) out.push(pos.getComponent(a, c) + (pos.getComponent(b, c) - pos.getComponent(a, c)) * s);
+    }
+  }
+  return out;
+}
+
+/** Distance from each point to the nearest seam point, up to `maxD` (Infinity beyond). */
+function seamDistance(base: THREE.BufferGeometry, seam: number[], maxD: number): Float32Array {
+  const pos = base.getAttribute('position');
+  const out = new Float32Array(pos.count).fill(Infinity);
+  if (!seam.length) return out;
+  // a grid of maxD-sized cells: only the neighbouring cells can be close enough
+  const cell = (v: number) => Math.floor(v / maxD);
+  const grid = new Map<string, number[]>();
+  for (let s = 0; s < seam.length; s += 3) {
+    const key = `${cell(seam[s])},${cell(seam[s + 1])},${cell(seam[s + 2])}`;
+    let list = grid.get(key);
+    if (!list) grid.set(key, (list = []));
+    list.push(s);
+  }
+  const max2 = maxD * maxD;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    const cx = cell(x), cy = cell(y), cz = cell(z);
+    let best = max2;
+    for (let dx = -1; dx <= 1; dx++)
+      for (let dy = -1; dy <= 1; dy++)
+        for (let dz = -1; dz <= 1; dz++) {
+          const list = grid.get(`${cx + dx},${cy + dy},${cz + dz}`);
+          if (list) for (const s of list) best = Math.min(best, (seam[s] - x) ** 2 + (seam[s + 1] - y) ** 2 + (seam[s + 2] - z) ** 2);
+        }
+    if (best < max2) out[i] = Math.sqrt(best);
+  }
+  return out;
+}
+
+const fusedCache = new Map<string, { geo: THREE.BufferGeometry; painted: boolean }>();
+
+/**
+ * Fuse a piece's surface into its neighbours (smooth-min fillet) and paint a
+ * color fade that meets 50/50 at the seam. Fades are measured from where the
+ * surfaces cross rather than how close they are, so a piece layered over
+ * another only fades near its edge, not all over.
+ */
+function fusePiece(base: THREE.BufferGeometry, own: THREE.Color, nbrs: BlendNeighbour[]): { geo: THREE.BufferGeometry; painted: boolean } {
+  const key = [base.uuid, own.getHex(), ...nbrs.flatMap((o) => [o.geo.uuid, o.k, o.fade, o.color.getHex(), ...o.toO.elements.map((v) => v.toFixed(6))])].join(';');
+  const hit = fusedCache.get(key);
+  if (hit) return hit;
+
+  const p0 = base.getAttribute('position') as THREE.BufferAttribute;
+  const nOwn = base.getAttribute('normal') as THREE.BufferAttribute;
+  // shared-corner normals so split (creased, low-poly) points all move the same way
+  const n0 = sharedNormals(base);
+  // far enough out to find where the surfaces cross, even on a coarse mesh
+  const fields = nbrs.map((o) => distanceField(base, o, Math.max(o.k, 0.08)));
+
+  const g = base.clone();
+  g.userData = {};
+  g.deleteAttribute('inkNormal');
+  const p1 = g.getAttribute('position') as THREE.BufferAttribute;
+  const n1 = g.getAttribute('normal') as THREE.BufferAttribute;
+
+  // colors first, from the unmoved surface
+  const fades = nbrs.map((o, j) => (o.fade > 0 ? seamDistance(base, seamPoints(base, fields[j].f), o.fade) : null));
+  const painted = fades.some((d) => d?.some((v) => v < Infinity));
+  if (painted) {
+    // low-poly keeps its per-facet shading variation underneath the tint
+    const jitter = base.getAttribute('color') as THREE.BufferAttribute | undefined;
+    const c1 = new THREE.BufferAttribute(new Float32Array(p0.count * 3), 3);
+    const col = new THREE.Color();
+    for (let i = 0; i < p0.count; i++) {
+      col.copy(own);
+      nbrs.forEach((o, j) => {
+        const s = fades[j]?.[i] ?? Infinity;
+        if (s >= o.fade) return;
+        // 50/50 at the seam, fading to our own color `fade` away from it
+        const t = 1 - s / o.fade;
+        col.lerp(o.color, 0.5 * t * t * (3 - 2 * t));
+      });
+      const jv = jitter ? jitter.getX(i) : 1;
+      c1.setXYZ(i, col.r * jv, col.g * jv, col.b * jv);
+    }
+    g.setAttribute('color', c1);
+  }
+
+  if (nbrs.some((o) => o.k > 0)) {
+    const pw = new THREE.Vector3(), nw = new THREE.Vector3(), gw = new THREE.Vector3(), gsum = new THREE.Vector3();
+    for (let i = 0; i < p0.count; i++) {
+      // running smooth-min of (this surface = 0, each neighbour's distance)
+      let d = 0, kk = 0;
+      gsum.fromBufferAttribute(n0, i);
+      for (let j = 0; j < nbrs.length; j++) {
+        const k = nbrs[j].k;
+        const f = fields[j].f[i];
+        if (!(k > 0) || f >= k) continue;
+        gw.fromArray(fields[j].g, i * 3);
+        const h = Math.min(1, Math.max(0, 0.5 + (0.5 * (f - d)) / k));
+        d = f * (1 - h) + d * h - k * h * (1 - h);
+        gsum.multiplyScalar(h).addScaledVector(gw, 1 - h);
+        kk = Math.max(kk, k);
+      }
+      if (!kk) continue;
+      // Deep inside a neighbour: leave it hidden. In the blend band: one
+      // Newton step onto the fused surface.
+      const w = 1 - Math.min(1, Math.max(0, (-d - 0.3 * kk) / (0.5 * kk)));
+      const g2 = Math.max(gsum.lengthSq(), 0.05);
+      const step = Math.max(-kk, Math.min(kk * 1.5, (-d / g2) * w));
+      pw.fromBufferAttribute(p0, i).addScaledVector(gsum, step);
+      nw.fromBufferAttribute(nOwn, i).lerp(gsum.normalize(), w).normalize();
+      p1.setXYZ(i, pw.x, pw.y, pw.z);
+      n1.setXYZ(i, nw.x, nw.y, nw.z);
+    }
+  }
+  g.computeBoundingBox();
+  g.computeBoundingSphere();
+  const res = { geo: g, painted };
+  // still-shown meshes just upload theirs again if they're dropped here
+  if (fusedCache.size > 60) {
+    for (const v of fusedCache.values()) v.geo.dispose();
+    fusedCache.clear();
+  }
+  fusedCache.set(key, res);
+  return res;
+}
+
 /**
  * Radius of the drawn silhouette at height y: the farthest crossing from the
  * centre line on either side, so a half-drawn or whole outline both work.
@@ -437,10 +750,15 @@ function radiusAt(outline: Vec2[], y: number): number | null {
 }
 
 /** Spin the silhouette's profile around the Y axis (the drawing's centre line). */
-function turnedGeometry(p: Piece): THREE.BufferGeometry {
-  const pts = turnedProfile(p);
+function turnedGeometry(p: Piece, step = 0): THREE.BufferGeometry {
+  let pts = turnedProfile(p);
   if (pts.length < 3) return new THREE.BufferGeometry();
-  const g = new THREE.LatheGeometry(pts, 64);
+  let around = 64;
+  if (step > 0) {
+    pts = densify(pts.map((v) => [v.x, v.y] as Vec2), step, false).map(([x, y]) => new THREE.Vector2(x, y));
+    around = Math.min(256, Math.max(64, Math.ceil((2 * Math.PI * Math.max(...pts.map((v) => v.x))) / step)));
+  }
+  const g = new THREE.LatheGeometry(pts, around);
   // smooth round shading but keep the rim and base edges crisp
   const out = toCreasedNormals(g, Math.PI / 4);
   g.dispose();

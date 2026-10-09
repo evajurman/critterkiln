@@ -3055,6 +3055,8 @@ function renderStuffPanel() {
     $<HTMLInputElement>('#piece-open').checked = !!p.open;
     $<HTMLInputElement>('#piece-open').disabled = !p.hollow;
     $<HTMLInputElement>('#piece-opacity').value = String(p.opacity ?? 1);
+    $<HTMLInputElement>('#piece-blend-shape').value = String(p.blendShape ?? 0);
+    $<HTMLInputElement>('#piece-blend-color').value = String(p.blendColor ?? 0);
     $('#piece-round-row').hidden = p.kind !== 'flat';
     $<HTMLInputElement>('#piece-round').value = String(p.round);
     $<HTMLInputElement>('#piece-z').value = String(p.z);
@@ -3172,7 +3174,7 @@ document.querySelectorAll<HTMLButtonElement>('#piece-kind button').forEach((b) =
 });
 $<HTMLInputElement>('#piece-hollow').onchange = (e) => updatePiece((p) => (p.hollow = (e.target as HTMLInputElement).checked));
 $<HTMLInputElement>('#piece-open').onchange = (e) => updatePiece((p) => (p.open = (e.target as HTMLInputElement).checked));
-for (const [id, key] of [['#piece-thickness', 'thickness'], ['#piece-round', 'round'], ['#piece-z', 'z'], ['#piece-opacity', 'opacity']] as const) {
+for (const [id, key] of [['#piece-thickness', 'thickness'], ['#piece-round', 'round'], ['#piece-z', 'z'], ['#piece-opacity', 'opacity'], ['#piece-blend-shape', 'blendShape'], ['#piece-blend-color', 'blendColor']] as const) {
   const input = $<HTMLInputElement>(id);
   input.oninput = () => updatePiece((p) => (p[key] = parseFloat(input.value)), false);
   input.onchange = () => commit();
