@@ -97,6 +97,8 @@ export const STYLE_PARAMS: Record<StyleId, StyleParam[]> = {
     { key: 'ink', label: 'Ink width', min: 0, max: 0.04, step: 0.001, value: 0.012 },
     { key: 'bands', label: 'Shade steps', min: 2, max: 6, step: 1, value: 3 },
     { key: 'shadow', label: 'Shadow depth', min: 0, max: 0.95, step: 0.01, value: 0.55 },
+    // no shading at all: each part is just its own color inside its ink line
+    { key: 'flat', label: 'Flat color', min: 0, max: 1, step: 0.01, value: 0 },
     // the pencil sliders: together they turn the cel look into a hand-drawn sketch
     { key: 'hatch', label: 'Pencil hatching', min: 0, max: 1, step: 0.01, value: 0 },
     // the strokes: a deep shade of the part's own color (colored pencil) through to black ink
@@ -901,7 +903,7 @@ const SKETCH_GLSL = /* glsl */ `
 `;
 
 const HATCH_GLSL = /* glsl */ `
-  uniform float sketchHatch, sketchHatchDark;
+  uniform float sketchHatch, sketchHatchDark, sketchFlat;
   // one set of parallel pencil strokes across the screen, 'spacing' CSS pixels apart
   float hatchLayer(vec2 p, float ang, float spacing, float seed) {
     vec2 d = vec2(cos(ang), sin(ang));
@@ -923,13 +925,15 @@ const HATCH_GLSL = /* glsl */ `
 const TOON_LIT = 1.25;
 
 /**
- * Toon's pencil sliders: Pencil hatching draws the shading in strokes (one
- * way in the half-tones, crossed in the shadows, a third way in the deepest)
- * instead of flat bands, and Paper grain gives everything a paper tooth.
+ * Toon's extra sliders: Flat color takes the shading away, leaving the part's
+ * own color as it was picked. Pencil hatching draws the shading in strokes
+ * (one way in the half-tones, crossed in the shadows, a third way in the
+ * deepest) instead of bands, over the flat color if that's on, and Paper
+ * grain gives everything a paper tooth.
  */
 function sketchToon(m: THREE.MeshToonMaterial, k: StyleSettings): THREE.Material {
-  const hatch = k.hatch ?? 0, grain = k.grain ?? 0;
-  if (hatch <= 0 && grain <= 0) return m;
+  const hatch = k.hatch ?? 0, grain = k.grain ?? 0, flat = k.flat ?? 0;
+  if (hatch <= 0 && grain <= 0 && flat <= 0) return m;
   m.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, {
       sketchPx,
@@ -937,6 +941,7 @@ function sketchToon(m: THREE.MeshToonMaterial, k: StyleSettings): THREE.Material
       sketchHatchDark: { value: k.hatchDark ?? 0.35 },
       sketchGrain: { value: grain },
       sketchWobble: { value: 0 },
+      sketchFlat: { value: flat },
     });
     shader.fragmentShader =
       SKETCH_GLSL +
@@ -946,10 +951,14 @@ function sketchToon(m: THREE.MeshToonMaterial, k: StyleSettings): THREE.Material
         `{
            vec2 sp = gl_FragCoord.xy / sketchPx;
            float tooth = vnoise2(sp * 0.9);
+           vec3 lit = diffuseColor.rgb * ${TOON_LIT.toFixed(3)};
+           // how far into shadow this spot is (for the hatching, even once flattened)
+           float lum = dot(outgoingLight, vec3(0.3, 0.59, 0.11)) / max(dot(lit, vec3(0.3, 0.59, 0.11)), 1e-4);
+           float dark = clamp(1.0 - lum, 0.0, 1.0);
+           // flat: the picked color itself, with no light or shadow on it
+           lit = mix(lit, diffuseColor.rgb, sketchFlat);
+           outgoingLight = mix(outgoingLight, diffuseColor.rgb, sketchFlat);
            if (sketchHatch > 0.0) {
-             vec3 lit = diffuseColor.rgb * ${TOON_LIT.toFixed(3)};
-             float lum = dot(outgoingLight, vec3(0.3, 0.59, 0.11)) / max(dot(lit, vec3(0.3, 0.59, 0.11)), 1e-4);
-             float dark = clamp(1.0 - lum, 0.0, 1.0);
              float s1 = hatchLayer(sp, 0.8, 5.0, 1.0) * smoothstep(0.06, 0.16, dark);
              float s2 = hatchLayer(sp, -0.75, 5.0, 9.0) * smoothstep(0.32, 0.42, dark);
              float s3 = hatchLayer(sp, 0.05, 3.5, 17.0) * smoothstep(0.58, 0.68, dark);
