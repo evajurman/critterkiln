@@ -370,22 +370,34 @@ function tintForBackdrop(c: THREE.Color) {
   hemi.groundColor.copy(c).multiplyScalar(0.8);
 }
 
-function setBackdrop(hex: string) {
-  backdrop = hex;
+/** The Stuff workbench has its own backdrop while it's open; the scene's comes back after. */
+const STUFF_BACKDROP = '#adcfa5';
+function paintBackdrop(hex: string) {
   const c = new THREE.Color(hex);
   scene.background = untoned(c);
   tintForBackdrop(c);
   refreshFloorColors();
+}
+
+function setBackdrop(hex: string) {
+  backdrop = hex;
+  paintBackdrop(mode === 'stuff' ? STUFF_BACKDROP : hex);
   try {
     localStorage.setItem(BG_KEY, hex);
   } catch {
     /* ignore */
   }
 }
-setBackdrop(backdrop);
+paintBackdrop(backdrop);
 
 const camera = new THREE.PerspectiveCamera(35, 1, 0.05, 100);
 camera.position.set(2.8, 2.0, 4.4);
+// Ortho: the controls still move `camera`; orthoCam follows it, as big as
+// `camera` sees at the orbit centre, so framing and zooming work the same.
+// It draws from behind its spot too (negative near), so nothing close is cut off.
+const orthoCam = new THREE.OrthographicCamera(-1, 1, 1, -1, -20, 100);
+/** whichever of the two draws the scene (and is picked and projected through) */
+let view: THREE.PerspectiveCamera | THREE.OrthographicCamera = camera;
 
 // Post-processing: MSAA scene render, ground-truth ambient occlusion for the
 // creases where parts meet and contact shadows on the floor, then tone mapping.
@@ -421,7 +433,7 @@ function hideOverlays() {
   for (const o of overlayHidden) o.visible = false;
 }
 
-const scenePass = new RenderPass(scene, camera);
+const scenePass = new RenderPass(scene, view);
 const scenePassRender = scenePass.render.bind(scenePass);
 scenePass.render = (...args: Parameters<RenderPass['render']>) => {
   if (furPass.enabled) {
@@ -511,19 +523,19 @@ class FurPass extends Pass {
     // only the fuzz: no backdrop (it would paint over everything), lights kept
     const background = scene.background;
     scene.background = null;
-    const mask = camera.layers.mask;
+    const mask = view.layers.mask;
     if (fur.length) {
-      camera.layers.set(FUR_LAYER);
-      renderer.render(scene, camera);
+      view.layers.set(FUR_LAYER);
+      renderer.render(scene, view);
     }
     // then the handles, on top of it all
     if (overlays.length) {
       for (const o of overlays) o.layers.enable(OVERLAY_LAYER);
-      camera.layers.set(OVERLAY_LAYER);
-      renderer.render(scene, camera);
+      view.layers.set(OVERLAY_LAYER);
+      renderer.render(scene, view);
       for (const o of overlays) o.layers.disable(OVERLAY_LAYER);
     }
-    camera.layers.mask = mask;
+    view.layers.mask = mask;
     scene.background = background;
     renderer.autoClear = autoClear;
   }
@@ -536,6 +548,48 @@ for (const l of [hemi, key, fill, rim]) l.layers.enable(FUR_LAYER);
 const bokeh = new BokehPass(scene, camera, { focus: 5, aperture: 0.004, maxblur: 0.012 });
 bokeh.enabled = false;
 composer.addPass(bokeh);
+
+const ORTHO_KEY = 'creature-creator/ortho';
+/** Shape and Look's choice (Stuff always opens in ortho) */
+let sceneOrtho = (() => {
+  try {
+    return localStorage.getItem(ORTHO_KEY) === '1';
+  } catch {
+    return false;
+  }
+})();
+
+/** Keep orthoCam on `camera`'s spot, facing the same way, framing what it frames at the orbit centre. */
+function syncView() {
+  if (view !== orthoCam) return;
+  const h = camera.position.distanceTo(controls.target) * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+  orthoCam.top = h;
+  orthoCam.bottom = -h;
+  orthoCam.right = h * camera.aspect;
+  orthoCam.left = -h * camera.aspect;
+  orthoCam.position.copy(camera.position);
+  orthoCam.quaternion.copy(camera.quaternion);
+  orthoCam.updateProjectionMatrix();
+  orthoCam.updateMatrixWorld();
+}
+
+/** Perspective or ortho, for everything that draws, picks or projects through the camera. */
+function setOrtho(on: boolean) {
+  view = on ? orthoCam : camera;
+  syncView();
+  scenePass.camera = view;
+  gtao.camera = view;
+  bokeh.camera = view;
+  gizmo.camera = view;
+  const persp = on ? 0 : 1;
+  for (const m of [gtao.gtaoMaterial, gtao.depthRenderMaterial, bokeh.materialBokeh]) {
+    m.defines.PERSPECTIVE_CAMERA = persp;
+    m.needsUpdate = true;
+  }
+  document.querySelectorAll<HTMLButtonElement>('#view-proj button').forEach((b) => b.classList.toggle('active', (b.dataset.proj === 'ortho') === on));
+  renderOverlay();
+  invalidate();
+}
 composer.addPass(new OutputPass());
 function setAO(on: boolean) {
   gtao.enabled = on;
@@ -965,7 +1019,7 @@ function toScreen(obj: THREE.Object3D, local: THREE.Vector3): THREE.Vector2 {
 /** Where a point in a frame (given by its world matrix) is on screen. */
 function toScreenFrom(frame: THREE.Matrix4, local: THREE.Vector3): THREE.Vector2 {
   const r = canvas.getBoundingClientRect();
-  const v = local.clone().applyMatrix4(frame).project(camera);
+  const v = local.clone().applyMatrix4(frame).project(view);
   return new THREE.Vector2(r.left + ((v.x + 1) / 2) * r.width, r.top + ((1 - v.y) / 2) * r.height);
 }
 
@@ -1370,7 +1424,7 @@ function setRay(clientX: number, clientY: number) {
   const r = canvas.getBoundingClientRect();
   raycaster.setFromCamera(
     new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1),
-    camera,
+    view,
   );
 }
 
@@ -1463,7 +1517,7 @@ function pickHandle(x: number, y: number): THREE.Object3D | null {
   let bestD = pointer.touch ? 28 : 16;
   const v = new THREE.Vector3();
   const near = (h: THREE.Object3D, at: THREE.Vector3) => {
-    h.localToWorld(v.copy(at)).project(camera);
+    h.localToWorld(v.copy(at)).project(view);
     if (v.z > 1) return Infinity;
     return Math.hypot(r.left + ((v.x + 1) / 2) * r.width - x, r.top + ((1 - v.y) / 2) * r.height - y);
   };
@@ -1988,7 +2042,7 @@ function screenToLocal(frame: THREE.Object3D, plane: THREE.Plane, x: number, y: 
 
 /** Drawing-plane point -> overlay pixel coordinates. */
 function localToOverlay(frame: THREE.Object3D, [x, y]: Vec2): Vec2 {
-  const v = frame.localToWorld(new THREE.Vector3(x, y, 0)).project(camera);
+  const v = frame.localToWorld(new THREE.Vector3(x, y, 0)).project(view);
   return [((v.x + 1) / 2) * overlay.clientWidth, ((1 - v.y) / 2) * overlay.clientHeight];
 }
 
@@ -2998,7 +3052,7 @@ function snapThumb(box: THREE.Box3, size = 160): string {
   camera.updateMatrixWorld();
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (let k = 0; k < 8; k++) {
-    const v = new THREE.Vector3(k & 1 ? box.max.x : box.min.x, k & 2 ? box.max.y : box.min.y, k & 4 ? box.max.z : box.min.z).project(camera);
+    const v = new THREE.Vector3(k & 1 ? box.max.x : box.min.x, k & 2 ? box.max.y : box.min.y, k & 4 ? box.max.z : box.min.z).project(view);
     const px = ((v.x + 1) / 2) * canvas.width;
     const py = ((1 - v.y) / 2) * canvas.height;
     x0 = Math.min(x0, px);
@@ -5190,7 +5244,13 @@ function setMode(m: Mode) {
   if (drawState) exitDraw();
   // leaving the workbench: keep what's on it (while it's still there to photograph)
   if (mode === 'stuff' && m !== 'stuff') saveWorkbenchNow();
+  // the workbench's own backdrop and flat (ortho) view last only while it's open
+  if ((mode === 'stuff') !== (m === 'stuff')) {
+    paintBackdrop(m === 'stuff' ? STUFF_BACKDROP : backdrop);
+    setOrtho(m === 'stuff' || sceneOrtho);
+  }
   mode = m;
+  applyDof();
   if (m === 'look' || m === 'stuff') unlock(m);
   document.querySelectorAll<HTMLButtonElement>('.modes button').forEach((b) => b.classList.toggle('active', b.dataset.mode === m));
   placeModePill();
@@ -6057,7 +6117,8 @@ function focusDistance() {
 }
 
 function applyDof() {
-  bokeh.enabled = dof.enabled;
+  // the workbench is always sharp; the photo blur comes back with the scene
+  bokeh.enabled = dof.enabled && mode !== 'stuff';
   // blur 0..1 maps onto the lens aperture; maxblur caps the spread
   const u = bokeh.uniforms as Record<string, THREE.IUniform>;
   u.aperture.value = 0.0004 + Math.pow(dof.blur, 2) * 0.03;
@@ -6076,7 +6137,7 @@ function showFocusMarker() {
 function updateFocus(now: number) {
   const d = focusDistance();
   (bokeh.uniforms as Record<string, THREE.IUniform>).focus.value = d;
-  const show = dof.enabled && now < focusMarkerUntil;
+  const show = bokeh.enabled && now < focusMarkerUntil;
   focusMarker.visible = show;
   if (show) {
     const dir = camera.getWorldDirection(new THREE.Vector3());
@@ -6278,6 +6339,21 @@ $<HTMLInputElement>('#keep-floor').onchange = (e) => {
   commit();
 };
 document.querySelectorAll<HTMLButtonElement>('#view-bar [data-view]').forEach((b) => (b.onclick = () => viewFrom(b.dataset.view!)));
+document.querySelectorAll<HTMLButtonElement>('#view-proj [data-proj]').forEach((b) => {
+  b.onclick = () => {
+    const on = b.dataset.proj === 'ortho';
+    // on the workbench it's just for now; in Shape and Look it's remembered
+    if (mode !== 'stuff') {
+      sceneOrtho = on;
+      try {
+        localStorage.setItem(ORTHO_KEY, on ? '1' : '0');
+      } catch {
+        /* ignore */
+      }
+    }
+    setOrtho(on);
+  };
+});
 
 $('#undo').onclick = undo;
 $('#redo').onclick = redo;
@@ -6504,6 +6580,7 @@ function resize() {
   aoTexel.set(1 / gtao.pdRenderTarget.width, 1 / gtao.pdRenderTarget.height);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
+  syncView();
   const dpr = Math.min(devicePixelRatio, 2);
   overlay.width = w * dpr;
   overlay.height = h * dpr;
@@ -6596,6 +6673,7 @@ function loop(now: number) {
   }
   // true while damping or auto-rotating
   if (controls.update()) invalidate(2);
+  syncView();
   const f = 1 - (now - flashStart) / 700;
   // one extra frame after the flash ends clears the glow
   if (f > -0.1) invalidate(1);
@@ -6653,6 +6731,7 @@ if (mode === 'shape' && idle) hintOnce('Click a part to begin!');
 renderSettings();
 applyLighting();
 applyFloor();
+setOrtho(sceneOrtho);
 resize();
 requestAnimationFrame(loop);
 

@@ -471,6 +471,8 @@ button.primary.slim { width: auto; flex: 1; padding: 8px 10px; font-size: 14px; 
   font-weight: var(--w-bold); font-size: 12px; cursor: var(--cursor-click); color: var(--ink);
 }
 .view-bar button:hover { background: var(--bg); }
+.view-proj { display: flex; gap: 2px; margin-left: 2px; padding-left: 4px; border-left: 1px solid var(--line); }
+.view-bar .view-proj button.active { background: var(--ink); color: var(--on-ink); }
 
 .pop-sub { font-size: 12px; font-weight: var(--w-heavy); color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin: 12px 0 6px; }
 #floor-mode button { font-size: 11px; padding: 5px 2px; }
