@@ -32,7 +32,9 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="theme-color" content="#f5efe4" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@500;700;800&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=DynaPuff:wdth,wght@75..100,400..700&family=Nunito:wght@500;700;800&display=swap" rel="stylesheet" />
+    <!-- Settings › Plain text, applied before the first paint so the font doesn't flash -->
+    <script>try { if (JSON.parse(localStorage.getItem('creature-creator/settings') || '{}').plainText) document.documentElement.classList.add('plain-text'); } catch {}</script>
     <script src="https://kit.fontawesome.com/16182ad8a7.js" crossorigin="anonymous"></script>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
@@ -374,6 +376,7 @@
         <div id="settings-pop" class="popover" hidden>
           <div class="pop-title">Settings</div>
           <label class="check"><input id="set-nums" type="checkbox" /> Show numbers on sliders</label>
+          <label class="check" title="Simpler, easier-to-read lettering everywhere"><input id="set-plain" type="checkbox" /> Plain text</label>
           <div class="pop-sub">Seamless joins</div>
           <div class="seg" id="set-seamless">
             <button data-seamless="on" title="Every creature">On</button>

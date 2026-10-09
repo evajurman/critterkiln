@@ -5487,8 +5487,8 @@ function hint(text: string, ms = 2000, warn = false) {
 // settings (remembered in this browser)
 
 const SETTINGS_KEY = 'creature-creator/settings';
-const settings: { numbers: boolean; seamless: SeamlessMode; seamlessLowPoly: boolean; quality: Quality } = (() => {
-  const defaults = { numbers: false, seamless: 'on' as SeamlessMode, seamlessLowPoly: false, quality };
+const settings: { numbers: boolean; plainText: boolean; seamless: SeamlessMode; seamlessLowPoly: boolean; quality: Quality } = (() => {
+  const defaults = { numbers: false, plainText: false, seamless: 'on' as SeamlessMode, seamlessLowPoly: false, quality };
   try {
     return { ...defaults, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') };
   } catch {
@@ -5509,6 +5509,8 @@ function saveSettings() {
 function renderSettings() {
   document.body.classList.toggle('show-nums', settings.numbers);
   $<HTMLInputElement>('#set-nums').checked = settings.numbers;
+  document.documentElement.classList.toggle('plain-text', settings.plainText);
+  $<HTMLInputElement>('#set-plain').checked = settings.plainText;
   document.querySelectorAll<HTMLButtonElement>('#set-seamless button').forEach((b) => b.classList.toggle('active', b.dataset.seamless === settings.seamless));
   $<HTMLInputElement>('#set-seamless-lp').checked = settings.seamlessLowPoly;
   // nothing to apply it to while seamless joins are off
@@ -5636,6 +5638,14 @@ $<HTMLInputElement>('#set-nums').onchange = (e) => {
   saveSettings();
   renderSettings();
 };
+$<HTMLInputElement>('#set-plain').onchange = (e) => {
+  settings.plainText = (e.target as HTMLInputElement).checked;
+  saveSettings();
+  renderSettings();
+  // the other font has other widths (and may still be loading)
+  fitTopbar();
+  document.fonts.ready.then(fitTopbar);
+};
 document.querySelectorAll<HTMLButtonElement>('#set-seamless button').forEach((b) => {
   b.onclick = () => {
     settings.seamless = b.dataset.seamless as SeamlessMode;
@@ -5660,7 +5670,7 @@ function fitTopbar() {
   bar.classList.toggle('compact', bar.scrollWidth > bar.clientWidth || tools.scrollWidth > tools.clientWidth);
 }
 new ResizeObserver(fitTopbar).observe($('.topbar'));
-document.fonts.ready.then(fitTopbar); // the icon font and Nunito change the buttons' widths
+document.fonts.ready.then(fitTopbar); // the icon font and the text font change the buttons' widths
 installScrollbars();
 installCursorPress();
 
