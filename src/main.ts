@@ -44,6 +44,7 @@ import {
   putThing,
   removeThing,
   safeFileName,
+  setCollection,
   uid,
   type BendMode,
   type Piece,
@@ -595,7 +596,7 @@ function loadWorld(): World | null {
     if (raw) {
       const w = JSON.parse(raw) as World;
       const list = (w.creatures ?? []).map(migrate).filter((s): s is CreatureState => !!s);
-      if (list.length) return { creatures: list, active: Math.min(Math.max(0, w.active ?? 0), list.length - 1), workbench: w.workbench };
+      if (list.length) return { creatures: list, active: Math.min(Math.max(0, w.active ?? 0), list.length - 1), workbench: w.workbench, name: w.name };
     }
     // the single-creature autosave from before scenes existed
     const old = localStorage.getItem(OLD_KEY);
@@ -2862,6 +2863,8 @@ function saveWorkbenchNow() {
     if (changed) creatures[i]?.sync();
   });
   save();
+  // My stuff is saved with the creation
+  queueCreationSave();
   renderCollection();
 }
 
@@ -3933,6 +3936,16 @@ interface LoadChoice {
 }
 
 /** Bring the chosen parts of a bundle in: alongside what's here, or in place of the scene. */
+/** Stuff these creatures are wearing (and any other things) joins My stuff, so it can be moved or worn again. */
+function keepInCollection(creatures: CreatureState[], things: Thing[] = []) {
+  const have = new Set(collection().map((t) => t.id));
+  for (const t of [...creatures.flatMap((s) => (s.attachments ?? []).map((a) => a.thing)), ...things]) {
+    if (have.has(t.id)) continue;
+    putThing(t);
+    have.add(t.id);
+  }
+}
+
 function loadBundle(b: Bundle, pick: LoadChoice, replace: boolean) {
   const incoming = b.creatures.filter((_, i) => pick.creatures[i]);
   const things = b.stuff.filter((_, i) => pick.stuff[i]);
@@ -3940,23 +3953,19 @@ function loadBundle(b: Bundle, pick: LoadChoice, replace: boolean) {
   exitDraw();
   deselectAttachment();
   stopPlacing();
-  // stuff the creatures are wearing joins My stuff, so it can be moved or worn again
-  const have = new Set(collection().map((t) => t.id));
-  for (const t of [...incoming.flatMap((s) => (s.attachments ?? []).map((a) => a.thing)), ...things]) {
-    if (have.has(t.id)) continue;
-    putThing(t);
-    have.add(t.id);
-  }
   for (const r of rigs) saveRig(r, r.name);
-  if (pick.look && b.look) applyLook(b.look);
 
   if (incoming.length && replace) {
     // a new creation: the scene it replaces stays in My creations
-    flushCreationSave();
+    leaveScene();
     const active = Math.max(0, incoming.indexOf(b.creatures[b.active ?? 0]));
-    replaceWorld({ creatures: incoming, active, workbench: world.workbench, name: b.name });
+    replaceWorld({ creatures: incoming, active, name: b.name }, []);
     beginCreation(null, true);
-  } else if (incoming.length) {
+  }
+  // after the old scene is saved, so it keeps its own backdrop
+  if (pick.look && b.look) applyLook(b.look);
+  keepInCollection(incoming, things);
+  if (incoming.length && !replace) {
     // keep the file's own arrangement, shifted to free floor on the right
     const spot = freeSpot();
     const minX = Math.min(...incoming.map((s) => s.placement?.x ?? 0));
@@ -4109,6 +4118,8 @@ interface CreationData {
   creatures: CreatureState[];
   active: number;
   look: SceneLook;
+  /** its My stuff (absent in creations saved before each one kept its own) */
+  stuff?: Thing[];
 }
 type SavedCreation = Creation<CreationData>;
 /** A backup of the whole library, as one file. */
@@ -4119,7 +4130,7 @@ interface LibraryFile {
 const CREATION_SAVE_MS = 1200;
 
 function creationData(): CreationData {
-  return { creatures: world.creatures.map(forFile), active: world.active, look: currentLook() };
+  return { creatures: world.creatures.map(forFile), active: world.active, look: currentLook(), stuff: collection() };
 }
 
 /** "Bimble & Twin", or "Untitled" when nobody has a name. */
@@ -4151,6 +4162,19 @@ function saveCreationWhenSettled() {
 /** Save straight away if a save is waiting (before the scene is swapped for another). */
 function flushCreationSave() {
   if (opened.timer) saveCreationNow();
+}
+
+/**
+ * Before the scene is swapped for another: the thing on the workbench goes in
+ * My stuff, and the scene (My stuff too) is saved to My creations.
+ */
+function leaveScene() {
+  exitDraw();
+  saveWorkbenchNow();
+  // My stuff belongs to the scene now: one with stuff in it is worth keeping
+  // even if its creatures were never touched (nothing in My stuff is lost)
+  if (collection().length) opened.keep = true;
+  saveCreationNow();
 }
 
 /** A picture of every creature in the scene, or '' when they can't be pictured right now. */
@@ -4227,9 +4251,16 @@ function beginCreation(id: string | null, keep: boolean, from?: SavedCreation) {
   hIndex = -1;
 }
 
-/** Swap every creature in the scene for these (the workbench stays). */
-function replaceWorld(next: World) {
+/**
+ * Swap every creature in the scene for these, and My stuff for `stuff`. The
+ * workbench starts empty. Call leaveScene first to keep the old scene.
+ */
+function replaceWorld(next: World, stuff: Thing[]) {
   exitDraw();
+  clearTimeout(thingSaveTimer);
+  setCollection(stuff);
+  selectedPiece = '';
+  $('#thing-saved').textContent = '';
   deselectAttachment();
   stopPlacing();
   for (const c of creatures) c.dispose();
@@ -4243,11 +4274,12 @@ function replaceWorld(next: World) {
   activate(world.active);
 }
 
-function newCreation() {
-  flushCreationSave();
-  const kept = opened.keep;
+/** A fresh scene with nothing in My stuff. `keepOld` = false: the open one was just deleted. */
+function newCreation(keepOld = true) {
   if (mode !== 'shape') setMode('shape');
-  replaceWorld({ ...freshWorld(), workbench: world.workbench });
+  if (keepOld) leaveScene();
+  const kept = opened.keep;
+  replaceWorld(freshWorld(), []);
   beginCreation(null, false);
   commit();
   unlock('new');
@@ -4266,7 +4298,10 @@ async function openCreation(id: string) {
   if (!c || !list.length) return hint("That creation couldn't be opened", 2500, true);
   for (const s of list) delete s.workbench;
   if (mode === 'stuff') setMode('shape');
-  replaceWorld({ creatures: list, active: Math.min(Math.max(0, c.data.active ?? 0), list.length - 1), workbench: world.workbench, name: c.name });
+  leaveScene();
+  replaceWorld({ creatures: list, active: Math.min(Math.max(0, c.data.active ?? 0), list.length - 1), name: c.name }, c.data.stuff ?? []);
+  // and whatever its creatures wear (creations from before each kept its own stuff)
+  keepInCollection(list);
   if (c.data.look) applyLook(c.data.look);
   beginCreation(c.id, true, c);
   commit();
@@ -4441,7 +4476,9 @@ function addCreationToScene(c: SavedCreation) {
   closeLibrary();
   if (mode === 'stuff') setMode('shape');
   // a fresh scene nobody has touched yet: they take the starter creature's place
-  loadBundle({ creatures: list, stuff: [], rigs: [] }, { creatures: list.map(() => true), stuff: [], rigs: [], look: false }, !opened.keep);
+  // its My stuff comes along too
+  const stuff = structuredClone(d.stuff ?? []);
+  loadBundle({ creatures: list, stuff, rigs: [] }, { creatures: list.map(() => true), stuff: stuff.map(() => true), rigs: [], look: false }, !opened.keep);
 }
 
 async function copyCreation(c: SavedCreation) {
@@ -4478,7 +4515,7 @@ async function removeCreation(c: SavedCreation) {
   } catch {
     hint("Couldn't delete it", 2000, true);
   }
-  if (current) newCreation();
+  if (current) newCreation(false);
   void renderLibrary();
 }
 

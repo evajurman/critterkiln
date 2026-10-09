@@ -846,7 +846,8 @@ export function disposeThing(group: THREE.Object3D) {
 }
 
 // ---------------------------------------------------------------------------
-// collection (browser storage)
+// collection (browser storage): My stuff for the creation that's open. Each
+// creation keeps its own, saved along with it; this is the working copy.
 
 const LIB_KEY = 'creature-creator/stuff';
 
@@ -867,9 +868,9 @@ function writeCollection(list: Thing[]): boolean {
   }
 }
 
-/** Empty My stuff. */
-export function clearCollection() {
-  writeCollection([]);
+/** Swap My stuff for another creation's (empty for a new one). */
+export function setCollection(list: Thing[]) {
+  writeCollection(list);
 }
 
 /** Add or replace (by id). Returns false if browser storage is full. */
