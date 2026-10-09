@@ -128,12 +128,18 @@ button, input, select { font: inherit; color: inherit; }
 .brand { font-family: 'DynaPuff', system-ui, sans-serif; font-stretch: 100%; font-weight: 700; font-size: 18px; white-space: nowrap; }
 .logo { width: 26px; height: 26px; vertical-align: -6px; margin-right: 2px; }
 .spacer { flex: 1; }
-.modes { display: flex; background: var(--bg); border-radius: 999px; padding: 3px; }
-.modes button {
-  border: 0; background: transparent; padding: 6px 16px; border-radius: 999px;
-  font-weight: var(--w-bold); cursor: var(--cursor-click); color: var(--muted); white-space: nowrap;
+.modes { position: relative; display: flex; background: var(--bg); border-radius: 999px; padding: 3px; }
+/* one pill under the picked mode, slid there by src/main.ts (placeModePill) */
+.modes::before {
+  content: ''; position: absolute; top: 3px; bottom: 3px; left: 0; width: var(--pill-w, 0);
+  translate: var(--pill-x, 0) 0; border-radius: 999px; background: var(--panel); box-shadow: 0 1px 4px rgba(0,0,0,.1);
 }
-.modes button.active { background: var(--panel); color: var(--ink); box-shadow: 0 1px 4px rgba(0,0,0,.1); }
+.modes.slide::before { transition: translate .35s cubic-bezier(.3, 1.35, .5, 1), width .35s cubic-bezier(.3, 1.35, .5, 1), background .2s; }
+.modes button {
+  position: relative; border: 0; background: transparent; padding: 6px 16px; border-radius: 999px;
+  font-weight: var(--w-bold); cursor: var(--cursor-click); color: var(--muted); white-space: nowrap; transition: color .2s;
+}
+.modes button.active { color: var(--ink); }
 .tools { display: flex; gap: 6px; }
 .tools button {
   border: 1px solid var(--line); background: var(--panel); padding: 6px 12px;
@@ -857,6 +863,45 @@ button.piece-icon { padding: 0; }
 body.carrying, body.carrying * { cursor: grabbing !important; }
 .eye-placed { margin: 4px 0; }
 #eye-spacing-row[hidden], #eye-height-row[hidden], .eye-placed[hidden] { display: none; }
+
+/* ---------- popups: pop open, fade shut ----------
+   @starting-style gives the opening a start; display transitions keep a closing one on
+   screen until it has faded (browsers without them just open and close instantly) */
+.popover, .eyes-card, .draw-bar {
+  transform-origin: top right;
+  transition: opacity .18s ease-out, scale .26s cubic-bezier(.3, 1.45, .5, 1), translate .26s cubic-bezier(.3, 1.45, .5, 1),
+    display .26s allow-discrete;
+}
+.popover[hidden], .eyes-card[hidden], .draw-bar[hidden] {
+  opacity: 0; scale: .92; translate: 0 -6px;
+  transition: opacity .12s ease-in, scale .12s ease-in, translate .12s ease-in, display .12s allow-discrete;
+}
+@starting-style {
+  .popover:not([hidden]), .eyes-card:not([hidden]), .draw-bar:not([hidden]) { opacity: 0; scale: .92; translate: 0 -6px; }
+}
+/* the ones on the left grow from their left corner, the centred ones from their middle */
+.attach-pop, .eyes-card { transform-origin: top left; }
+/* (their translate(-50%, -50%) centring runs before scale, which puts their middle at the box's corner) */
+.popover:is(.library-pop, .trophy-pop, .load-pop) { transform-origin: 0 0; }
+/* the floating bars (drawing, Arrange, attaching) drop in from their top middle; same translate(-50%) story */
+.draw-bar { transform-origin: 0 0; }
+@media (max-width: 760px) { .popover:is(.library-pop, .trophy-pop, .load-pop), .draw-bar { transform-origin: top center; } }
+.popover:is(.library-pop, .trophy-pop, .load-pop)[hidden] { translate: none; }
+@starting-style {
+  .popover:is(.library-pop, .trophy-pop, .load-pop):not([hidden]) { translate: none; }
+}
+/* the eye settings slide open and shut under their title */
+.eyes-body {
+  interpolate-size: allow-keywords;
+  transition: height .24s cubic-bezier(.3, 1.1, .5, 1), padding .24s, opacity .2s, display .24s allow-discrete;
+}
+.eyes-card.folded .eyes-body { height: 0; padding-bottom: 0; opacity: 0; }
+@starting-style {
+  .eyes-card:not(.folded) .eyes-body { height: 0; padding-bottom: 0; opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .popover, .eyes-card, .draw-bar, .popover[hidden], .eyes-card[hidden], .draw-bar[hidden], .eyes-body, .modes.slide::before { transition-duration: 0s; }
+}
 
 /* ---------- icons: two-tone styles whose fill shows only in the Color theme ---------- */
 .fa-slab-duo, .fa-duotone { --fa-secondary-opacity: 0; }

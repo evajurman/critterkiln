@@ -3762,13 +3762,17 @@ $('#attach-pop-close').onclick = () => ($('#attach-pop').hidden = true);
 // from Shape: stuff is placed and styled in Look, so go there with this part still picked
 $('#rig-attach').onclick = () => {
   if (mode !== 'look') setMode('look');
+  closeTopPopovers();
   $('#attach-pop').hidden = false;
   renderCollection();
 };
 $('#attach-mat').onclick = () => {
   const pop = $('#attach-mat-pop');
   pop.hidden = !pop.hidden;
-  if (!pop.hidden) renderAttachMaterial();
+  if (!pop.hidden) {
+    closeTopPopovers();
+    renderAttachMaterial();
+  }
 };
 $('#attach-mat-close').onclick = () => ($('#attach-mat-pop').hidden = true);
 document.querySelectorAll<HTMLButtonElement>('#attach-bar [data-gizmo]').forEach((b) => {
@@ -3817,7 +3821,19 @@ function togglePopover(pop: string): boolean {
     $(p).hidden = !(open && p === pop);
     $(b).classList.toggle('on', open && p === pop);
   }
+  // one menu at a time: the Attach popups would sit under Creations or Trophies
+  if (open) closeAttachPops();
   return open;
+}
+function closeTopPopovers() {
+  for (const [b, p] of POPOVERS) {
+    $(p).hidden = true;
+    $(b).classList.remove('on');
+  }
+}
+function closeAttachPops() {
+  $('#attach-pop').hidden = true;
+  $('#attach-mat-pop').hidden = true;
 }
 
 $('#file-btn').onclick = () => {
@@ -5093,6 +5109,7 @@ function setMode(m: Mode) {
   mode = m;
   if (m !== 'shape') unlock(m);
   document.querySelectorAll<HTMLButtonElement>('.modes button').forEach((b) => b.classList.toggle('active', b.dataset.mode === m));
+  placeModePill();
   // the Color theme tints the panels by mode
   document.documentElement.dataset.mode = m;
   $('#parts-sec').hidden = m === 'stuff';
@@ -5687,6 +5704,19 @@ function fitTopbar() {
   bar.classList.toggle('compact', bar.scrollWidth > bar.clientWidth || tools.scrollWidth > tools.clientWidth);
 }
 new ResizeObserver(fitTopbar).observe($('.topbar'));
+/** The Shape / Look / Stuff switch has one pill that slides under whichever is picked. */
+function placeModePill() {
+  const modes = $('.modes');
+  const on = modes.querySelector<HTMLElement>('button.active');
+  if (!on) return;
+  modes.style.setProperty('--pill-x', `${on.offsetLeft}px`);
+  modes.style.setProperty('--pill-w', `${on.offsetWidth}px`);
+}
+// labels dropping (compact) or the font loading change the widths
+new ResizeObserver(placeModePill).observe($('.modes'));
+document.fonts.ready.then(placeModePill);
+// only slide once it has found its first spot
+requestAnimationFrame(() => requestAnimationFrame(() => $('.modes').classList.add('slide')));
 document.fonts.ready.then(fitTopbar); // the icon font and the text font change the buttons' widths
 installScrollbars();
 installCursorPress();
