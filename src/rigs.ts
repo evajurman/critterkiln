@@ -36,6 +36,8 @@ export interface BoneDef {
   mirror?: boolean;
   /** IK chains stop before reaching this bone. */
   anchor?: boolean;
+  /** detached: its base can slide anywhere, even back onto its parent's tip */
+  loose?: boolean;
   /** Filled in by expansion: the part whose drawing this bone reuses. */
   mirrorOf?: string;
 }
@@ -546,6 +548,8 @@ export function splitBone(rig: RigState, sceneId: string): SplitResult | null {
     width: wMid,
     widthEnd: w1,
     anchor: false,
+    // the lower half keeps any detached base; the upper one sits on its tip
+    loose: undefined,
   };
   if (d.bendy && d.bend) {
     upper.bend = d.bend / 2;
@@ -595,6 +599,26 @@ export function extendBone(rig: RigState, sceneId: string): PartCopy[] {
     mirror,
   });
   return [{ from: partSrc(def), to: mirror ? id + 'L' : id }];
+}
+
+/**
+ * Detach a bone from its parent's tip so its base can slide anywhere (like a
+ * Bone sprouted from the side); it still hangs off the parent and moves with it.
+ */
+export function detachBone(rig: RigState, sceneId: string): PartCopy[] {
+  const f = findDef(rig, sceneId);
+  if (f?.def.parent) f.def.loose = true;
+  return [];
+}
+
+/** Snap a detached bone's base back onto its parent's tip; everything on it follows. */
+export function reattachBone(rig: RigState, sceneId: string): PartCopy[] {
+  const f = findDef(rig, sceneId);
+  const parent = f && expandRig(rig).bones.find((b) => b.id === f.ex.parent);
+  if (!f || !parent) return [];
+  moveJoint(rig, sceneId, 'start', sub3(parent.end, f.ex.start));
+  delete f.def.loose;
+  return [];
 }
 
 /** Copy a bone and everything hanging off it, nudged down so it's visible. */

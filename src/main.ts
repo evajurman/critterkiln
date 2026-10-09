@@ -60,6 +60,7 @@ import {
   addLimb,
   deleteLimb,
   deleteSavedRig,
+  detachBone,
   duplicateLimb,
   expandRig,
   extendBone,
@@ -68,6 +69,7 @@ import {
   mirrorTarget,
   moveJoint,
   partIds,
+  reattachBone,
   rigFromTemplate,
   rollLimb,
   saveRig,
@@ -5240,6 +5242,16 @@ function renderRigPanel() {
   }
   $('#rig-attach').hidden = !b || idle;
   $<HTMLButtonElement>('#rig-split').disabled = !b;
+  // a part on its parent's tip can come off it; one that's off can go back
+  const detach = $<HTMLButtonElement>('#rig-detach');
+  const loose = !!b && b.attach;
+  iconLabel(detach, faClassic(loose ? 'link' : 'link-slash'), loose ? 'Reattach' : 'Detach');
+  detach.title = isRoot
+    ? 'The first part holds everything else, so it has nothing to come off'
+    : loose
+      ? 'Snap the base of this part back onto the tip of the part it hangs off'
+      : 'Unhook this part from the tip it grew from, so its base can slide anywhere';
+  detach.disabled = !b || isRoot;
   $('#rig-pair-note').textContent = paired ? 'Mirrored pair: both sides move together.' : '';
   $<HTMLInputElement>('#rig-sym').checked = rigLocked();
   $<HTMLInputElement>('#keep-floor').checked = state.keepFloor !== false;
@@ -5391,6 +5403,12 @@ $<HTMLInputElement>('#rig-title').onkeydown = (e) => {
 };
 
 $('#rig-extend').onclick = () => rigEdit((rig) => extendBone(rig, selected), false);
+$('#rig-detach').onclick = () => {
+  if (!creature.bones.get(selected)?.parent) return;
+  const loose = creature.bones.get(selected)!.attach;
+  rigEdit((rig) => (loose ? reattachBone : detachBone)(rig, selected), false);
+  hint(loose ? 'Back on the tip' : 'Detached: drag the purple grip at its base to move it', 2200);
+};
 $('#rig-dup').onclick = () => rigEdit((rig) => duplicateLimb(rig, selected), true);
 $('#rig-unlink').onclick = () => rigEdit((rig) => unlinkPair(rig, selected), true);
 /**

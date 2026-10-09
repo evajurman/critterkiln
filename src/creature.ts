@@ -639,7 +639,7 @@ export class Creature {
       startHandle.userData.kind = 'start';
       startHandle.visible = false;
       pivot.add(startHandle);
-      const attach = !parent || new THREE.Vector3(...def.start).distanceTo(new THREE.Vector3(...parent.def.end)) > 0.02;
+      const attach = !parent || !!def.loose || new THREE.Vector3(...def.start).distanceTo(new THREE.Vector3(...parent.def.end)) > 0.02;
 
       const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(bonePoints(bd)), lineMat);
 
