@@ -369,7 +369,12 @@ function render() {
   for (const [p] of PLACE_NAMES) container(p).replaceChildren();
   document.body.classList.toggle('ck-editing', editing);
   renderBanner();
-  if (!tab) return sync();
+  if (!tab) {
+    // Stuff isn't arranged: it just keeps the camera views bottom right
+    const cam = SECTIONS.find((s) => s.id === 'camera')!;
+    container('br').append(sectionEl({ ...cam, tools: [...cam.tools], place: 'br' }));
+    return sync();
+  }
   const tray = container('hidden');
   tray.append(el('div', 'ck-tray-title', 'Hidden <span class="muted">· drop sections here to hide them</span>'));
   for (const s of layout().sections) container(s.place).append(sectionEl(s));

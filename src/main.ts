@@ -2700,6 +2700,7 @@ function refreshPieceGizmo() {
   if (!on) {
     if (piecePivot && gizmo.object === piecePivot) gizmo.detach();
     piecePivot = null;
+    unwrapPieces();
     return;
   }
   // still wrapped round this piece's current mesh: nothing to do
@@ -2707,12 +2708,15 @@ function refreshPieceGizmo() {
     setPieceMode(pieceMode);
     return;
   }
+  // a piece picked before (and left unchanged) is still in its pivot: put it back first
+  unwrapPieces();
   const mesh = bench!.children.find((m) => m.userData.pieceId === p.id);
   if (!mesh) return;
   const b = bounds(p.outline);
   const c = new THREE.Vector2((b.minX + b.maxX) / 2, (b.minY + b.maxY) / 2);
   // holder = the piece's plane in the thing; pivot = its middle on that plane
   const holder = new THREE.Group();
+  holder.userData.pieceHolder = true;
   holder.position.copy(mesh.position);
   holder.quaternion.copy(mesh.quaternion);
   const pivot = new THREE.Group();
@@ -2728,6 +2732,22 @@ function refreshPieceGizmo() {
   gizmo.attach(pivot);
   setPieceMode(pieceMode);
   $('#piece-name').textContent = `Piece ${workbench().pieces.indexOf(p) + 1}`;
+}
+
+/** Take every piece out of the pivot it was wrapped in for the gizmo, back onto the bench where it sits. */
+function unwrapPieces() {
+  if (!bench) return;
+  for (const holder of bench.children.filter((o) => o.userData.pieceHolder)) {
+    holder.traverse((o) => o.updateMatrix());
+    const pivot = holder.children[0];
+    for (const mesh of [...(pivot?.children ?? [])]) {
+      // its spot on the bench: the holder's, carried through the pivot
+      mesh.matrix.premultiply(pivot.matrix).premultiply(holder.matrix);
+      mesh.matrix.decompose(mesh.position, mesh.quaternion, mesh.scale);
+      bench.add(mesh);
+    }
+    bench.remove(holder);
+  }
 }
 
 function setPieceMode(m: PieceMode) {
@@ -3040,12 +3060,17 @@ function renderStuffPanel() {
       renderStuffPanel();
       enterDraw({ kind: 'piece', redraw: p.id });
     };
+    const copy = document.createElement('button');
+    copy.className = 'piece-icon';
+    copy.innerHTML = fa('copy');
+    copy.title = 'Copy this piece';
+    copy.onclick = () => copyPiece(p.id);
     const del = document.createElement('button');
     del.className = 'piece-icon';
     del.innerHTML = fa('xmark');
     del.title = 'Delete this piece';
     del.onclick = () => deletePiece(p.id);
-    row.append(pick, edit, del);
+    row.append(pick, edit, copy, del);
     list.append(row);
   });
   if (!wb.pieces.length) list.innerHTML = '<p class="muted small">No pieces yet: draw one to start.</p>';
@@ -3165,6 +3190,24 @@ function renderCollection() {
 }
 
 $('#piece-draw').onclick = () => enterDraw({ kind: 'piece' });
+/** A copy of a piece, nudged aside so it shows, right after it and picked. */
+function copyPiece(id: string) {
+  if (drawState) exitDraw();
+  const wb = workbench();
+  const i = wb.pieces.findIndex((p) => p.id === id);
+  if (i < 0) return;
+  const twin: Piece = { ...structuredClone(wb.pieces[i]), id: uid() };
+  const nudge = ([x, y]: Vec2): Vec2 => [x + 0.08, y - 0.08];
+  twin.outline = twin.outline.map(nudge);
+  twin.holes = twin.holes.map((l) => l.map(nudge));
+  wb.pieces.splice(i + 1, 0, twin);
+  selectedPiece = twin.id;
+  syncWorkbench();
+  commit();
+  renderStuffPanel();
+  flashPart();
+  autosaveThing();
+}
 function deletePiece(id: string) {
   if (drawState) exitDraw();
   const wb = workbench();
