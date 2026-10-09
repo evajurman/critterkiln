@@ -5058,6 +5058,12 @@ function renderEyes() {
       sw.append(b);
     }
     $<HTMLInputElement>('#eye-color').value = current;
+    // the lids, crescent and tilt reshape a bead or a dot; a button stays round
+    $('#eye-shape').hidden = e.style === 'button';
+    $<HTMLInputElement>('#eye-lid-top').value = String(e.lidTop ?? 1);
+    $<HTMLInputElement>('#eye-lid-bottom').value = String(e.lidBottom ?? -1);
+    $<HTMLInputElement>('#eye-crescent').value = String(e.crescent ?? 0);
+    $<HTMLInputElement>('#eye-tilt').value = String(e.tilt ?? 0);
   }
 }
 
@@ -6147,7 +6153,7 @@ function setEyeLook(fn: (e: CreatureState['eyes']) => void) {
   commit();
   renderEyes();
 }
-for (const [id, key] of [['#eye-shine', 'shine'], ['#eye-pupil', 'pupil'], ['#eye-look-x', 'lookX'], ['#eye-look-y', 'lookY'], ['#eye-cross', 'cross']] as const) {
+for (const [id, key] of [['#eye-shine', 'shine'], ['#eye-pupil', 'pupil'], ['#eye-look-x', 'lookX'], ['#eye-look-y', 'lookY'], ['#eye-cross', 'cross'], ['#eye-lid-top', 'lidTop'], ['#eye-lid-bottom', 'lidBottom'], ['#eye-crescent', 'crescent'], ['#eye-tilt', 'tilt']] as const) {
   const input = $<HTMLInputElement>(id);
   input.oninput = () => {
     state.eyes[key] = parseFloat(input.value);
@@ -6155,6 +6161,13 @@ for (const [id, key] of [['#eye-shine', 'shine'], ['#eye-pupil', 'pupil'], ['#ey
   };
   input.onchange = () => commit();
 }
+$('#eye-shape-reset').onclick = () =>
+  setEyeLook((e) => {
+    delete e.lidTop;
+    delete e.lidBottom;
+    delete e.crescent;
+    delete e.tilt;
+  });
 document.querySelectorAll<HTMLButtonElement>('#eye-finish button').forEach((b) => {
   b.onclick = () => setEyeLook((e) => (e.finish = b.dataset.finish as EyeFinish));
 });

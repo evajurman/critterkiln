@@ -500,7 +500,8 @@ body.ck-editing .panel.idle .idle-note { display: none; }
 .dot.green { background: #22c55e; }
 .dot.diamond { border-radius: 2px; transform: rotate(45deg) scale(.85); }
 
-#eye-look[hidden], #eye-pupil-look[hidden] { display: none; }
+#eye-look[hidden], #eye-pupil-look[hidden], #eye-shape[hidden] { display: none; }
+#eye-shape { margin-top: 8px; }
 #eye-pupil-look { margin-top: 8px; }
 #eye-look { margin-top: 8px; }
 .eye-swatches { grid-template-columns: repeat(8, 1fr); margin: 6px 0; }

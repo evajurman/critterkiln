@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { bvhFor, exactDistance, sharedNormals } from './distance';
 import { buildSkin, paintSkin, type SkinPart } from './skin';
 import { buildInflatedGeometry, defaultOutline, getMeshDetail, type Solid, type Vec2 } from './inflate';
@@ -120,6 +120,14 @@ export interface EyesState {
   lookY?: number;
   /** googly / sticker: -1 the pupils look away from each other .. 1 they meet in front of the nose */
   cross?: number;
+  /** bead / dot: where the upper lid cuts the eye, -1 (bottom) .. 1 (open, the default) */
+  lidTop?: number;
+  /** bead / dot: where the lower lid cuts the eye, -1 (open, the default) .. 1 (top) */
+  lidBottom?: number;
+  /** bead / dot: -1 both lids sag into a cup .. 1 they arch up into a happy crescent */
+  crescent?: number;
+  /** bead / dot: -1 inner corners up (worried) .. 1 inner corners down (angry) */
+  tilt?: number;
   /** legacy: one stand-off for every pair (now per pair) */
   lift?: number;
   /** legacy: radians every pair is turned round the head (now per pair) */
@@ -2305,6 +2313,59 @@ function realSphere(sx: number, sy: number, sz: number): THREE.BufferGeometry {
   return g;
 }
 
+const shapedSphereGeo = new THREE.SphereGeometry(1, 64, 40);
+
+/**
+ * A bead / dot squeezed into an expression: the lids cut it top and bottom
+ * (each column keeps a round cross-section, so the cut eye stays a smooth
+ * pebble with tapered corners), the crescent bends it into an arch or a cup,
+ * and the tilt turns it, mirrored so both eyes lean toward or away from the nose.
+ */
+function shapedEye(sx: number, sy: number, sz: number, sgn: number, e: EyesState): THREE.BufferGeometry {
+  const top = e.lidTop ?? 1;
+  const bottom = e.lidBottom ?? -1;
+  const crescent = e.crescent ?? 0;
+  const tilt = e.tilt ?? 0;
+  if (top >= 1 && bottom <= -1 && !crescent && !tilt) return realSphere(sx, sy, sz);
+
+  // the lids never quite meet
+  const t = Math.min(1, Math.max(top, bottom + 0.08));
+  const b = Math.max(-1, Math.min(bottom, t - 0.08));
+  // how far across the cut eye reaches: where the circle still spans both lids
+  const cut = Math.max(0, b, -t);
+  const reach = Math.sqrt(1 - cut * cut);
+  const bend = crescent * 0.7;
+  // mirrored, so +tilt drops each eye's inner corner (local -X faces the nose on the left eye)
+  const angle = (sgn || 1) * tilt * (Math.PI / 4);
+  const cos = Math.cos(angle), sin = Math.sin(angle);
+
+  const g = shapedSphereGeo.clone();
+  g.deleteAttribute('normal');
+  g.deleteAttribute('uv');
+  const pos = g.getAttribute('position') as THREE.BufferAttribute;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    const h = Math.sqrt(Math.max(0, 1 - x * x));
+    // squeezed across so the cut eye ends in a point rather than a collapsed sliver
+    const nx = x * reach;
+    const nh = Math.sqrt(Math.max(0, 1 - nx * nx));
+    const lo = Math.max(b, -nh), hi = Math.min(t, nh);
+    const mid = (lo + hi) / 2, half = Math.max(0, (hi - lo) / 2);
+    // each column of the sphere becomes a circle spanning just the open part
+    const k = h > 1e-6 ? half / h : 0;
+    // the arch rises in the middle, kept centred on the eye
+    const ny = mid + y * k + bend * (0.5 - x * x);
+    const px = nx * sx, py = ny * sy;
+    pos.setXYZ(i, px * cos - py * sin, px * sin + py * cos, z * k * sz);
+  }
+  const merged = mergeVertices(g);
+  g.dispose();
+  merged.computeVertexNormals();
+  // low-poly materials read per-vertex color
+  merged.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(merged.getAttribute('position').count * 3).fill(1), 3));
+  return merged;
+}
+
 /** Material for bead / dot / button eyes. */
 function eyeMaterial(finish: EyeFinish, color: string, headStyle: StyleId, headSettings: StyleSettings): THREE.Material {
   switch (finish) {
@@ -2400,12 +2461,12 @@ function buildEye(style: EyeStyle, r: number, sgn: number, headStyle: StyleId, h
     }
     case 'bead': {
       // a bead, by default in the creature's own material
-      add(realSphere(r * 0.8, r * 0.8, r * 0.8), eyeMaterial(finish, e.color ?? '#1d1a22', headStyle, headSettings), [0, 0, -r * 0.3], [1, 1, 1]);
+      add(shapedEye(r * 0.8, r * 0.8, r * 0.8, sgn, e), eyeMaterial(finish, e.color ?? '#1d1a22', headStyle, headSettings), [0, 0, -r * 0.3], [1, 1, 1]);
       break;
     }
     case 'dot': {
       // a flat disc of dark wool/clay pressed onto the face
-      add(realSphere(r * 0.95, r * 0.95, r * 0.28), eyeMaterial(finish, e.color ?? '#2a2730', headStyle, headSettings), [0, 0, 0], [1, 1, 1]);
+      add(shapedEye(r * 0.95, r * 0.95, r * 0.28, sgn, e), eyeMaterial(finish, e.color ?? '#2a2730', headStyle, headSettings), [0, 0, 0], [1, 1, 1]);
       break;
     }
     case 'button': {

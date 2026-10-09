@@ -204,6 +204,18 @@
                   </div>
                   <div class="swatches eye-swatches" id="eye-swatches"></div>
                   <label class="color-pick"><input id="eye-color" type="color" /> Eye color</label>
+                  <div id="eye-shape">
+                    <div class="sub-title">Expression</div>
+                    <label class="slider" title="Bring the upper lid down over the eye"><span>Upper lid</span><input id="eye-lid-top" type="range" min="-0.8" max="1" step="0.01" />
+                      <span class="ends"><em>low</em><em>open</em></span></label>
+                    <label class="slider" title="Bring the lower lid up over the eye"><span>Lower lid</span><input id="eye-lid-bottom" type="range" min="-1" max="0.8" step="0.01" />
+                      <span class="ends"><em>open</em><em>high</em></span></label>
+                    <label class="slider" title="Bend both lids: down into a cup, or up into a happy crescent"><span>Crescent</span><input id="eye-crescent" type="range" min="-1" max="1" step="0.01" />
+                      <span class="ends"><em>cup</em><em>arch</em></span></label>
+                    <label class="slider" title="Lean the eyes: inner corners up, or down toward the nose"><span>Tilt</span><input id="eye-tilt" type="range" min="-1" max="1" step="0.01" />
+                      <span class="ends"><em>worried</em><em>angry</em></span></label>
+                    <button id="eye-shape-reset" class="ghost" title="Back to round, open eyes"><i class="fa-slab-duo fa-regular fa-circle" aria-hidden="true"></i> Round eyes</button>
+                  </div>
                 </div>
               </div>
             </div>
