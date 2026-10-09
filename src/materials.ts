@@ -97,6 +97,11 @@ export const STYLE_PARAMS: Record<StyleId, StyleParam[]> = {
     { key: 'ink', label: 'Ink width', min: 0, max: 0.04, step: 0.001, value: 0.012 },
     { key: 'bands', label: 'Shade steps', min: 2, max: 6, step: 1, value: 3 },
     { key: 'shadow', label: 'Shadow depth', min: 0, max: 0.95, step: 0.01, value: 0.55 },
+    // the pencil sliders: together they turn the cel look into a hand-drawn sketch
+    { key: 'hatch', label: 'Pencil hatching', min: 0, max: 1, step: 0.01, value: 0 },
+    { key: 'grain', label: 'Paper grain', min: 0, max: 1, step: 0.01, value: 0 },
+    { key: 'wobble', label: 'Line wobble', min: 0, max: 1, step: 0.01, value: 0 },
+    { key: 'boil', label: 'Line boil', min: 0, max: 1, step: 0.01, value: 0 },
   ],
 };
 
@@ -867,6 +872,128 @@ function getToonGradient(bands: number, shadow: number) {
 }
 
 // ---------------------------------------------------------------------------
+// Pencil: toon's hand-drawn sliders (hatching, paper grain, line wobble, boil)
+
+/** Which redraw of a boiling line it is: shared by every pencil material. */
+const sketchFrame = { value: 0 };
+/** Screen pixels per CSS pixel, so hatching keeps its spacing on any display. */
+const sketchPx = { value: window.devicePixelRatio || 1 };
+/** Materials whose lines boil: while any are alive, the drawing is redrawn a few times a second. */
+const boiling = new Set<THREE.Material>();
+function watchBoil(m: THREE.Material) {
+  boiling.add(m);
+  m.addEventListener('dispose', () => boiling.delete(m));
+}
+/** Redraws a second for Line boil, like a hand-drawn animation shot on threes. */
+const BOIL_FPS = 8;
+/** Moves boiling lines on. True when there's a new frame to draw. */
+export function tickSketch(now: number): boolean {
+  if (!boiling.size) return false;
+  const f = Math.floor((now / 1000) * BOIL_FPS) % 1000;
+  if (f === sketchFrame.value) return false;
+  sketchFrame.value = f;
+  return true;
+}
+/** Screen pixels per CSS pixel the scene is drawn at. */
+export function setSketchPixelRatio(r: number) {
+  sketchPx.value = r;
+}
+
+const SKETCH_GLSL = /* glsl */ `
+  uniform float sketchFrame, sketchPx, sketchWobble, sketchGrain, sketchBoil;
+  float sketchHash(vec3 p) {
+    p = fract(p * 0.3183099 + 0.1);
+    p *= 17.0;
+    return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+  }
+  float vnoise3(vec3 x) {
+    vec3 i = floor(x), f = fract(x);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(
+      mix(mix(sketchHash(i), sketchHash(i + vec3(1, 0, 0)), f.x), mix(sketchHash(i + vec3(0, 1, 0)), sketchHash(i + vec3(1, 1, 0)), f.x), f.y),
+      mix(mix(sketchHash(i + vec3(0, 0, 1)), sketchHash(i + vec3(1, 0, 1)), f.x), mix(sketchHash(i + vec3(0, 1, 1)), sketchHash(i + vec3(1, 1, 1)), f.x), f.y),
+      f.z);
+  }
+  float vnoise2(vec2 p) { return vnoise3(vec3(p, 0.5)); }
+  // where the noise is read from: still, or moved on with each boiled redraw
+  float sketchSeed() { return sketchBoil > 0.0 ? sketchBoil * (sketchHash(vec3(sketchFrame, 1.3, 7.1)) * 2.0 - 1.0) : 0.0; }
+`;
+
+const HATCH_GLSL = /* glsl */ `
+  uniform float sketchHatch;
+  // one set of parallel pencil strokes across the screen, 'spacing' CSS pixels apart
+  float hatchLayer(vec2 p, float ang, float spacing, float seed) {
+    vec2 d = vec2(cos(ang), sin(ang));
+    float u = dot(p, d), v = dot(p, vec2(-d.y, d.x));
+    // a hand doesn't rule straight lines
+    u += (vnoise2(vec2(v * 0.015, seed)) - 0.5) * spacing * 0.9;
+    float row = floor(u / spacing);
+    float f = fract(u / spacing);
+    // each stroke presses harder in places, and stops and starts
+    float press = 0.5 + 0.5 * vnoise2(vec2(v * 0.03 + row * 7.3, row * 0.37 + seed));
+    float w = 0.12 + 0.16 * press;
+    float line = 1.0 - smoothstep(w, w + 0.14, abs(f - 0.5));
+    float gap = smoothstep(0.18, 0.34, vnoise2(vec2(v * 0.011 + row * 3.1, row * 1.7 + seed + 40.0)));
+    return line * (0.45 + 0.55 * press) * gap;
+  }
+`;
+
+/** How bright toon's lit side comes out: the light reaching it, over its own color. */
+const TOON_LIT = 1.25;
+
+/**
+ * Toon's pencil sliders: Pencil hatching draws the shading in strokes (one
+ * way in the half-tones, crossed in the shadows, a third way in the deepest)
+ * instead of flat bands, and Paper grain gives everything a paper tooth.
+ */
+function sketchToon(m: THREE.MeshToonMaterial, k: StyleSettings): THREE.Material {
+  const hatch = k.hatch ?? 0, grain = k.grain ?? 0, boil = k.boil ?? 0;
+  if (hatch <= 0 && grain <= 0) return m;
+  m.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, {
+      sketchFrame,
+      sketchPx,
+      sketchHatch: { value: hatch },
+      sketchGrain: { value: grain },
+      sketchBoil: { value: boil },
+      sketchWobble: { value: 0 },
+    });
+    shader.fragmentShader =
+      SKETCH_GLSL +
+      HATCH_GLSL +
+      shader.fragmentShader.replace(
+        '#include <opaque_fragment>',
+        `{
+           vec2 sp = gl_FragCoord.xy / sketchPx;
+           float seed = sketchSeed();
+           float tooth = vnoise2(sp * 0.9 + seed * 13.0);
+           if (sketchHatch > 0.0) {
+             vec3 lit = diffuseColor.rgb * ${TOON_LIT.toFixed(3)};
+             float lum = dot(outgoingLight, vec3(0.3, 0.59, 0.11)) / max(dot(lit, vec3(0.3, 0.59, 0.11)), 1e-4);
+             float dark = clamp(1.0 - lum, 0.0, 1.0);
+             // boiling also turns the strokes a touch and shifts them along
+             vec2 jp = sp + seed * vec2(23.0, 11.0);
+             float tilt = seed * 0.12;
+             float s1 = hatchLayer(jp, 0.8 + tilt, 5.0, 1.0) * smoothstep(0.06, 0.16, dark);
+             float s2 = hatchLayer(jp, -0.75 + tilt, 5.0, 9.0) * smoothstep(0.32, 0.42, dark);
+             float s3 = hatchLayer(jp, 0.05 + tilt, 3.5, 17.0) * smoothstep(0.58, 0.68, dark);
+             float ink = 1.0 - (1.0 - s1) * (1.0 - s2) * (1.0 - s3);
+             // graphite skips over the paper's tooth
+             ink *= mix(1.0, smoothstep(0.1, 0.6, tooth), sketchGrain);
+             // colored pencil: strokes in a deep shade of the part's own color
+             vec3 lead = mix(lit * 0.3, vec3(0.16, 0.15, 0.17), 0.35);
+             outgoingLight = mix(outgoingLight, mix(lit, lead, ink * 0.92), sketchHatch);
+           }
+           outgoingLight *= 1.0 - sketchGrain * 0.16 * (1.0 - tooth);
+         }
+         #include <opaque_fragment>`,
+      );
+  };
+  if (boil > 0) watchBoil(m);
+  return m;
+}
+
+// ---------------------------------------------------------------------------
 // Triplanar texturing in object space: no stretching on the steep sides of
 // inflated shapes, and the pattern stays glued to the part when posed.
 
@@ -1275,7 +1402,7 @@ export function makeMaterial(style: StyleId, color: string, settings: StyleSetti
       );
     }
     case 'toon':
-      return new THREE.MeshToonMaterial({ color: c, gradientMap: getToonGradient(Math.round(k.bands), k.shadow) });
+      return sketchToon(new THREE.MeshToonMaterial({ color: c, gradientMap: getToonGradient(Math.round(k.bands), k.shadow) }), k);
     case 'patchwork': {
       const p = getPatchwork(k.variety, k.prints, k.stitches);
       return triplanar(
@@ -1577,22 +1704,58 @@ export function castsShadow(style: StyleId) {
  * pushed out along the geometry's `inkNormal` attribute (see inkNormals), so
  * shapes with hard edges get one unbroken outline instead of split shards.
  */
-export function makeOutlineMaterial(width = 0.012, smooth = false): THREE.Material {
+export function makeOutlineMaterial(width = 0.012, smooth = false, k?: StyleSettings, unit = 1): THREE.Material {
   const m = new THREE.MeshBasicMaterial({ color: 0x2b2024, side: THREE.BackSide });
-  if (smooth) m.defines = { INK_NORMAL: '' };
+  const wobble = k?.wobble ?? 0, grain = k?.grain ?? 0, boil = k?.boil ?? 0;
+  const sketch = wobble > 0 || grain > 0;
+  m.defines = {};
+  if (smooth) m.defines.INK_NORMAL = '';
+  if (sketch) m.defines.SKETCH = '';
   m.onBeforeCompile = (shader) => {
-    shader.uniforms.outlineWidth = { value: width };
+    Object.assign(shader.uniforms, {
+      outlineWidth: { value: width },
+      sketchFrame,
+      sketchPx,
+      sketchWobble: { value: wobble },
+      sketchGrain: { value: grain },
+      sketchBoil: { value: boil },
+      // the wobble's waves keep their size in the world, however the piece is scaled
+      sketchFreq: { value: 9 * unit },
+    });
     shader.vertexShader =
       'uniform float outlineWidth;\n#ifdef INK_NORMAL\nattribute vec3 inkNormal;\n#endif\n' +
+      '#ifdef SKETCH\n' + SKETCH_GLSL + '\nuniform float sketchFreq;\n#endif\n' +
       shader.vertexShader.replace(
         '#include <begin_vertex>',
-        `#ifdef INK_NORMAL
-           vec3 transformed = position + inkNormal * outlineWidth;
+        `float inkWidth = outlineWidth;
+         #ifdef SKETCH
+           // pen pressure: the line swells and thins (to nothing, at full wobble)
+           // along the outline, and with boil it's redrawn a little differently each frame
+           vec3 wp = position * sketchFreq + sketchSeed() * vec3(1.7, 9.2, 3.1);
+           float pressure = (vnoise3(wp) - 0.5) * 1.4 + (vnoise3(wp * 2.7) - 0.5) * 0.6;
+           inkWidth *= max(0.0, 1.0 + sketchWobble * 2.2 * pressure);
+         #endif
+         #ifdef INK_NORMAL
+           vec3 transformed = position + inkNormal * inkWidth;
          #else
-           vec3 transformed = position + normal * outlineWidth;
+           vec3 transformed = position + normal * inkWidth;
          #endif`,
       );
+    if (sketch)
+      shader.fragmentShader =
+        SKETCH_GLSL +
+        shader.fragmentShader.replace(
+          '#include <opaque_fragment>',
+          `// a pencil line: soft graphite grey, mottled where the paper's tooth
+           // catches it, and here and there broken
+           vec2 sp = gl_FragCoord.xy / sketchPx;
+           float tooth = vnoise2(sp * 0.9 + sketchSeed() * 13.0);
+           if (tooth < sketchGrain * 0.3) discard;
+           outgoingLight = mix(outgoingLight, vec3(0.24, 0.24, 0.26) * (0.75 + 0.5 * tooth), sketchGrain * 0.7);
+           #include <opaque_fragment>`,
+        );
   };
+  if (boil > 0) watchBoil(m);
   m.userData.ink = true;
   return m;
 }

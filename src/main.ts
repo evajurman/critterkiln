@@ -50,7 +50,7 @@ import {
   type Thing,
   type Wearer,
 } from './stuff';
-import { FUR_LAYER, STYLE_PARAMS, STYLES, makeMaterial, setFuzzQuality, setGlassEnvironment, styleSettings, type StyleId } from './materials';
+import { FUR_LAYER, STYLE_PARAMS, STYLES, makeMaterial, setFuzzQuality, setGlassEnvironment, setSketchPixelRatio, styleSettings, tickSketch, type StyleId } from './materials';
 import { installScrollbars } from './scrollbars';
 import { installCursorPress } from './cursorPress';
 import { deleteCreation, getCreation, keepStorage, listCreations, putCreation, type Creation } from './library';
@@ -122,6 +122,7 @@ setFuzzQuality(QUALITY[quality].fuzz);
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
 renderer.setPixelRatio(pixelRatio());
+setSketchPixelRatio(pixelRatio());
 renderer.transmissionResolutionScale = QUALITY[quality].glass;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.VSMShadowMap;
@@ -1459,6 +1460,10 @@ function pickHandle(x: number, y: number): THREE.Object3D | null {
     if (v.z > 1) return Infinity;
     return Math.hypot(r.left + ((v.x + 1) / 2) * r.width - x, r.top + ((1 - v.y) / 2) * r.height - y);
   };
+  // the roll ring is big and easy to catch anywhere round its hoop, and seen
+  // edge-on it's a line straight through the grips near it (the purple base
+  // square): any grip in reach wins over it, so the ring is only tried after
+  let ring: { h: THREE.Object3D; d: number; at: THREE.Vector3 } | null = null;
   for (const h of creature.handles()) {
     if (!h.visible) continue;
     if (h.userData.ring !== undefined) {
@@ -1468,11 +1473,7 @@ function pickHandle(x: number, y: number): THREE.Object3D | null {
         const a = (i / 48) * Math.PI * 2;
         const at = new THREE.Vector3(rr * Math.cos(a), 0, rr * Math.sin(a));
         const d = near(h, at);
-        if (d < bestD) {
-          bestD = d;
-          best = h;
-          h.userData.grab = at.add(h.position);
-        }
+        if (d < bestD && (!ring || d < ring.d)) ring = { h, d, at };
       }
       continue;
     }
@@ -1481,6 +1482,10 @@ function pickHandle(x: number, y: number): THREE.Object3D | null {
       bestD = d;
       best = h;
     }
+  }
+  if (!best && ring) {
+    ring.h.userData.grab = ring.at.add(ring.h.position);
+    return ring.h;
   }
   return best;
 }
@@ -6272,6 +6277,7 @@ function resize() {
   renderer.setSize(w, h, false);
   renderer.setPixelRatio(pixelRatio());
   composer.setPixelRatio(pixelRatio());
+  setSketchPixelRatio(pixelRatio());
   composer.setSize(w, h);
   aoTexel.set(1 / gtao.pdRenderTarget.width, 1 / gtao.pdRenderTarget.height);
   camera.aspect = w / h;
@@ -6374,6 +6380,8 @@ function loop(now: number) {
   if (mode === 'stuff') flashPiece(drawState ? 0 : Math.max(0, f));
   else creature.flash(drawState ? null : selected, Math.max(0, f));
   if (creature.tickBoing(now)) invalidate(1);
+  // toon's Line boil redraws the pencil lines a few times a second
+  if (tickSketch(now)) invalidate(1);
   // while something's dragged, moving joins blend colors more cheaply (see setDragging)
   const dragging = !!drag || gizmo.dragging;
   // on the fast setting, moving joins aren't fused at all until it's let go

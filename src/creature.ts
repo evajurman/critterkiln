@@ -633,7 +633,8 @@ export class Creature {
       pivot.add(tip);
 
       const startHandle = new THREE.Mesh(startGeo, startMat);
-      startHandle.renderOrder = 1000;
+      // drawn over the roll ring, which crosses it when seen edge-on
+      startHandle.renderOrder = 1001;
       startHandle.userData.handle = def.id;
       startHandle.userData.kind = 'start';
       startHandle.visible = false;
@@ -844,7 +845,7 @@ export class Creature {
       mesh.receiveShadow = castsShadow(style);
       mesh.userData.boneId = b.def.id;
       if (style === 'toon' && k.ink > 0) {
-        const ink = new THREE.Mesh(geo, makeOutlineMaterial(k.ink));
+        const ink = new THREE.Mesh(geo, makeOutlineMaterial(k.ink, false, k));
         ink.userData.boneId = b.def.id;
         ink.raycast = () => {};
         mesh.add(ink);
@@ -1322,7 +1323,7 @@ export class Creature {
     mesh.material = mat;
     mesh.castShadow = mesh.receiveShadow = castsShadow(style);
     if (style === 'toon' && k.ink > 0) {
-      const ink = new THREE.Mesh(geo, makeOutlineMaterial(k.ink));
+      const ink = new THREE.Mesh(geo, makeOutlineMaterial(k.ink, false, k));
       ink.raycast = () => {};
       mesh.add(ink);
     }

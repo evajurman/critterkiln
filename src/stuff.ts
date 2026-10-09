@@ -198,7 +198,7 @@ export function buildThing(thing: Thing, wearer: Wearer, unit = 1): THREE.Group 
     if (style === 'toon' && k.ink > 0) {
       // flat and turned pieces have hard edges: an outline along smoothed
       // normals stays in one piece. Ink width is in world units, like the body's.
-      const ink = new THREE.Mesh(inkNormals(geo), makeOutlineMaterial(k.ink / unit, true));
+      const ink = new THREE.Mesh(inkNormals(geo), makeOutlineMaterial(k.ink / unit, true, k, unit));
       ink.raycast = () => {};
       mesh.add(ink);
     }
