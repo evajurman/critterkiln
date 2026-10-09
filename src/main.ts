@@ -50,7 +50,7 @@ import {
   type Thing,
   type Wearer,
 } from './stuff';
-import { FUR_LAYER, STYLE_PARAMS, STYLES, makeMaterial, setFuzzQuality, setGlassEnvironment, setSketchPixelRatio, styleSettings, tickSketch, type StyleId } from './materials';
+import { FUR_LAYER, STYLE_PARAMS, STYLES, makeMaterial, setFuzzQuality, setGlassEnvironment, setSketchPixelRatio, styleSettings, type StyleId } from './materials';
 import { installScrollbars } from './scrollbars';
 import { installCursorPress } from './cursorPress';
 import { deleteCreation, getCreation, keepStorage, listCreations, putCreation, type Creation } from './library';
@@ -6380,8 +6380,6 @@ function loop(now: number) {
   if (mode === 'stuff') flashPiece(drawState ? 0 : Math.max(0, f));
   else creature.flash(drawState ? null : selected, Math.max(0, f));
   if (creature.tickBoing(now)) invalidate(1);
-  // toon's Line boil redraws the pencil lines a few times a second
-  if (tickSketch(now)) invalidate(1);
   // while something's dragged, moving joins blend colors more cheaply (see setDragging)
   const dragging = !!drag || gizmo.dragging;
   // on the fast setting, moving joins aren't fused at all until it's let go

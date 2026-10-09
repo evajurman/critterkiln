@@ -101,7 +101,6 @@ export const STYLE_PARAMS: Record<StyleId, StyleParam[]> = {
     { key: 'hatch', label: 'Pencil hatching', min: 0, max: 1, step: 0.01, value: 0 },
     { key: 'grain', label: 'Paper grain', min: 0, max: 1, step: 0.01, value: 0 },
     { key: 'wobble', label: 'Line wobble', min: 0, max: 1, step: 0.01, value: 0 },
-    { key: 'boil', label: 'Line boil', min: 0, max: 1, step: 0.01, value: 0 },
   ],
 };
 
@@ -872,35 +871,17 @@ function getToonGradient(bands: number, shadow: number) {
 }
 
 // ---------------------------------------------------------------------------
-// Pencil: toon's hand-drawn sliders (hatching, paper grain, line wobble, boil)
+// Pencil: toon's hand-drawn sliders (hatching, paper grain, line wobble)
 
-/** Which redraw of a boiling line it is: shared by every pencil material. */
-const sketchFrame = { value: 0 };
 /** Screen pixels per CSS pixel, so hatching keeps its spacing on any display. */
 const sketchPx = { value: window.devicePixelRatio || 1 };
-/** Materials whose lines boil: while any are alive, the drawing is redrawn a few times a second. */
-const boiling = new Set<THREE.Material>();
-function watchBoil(m: THREE.Material) {
-  boiling.add(m);
-  m.addEventListener('dispose', () => boiling.delete(m));
-}
-/** Redraws a second for Line boil, like a hand-drawn animation shot on threes. */
-const BOIL_FPS = 8;
-/** Moves boiling lines on. True when there's a new frame to draw. */
-export function tickSketch(now: number): boolean {
-  if (!boiling.size) return false;
-  const f = Math.floor((now / 1000) * BOIL_FPS) % 1000;
-  if (f === sketchFrame.value) return false;
-  sketchFrame.value = f;
-  return true;
-}
 /** Screen pixels per CSS pixel the scene is drawn at. */
 export function setSketchPixelRatio(r: number) {
   sketchPx.value = r;
 }
 
 const SKETCH_GLSL = /* glsl */ `
-  uniform float sketchFrame, sketchPx, sketchWobble, sketchGrain, sketchBoil;
+  uniform float sketchPx, sketchWobble, sketchGrain;
   float sketchHash(vec3 p) {
     p = fract(p * 0.3183099 + 0.1);
     p *= 17.0;
@@ -915,8 +896,6 @@ const SKETCH_GLSL = /* glsl */ `
       f.z);
   }
   float vnoise2(vec2 p) { return vnoise3(vec3(p, 0.5)); }
-  // where the noise is read from: still, or moved on with each boiled redraw
-  float sketchSeed() { return sketchBoil > 0.0 ? sketchBoil * (sketchHash(vec3(sketchFrame, 1.3, 7.1)) * 2.0 - 1.0) : 0.0; }
 `;
 
 const HATCH_GLSL = /* glsl */ `
@@ -947,15 +926,13 @@ const TOON_LIT = 1.25;
  * instead of flat bands, and Paper grain gives everything a paper tooth.
  */
 function sketchToon(m: THREE.MeshToonMaterial, k: StyleSettings): THREE.Material {
-  const hatch = k.hatch ?? 0, grain = k.grain ?? 0, boil = k.boil ?? 0;
+  const hatch = k.hatch ?? 0, grain = k.grain ?? 0;
   if (hatch <= 0 && grain <= 0) return m;
   m.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, {
-      sketchFrame,
       sketchPx,
       sketchHatch: { value: hatch },
       sketchGrain: { value: grain },
-      sketchBoil: { value: boil },
       sketchWobble: { value: 0 },
     });
     shader.fragmentShader =
@@ -965,18 +942,14 @@ function sketchToon(m: THREE.MeshToonMaterial, k: StyleSettings): THREE.Material
         '#include <opaque_fragment>',
         `{
            vec2 sp = gl_FragCoord.xy / sketchPx;
-           float seed = sketchSeed();
-           float tooth = vnoise2(sp * 0.9 + seed * 13.0);
+           float tooth = vnoise2(sp * 0.9);
            if (sketchHatch > 0.0) {
              vec3 lit = diffuseColor.rgb * ${TOON_LIT.toFixed(3)};
              float lum = dot(outgoingLight, vec3(0.3, 0.59, 0.11)) / max(dot(lit, vec3(0.3, 0.59, 0.11)), 1e-4);
              float dark = clamp(1.0 - lum, 0.0, 1.0);
-             // boiling also turns the strokes a touch and shifts them along
-             vec2 jp = sp + seed * vec2(23.0, 11.0);
-             float tilt = seed * 0.12;
-             float s1 = hatchLayer(jp, 0.8 + tilt, 5.0, 1.0) * smoothstep(0.06, 0.16, dark);
-             float s2 = hatchLayer(jp, -0.75 + tilt, 5.0, 9.0) * smoothstep(0.32, 0.42, dark);
-             float s3 = hatchLayer(jp, 0.05 + tilt, 3.5, 17.0) * smoothstep(0.58, 0.68, dark);
+             float s1 = hatchLayer(sp, 0.8, 5.0, 1.0) * smoothstep(0.06, 0.16, dark);
+             float s2 = hatchLayer(sp, -0.75, 5.0, 9.0) * smoothstep(0.32, 0.42, dark);
+             float s3 = hatchLayer(sp, 0.05, 3.5, 17.0) * smoothstep(0.58, 0.68, dark);
              float ink = 1.0 - (1.0 - s1) * (1.0 - s2) * (1.0 - s3);
              // graphite skips over the paper's tooth
              ink *= mix(1.0, smoothstep(0.1, 0.6, tooth), sketchGrain);
@@ -989,7 +962,6 @@ function sketchToon(m: THREE.MeshToonMaterial, k: StyleSettings): THREE.Material
          #include <opaque_fragment>`,
       );
   };
-  if (boil > 0) watchBoil(m);
   return m;
 }
 
@@ -1706,7 +1678,7 @@ export function castsShadow(style: StyleId) {
  */
 export function makeOutlineMaterial(width = 0.012, smooth = false, k?: StyleSettings, unit = 1): THREE.Material {
   const m = new THREE.MeshBasicMaterial({ color: 0x2b2024, side: THREE.BackSide });
-  const wobble = k?.wobble ?? 0, grain = k?.grain ?? 0, boil = k?.boil ?? 0;
+  const wobble = k?.wobble ?? 0, grain = k?.grain ?? 0;
   const sketch = wobble > 0 || grain > 0;
   m.defines = {};
   if (smooth) m.defines.INK_NORMAL = '';
@@ -1714,11 +1686,9 @@ export function makeOutlineMaterial(width = 0.012, smooth = false, k?: StyleSett
   m.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, {
       outlineWidth: { value: width },
-      sketchFrame,
       sketchPx,
       sketchWobble: { value: wobble },
       sketchGrain: { value: grain },
-      sketchBoil: { value: boil },
       // the wobble's waves keep their size in the world, however the piece is scaled
       sketchFreq: { value: 9 * unit },
     });
@@ -1730,8 +1700,8 @@ export function makeOutlineMaterial(width = 0.012, smooth = false, k?: StyleSett
         `float inkWidth = outlineWidth;
          #ifdef SKETCH
            // pen pressure: the line swells and thins (to nothing, at full wobble)
-           // along the outline, and with boil it's redrawn a little differently each frame
-           vec3 wp = position * sketchFreq + sketchSeed() * vec3(1.7, 9.2, 3.1);
+           // along the outline
+           vec3 wp = position * sketchFreq;
            float pressure = (vnoise3(wp) - 0.5) * 1.4 + (vnoise3(wp * 2.7) - 0.5) * 0.6;
            inkWidth *= max(0.0, 1.0 + sketchWobble * 2.2 * pressure);
          #endif
@@ -1749,13 +1719,12 @@ export function makeOutlineMaterial(width = 0.012, smooth = false, k?: StyleSett
           `// a pencil line: soft graphite grey, mottled where the paper's tooth
            // catches it, and here and there broken
            vec2 sp = gl_FragCoord.xy / sketchPx;
-           float tooth = vnoise2(sp * 0.9 + sketchSeed() * 13.0);
+           float tooth = vnoise2(sp * 0.9);
            if (tooth < sketchGrain * 0.3) discard;
            outgoingLight = mix(outgoingLight, vec3(0.24, 0.24, 0.26) * (0.75 + 0.5 * tooth), sketchGrain * 0.7);
            #include <opaque_fragment>`,
         );
   };
-  if (boil > 0) watchBoil(m);
   m.userData.ink = true;
   return m;
 }
