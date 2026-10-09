@@ -83,9 +83,12 @@ import {
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector(sel) as T;
 
-/** Font Awesome icon markup. Slab where it has the icon, classic regular (`fa-regular fa-…`) otherwise. */
-const fa = (name: string) => `<i class="fa-slab fa-regular fa-${name}" aria-hidden="true"></i>`;
-const faClassic = (name: string) => `<i class="fa-regular fa-${name}" aria-hidden="true"></i>`;
+/**
+ * Font Awesome icon markup. Slab where it has the icon, classic regular otherwise; both
+ * are the two-tone styles, whose fill only shows in the Color theme (style.css).
+ */
+const fa = (name: string) => `<i class="fa-slab-duo fa-regular fa-${name}" aria-hidden="true"></i>`;
+const faClassic = (name: string) => `<i class="fa-duotone fa-regular fa-${name}" aria-hidden="true"></i>`;
 /** Sets an element to an icon followed by text (added as a text node, so names need no escaping). */
 function iconLabel(el: HTMLElement, icon: string, text = '') {
   el.innerHTML = icon;
@@ -1706,9 +1709,9 @@ interface BoneView {
   mirrored: boolean;
 }
 const VIEW_NAMES: Record<ViewKind, { name: string; icon: string }> = {
-  front: { name: 'Front', icon: 'fa-regular fa-user' },
-  side: { name: 'Side', icon: 'fa-regular fa-person-walking' },
-  top: { name: 'Top', icon: 'fa-regular fa-arrow-down-to-line' },
+  front: { name: 'Front', icon: 'fa-duotone fa-regular fa-user' },
+  side: { name: 'Side', icon: 'fa-duotone fa-regular fa-person-walking' },
+  top: { name: 'Top', icon: 'fa-duotone fa-regular fa-arrow-down-to-line' },
 };
 
 /**
@@ -5090,6 +5093,8 @@ function setMode(m: Mode) {
   mode = m;
   if (m !== 'shape') unlock(m);
   document.querySelectorAll<HTMLButtonElement>('.modes button').forEach((b) => b.classList.toggle('active', b.dataset.mode === m));
+  // the Color theme tints the panels by mode
+  document.documentElement.dataset.mode = m;
   $('#parts-sec').hidden = m === 'stuff';
   $('#plan-sec').hidden = m !== 'shape';
   $('#shape-panel').hidden = m !== 'shape';
@@ -5487,8 +5492,9 @@ function hint(text: string, ms = 2000, warn = false) {
 // settings (remembered in this browser)
 
 const SETTINGS_KEY = 'creature-creator/settings';
-const settings: { numbers: boolean; plainText: boolean; seamless: SeamlessMode; seamlessLowPoly: boolean; quality: Quality } = (() => {
-  const defaults = { numbers: false, plainText: false, seamless: 'on' as SeamlessMode, seamlessLowPoly: false, quality };
+type Theme = 'light' | 'dark' | 'color';
+const settings: { numbers: boolean; plainText: boolean; theme: Theme; seamless: SeamlessMode; seamlessLowPoly: boolean; quality: Quality } = (() => {
+  const defaults = { numbers: false, plainText: false, theme: 'light' as Theme, seamless: 'on' as SeamlessMode, seamlessLowPoly: false, quality };
   try {
     return { ...defaults, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') };
   } catch {
@@ -5511,6 +5517,10 @@ function renderSettings() {
   $<HTMLInputElement>('#set-nums').checked = settings.numbers;
   document.documentElement.classList.toggle('plain-text', settings.plainText);
   $<HTMLInputElement>('#set-plain').checked = settings.plainText;
+  for (const t of ['dark', 'color']) document.documentElement.classList.toggle(`theme-${t}`, settings.theme === t);
+  document.querySelectorAll<HTMLButtonElement>('#set-theme button').forEach((b) => b.classList.toggle('active', b.dataset.theme === settings.theme));
+  // the browser's own bar (phones, installed app) matches the page
+  document.querySelector('meta[name=theme-color]')?.setAttribute('content', getComputedStyle(document.documentElement).getPropertyValue('--bg').trim());
   document.querySelectorAll<HTMLButtonElement>('#set-seamless button').forEach((b) => b.classList.toggle('active', b.dataset.seamless === settings.seamless));
   $<HTMLInputElement>('#set-seamless-lp').checked = settings.seamlessLowPoly;
   // nothing to apply it to while seamless joins are off
@@ -5638,6 +5648,13 @@ $<HTMLInputElement>('#set-nums').onchange = (e) => {
   saveSettings();
   renderSettings();
 };
+document.querySelectorAll<HTMLButtonElement>('#set-theme button').forEach((b) => {
+  b.onclick = () => {
+    settings.theme = b.dataset.theme as Theme;
+    saveSettings();
+    renderSettings();
+  };
+});
 $<HTMLInputElement>('#set-plain').onchange = (e) => {
   settings.plainText = (e.target as HTMLInputElement).checked;
   saveSettings();
