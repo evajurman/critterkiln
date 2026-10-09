@@ -437,7 +437,8 @@ button.primary.slim { width: auto; flex: 1; padding: 8px 10px; font-size: 14px; 
 .editing-head { display: flex; align-items: center; gap: 8px; }
 .saved-badge { font-size: 11px; font-weight: var(--w-bold); color: var(--ok-ink); text-transform: none; letter-spacing: 0; }
 .saved-badge.warn { color: var(--warn-ink); }
-.thing-actions-row { justify-content: flex-start; flex-wrap: wrap; }
+/* three icons share a narrow card */
+.creation-actions.thing-card-actions .piece-icon { height: 24px; }
 .inherit-note { margin: 4px 0 8px; }
 .viewport.space-pan, .viewport.space-pan canvas { cursor: grab; }
 
@@ -647,6 +648,14 @@ details.fine[open] > summary { margin-bottom: 6px; }
 .creation-actions { display: flex; justify-content: space-between; }
 /* five of them share the card, however narrow */
 .creation-actions .piece-icon { width: auto; flex: 0 1 30px; min-width: 0; }
+/* one outlined strip of buttons sets them apart from the picture above
+   (--line alone is too faint to see in the dark theme) */
+.creation-actions {
+  --strip: color-mix(in srgb, var(--muted) 55%, transparent);
+  border: 2px solid var(--strip); border-radius: 9px; overflow: hidden;
+}
+.creation-actions button.piece-icon { flex: 1 1 0; border-radius: 0; height: 26px; }
+.creation-actions button.piece-icon + button.piece-icon { border-left: 1px solid var(--strip); }
 .creation-new { cursor: var(--cursor-click); }
 .creation-new .thumb { font-size: 28px; color: var(--muted); border: 2px dashed var(--line); background: var(--card); }
 .creation-new:hover .thumb { border-color: var(--accent); color: var(--accent); }
@@ -761,7 +770,8 @@ details.fine[open] > summary { margin-bottom: 6px; }
 .piece-pick i:not([class]) { width: 10px; height: 10px; border-radius: 50%; display: inline-block; border: 1px solid rgba(0,0,0,.15); flex: none; }
 .piece-icon { width: 30px; height: 28px; border-radius: 8px; display: grid; place-items: center; opacity: .7; }
 /* no browser padding: it left too little room and pushed the icon off centre */
-button.piece-icon { padding: 0; }
+/* no browser fill either: it stays light grey in the dark theme */
+button.piece-icon { padding: 0; border: 0; background: transparent; }
 .piece-icon:hover { opacity: 1; background: rgba(127,127,127,.18); }
 .parts-blend { margin-top: 10px; }
 

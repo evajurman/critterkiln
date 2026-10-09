@@ -3149,7 +3149,10 @@ function renderCollection() {
         c.classList.add('carry');
         carryFrom(c, () => t, () => (t.thumb ? `<img src="${t.thumb}" alt="" />` : fa('box')));
       }
-      if (!forAttach) c.classList.toggle('current', t.id === current);
+      if (!forAttach) {
+        c.classList.toggle('current', t.id === current);
+        c.append(thingActions(t));
+      }
     }
   }
 }
@@ -3210,23 +3213,51 @@ document.querySelectorAll<HTMLButtonElement>('#thing-bend-mode button').forEach(
     renderStuffPanel();
   };
 });
-$('#thing-dup').onclick = () => {
-  const wb = workbench();
-  if (!wb.pieces.length) return;
-  openOnBench({ ...structuredClone(wb), id: uid(), name: `${wb.name.trim() || 'Thing'} copy` });
+/** Copy, download and delete buttons on a My stuff card, like the ones on My creations. */
+function thingActions(t: Thing): HTMLElement {
+  const actions = document.createElement('div');
+  actions.className = 'creation-actions thing-card-actions';
+  const action = (icon: string, title: string, fn: () => void) => {
+    const b = document.createElement('button');
+    b.className = 'piece-icon';
+    b.innerHTML = fa(icon);
+    b.title = title;
+    b.onclick = (e) => {
+      // the card itself opens the thing
+      e.stopPropagation();
+      fn();
+    };
+    actions.append(b);
+  };
+  action('copy', 'Make a copy of this thing to change', () => copyThing(t));
+  action('arrow-down-to-line', 'Download as a .stuff file', () => downloadThing(t));
+  action('trash', 'Remove from My stuff', () => deleteThing(t));
+  return actions;
+}
+/** The open thing is the one on the workbench (its latest changes may not be saved yet). */
+const latest = (t: Thing): Thing => (t.id === world.workbench?.id ? workbench() : t);
+function copyThing(t: Thing) {
+  const src = latest(t);
+  if (!src.pieces.length) return;
+  openOnBench({ ...stripThumb(src), id: uid(), name: `${src.name.trim() || 'Thing'} copy` });
   hint('Made a copy to change', 1800);
-};
-$('#thing-download').onclick = () => {
-  const wb = workbench();
+}
+function downloadThing(t: Thing) {
+  const src = latest(t);
   // one kind of file: a save holding just this thing opens straight into My stuff
-  saveBundle({ creatures: [], stuff: [stripThumb(wb)], rigs: [] }, wb.name.trim() || 'thing');
-};
-$('#thing-delete').onclick = () => {
-  const wb = workbench();
-  const name = wb.name.trim() || 'this thing';
-  if (wb.pieces.length && !confirm(`Delete "${name}" from My stuff? (Creatures already wearing it keep their copy.)`)) return;
+  saveBundle({ creatures: [], stuff: [stripThumb(src)], rigs: [] }, src.name.trim() || 'thing');
+}
+function deleteThing(t: Thing) {
+  const src = latest(t);
+  const name = src.name.trim() || 'this thing';
+  if (src.pieces.length && !confirm(`Delete "${name}" from My stuff? (Creatures already wearing it keep their copy.)`)) return;
+  if (t.id !== world.workbench?.id) {
+    removeThing(t.id);
+    renderStuffPanel();
+    return;
+  }
   clearTimeout(thingSaveTimer);
-  removeThing(wb.id);
+  removeThing(t.id);
   // carry on with the last thing in the list, or a fresh one
   const next = collection().at(-1);
   world.workbench = next ? stripThumb(next) : newThing();
@@ -3235,7 +3266,7 @@ $('#thing-delete').onclick = () => {
   syncWorkbench();
   commit();
   renderStuffPanel();
-};
+}
 
 
 // ---------------------------------------------------------------------------
