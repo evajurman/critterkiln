@@ -47,6 +47,8 @@ import {
   setCollection,
   uid,
   type BendMode,
+  WRAP_SMOOTH,
+  WRAP_STRENGTH,
   type Piece,
   type Thing,
   type Wearer,
@@ -3131,6 +3133,9 @@ function renderStuffPanel() {
   $('#thing-bend-card').hidden = !wb.pieces.length;
   document.querySelectorAll<HTMLButtonElement>('#thing-bend-mode button').forEach((b) => b.classList.toggle('active', b.dataset.bend === (wb.bendMode ?? 'axis')));
   $<HTMLInputElement>('#thing-bend').value = String(wb.bend ?? 0);
+  $('#thing-wrap-card').hidden = !wb.pieces.length;
+  $<HTMLInputElement>('#thing-wrap-smooth').value = String(wb.wrapSmooth ?? WRAP_SMOOTH);
+  $<HTMLInputElement>('#thing-wrap-strength').value = String(wb.wrapStrength ?? WRAP_STRENGTH);
 
   const p = piece();
   $('#piece-card').hidden = !p;
@@ -3306,6 +3311,15 @@ $<HTMLInputElement>('#thing-bend').oninput = (e) => {
   syncWorkbench();
 };
 $<HTMLInputElement>('#thing-bend').onchange = () => commit();
+// wrap only shows where it's worn: settled (and passed on to wearers) on release
+$<HTMLInputElement>('#thing-wrap-smooth').onchange = (e) => {
+  workbench().wrapSmooth = parseFloat((e.target as HTMLInputElement).value);
+  commit();
+};
+$<HTMLInputElement>('#thing-wrap-strength').onchange = (e) => {
+  workbench().wrapStrength = parseFloat((e.target as HTMLInputElement).value);
+  commit();
+};
 document.querySelectorAll<HTMLButtonElement>('#thing-bend-mode button').forEach((b) => {
   b.onclick = () => {
     const wb = workbench();
@@ -3664,6 +3678,8 @@ function syncAttachBar() {
   $('#attach-mirror-label').hidden = !hasTwin;
   $<HTMLInputElement>('#attach-mirror').checked = a.mirror;
   $('#attach-mirror-label').classList.toggle('on', a.mirror);
+  $<HTMLInputElement>('#attach-wrap').checked = !!a.wrap;
+  $('#attach-wrap-label').classList.toggle('on', !!a.wrap);
   $('#attach-name').textContent = a.thing.name;
   if (!$('#attach-mat-pop').hidden) renderAttachMaterial();
 }
@@ -3916,6 +3932,14 @@ $<HTMLInputElement>('#attach-mirror').onchange = (e) => {
   const a = currentAttachment();
   if (!a) return;
   a.mirror = (e.target as HTMLInputElement).checked;
+  creature.sync();
+  commit();
+  selectAttachment(a.id);
+};
+$<HTMLInputElement>('#attach-wrap').onchange = (e) => {
+  const a = currentAttachment();
+  if (!a) return;
+  a.wrap = (e.target as HTMLInputElement).checked || undefined;
   creature.sync();
   commit();
   selectAttachment(a.id);

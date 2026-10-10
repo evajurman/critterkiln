@@ -21,7 +21,7 @@ import {
   type StyleSettings,
 } from './materials';
 import { MAX_BEND, expandRig, stretchBend, type ExpandedBone, type ExpandedRig, type RigState, type V3 } from './rigs';
-import { buildThing, disposeThing, type Thing } from './stuff';
+import { buildThing, disposeThing, type Thing, type WrapSurface } from './stuff';
 
 /** One drawn shape of a part, puffed up on its own: drawn from the front (the default) or from the side. */
 export interface PartShape {
@@ -150,6 +150,8 @@ export interface Attachment {
   scale: V3;
   /** also show a mirrored copy on the twin limb */
   mirror: boolean;
+  /** shrink wrap: pressed onto the part's surface like a decal (instead of the thing's own bend) */
+  wrap?: boolean;
 }
 
 export interface CreatureState {
@@ -904,10 +906,13 @@ export class Creature {
       // rescale rebuilds them (unless the item opts out, and lets them scale along with it)
       const sized = a.thing.scaleMaterial !== false && styles.some((s) => s === 'felt' || s === 'toon');
       const unit = sized ? Math.round(Math.cbrt(Math.abs(a.scale[0] * a.scale[1] * a.scale[2])) * 20) / 20 || 1 : 1;
-      const key = JSON.stringify([a.thing.pieces, a.thing.ownMaterial, a.thing.inherit, a.thing.materialSettings, a.thing.bend, a.thing.bendMode, a.bone, twinBone?.def.id, this.state.materialSettings, wearer.style, unit, getMeshDetail()]);
+      // a wrapped item follows the creature under it: moving, posing or reshaping either reshapes it
+      const wrapKey = a.wrap ? [a.thing.wrapSmooth, a.thing.wrapStrength, a.position, a.quaternion, a.scale, this.state.pose, this.list.map((b) => [b.meshKey, b.mesh?.scale.toArray()])] : 0;
+      const key = JSON.stringify([a.thing.pieces, a.thing.ownMaterial, a.thing.inherit, a.thing.materialSettings, a.thing.bend, a.thing.bendMode, a.bone, twinBone?.def.id, this.state.materialSettings, wearer.style, unit, getMeshDetail(), wrapKey]);
       let rec = this.attached.get(a.id);
       if (!rec || rec.key !== key) {
         const settings = wearer;
+        const wrap = wrapKey ? this.wrapSurface(a, bone) : undefined;
         if (rec && rec.bone === bone && rec.twinBone === twinBone) {
           // same place: swap the contents but keep the groups (the gizmo may hold one)
           for (const g of [rec.main, rec.twin]) {
@@ -916,18 +921,18 @@ export class Creature {
               c.removeFromParent();
               disposeThing(c);
             }
-            g.add(buildThing(a.thing, settings, unit));
+            g.add(buildThing(a.thing, settings, unit, wrap));
           }
           rec.key = key;
         } else {
           if (rec) this.dropAttachment(rec);
           const main = new THREE.Group();
-          main.add(buildThing(a.thing, settings, unit));
+          main.add(buildThing(a.thing, settings, unit, wrap));
           bone.pivot.add(main);
           let twin: THREE.Group | null = null;
           if (twinBone) {
             twin = new THREE.Group();
-            twin.add(buildThing(a.thing, settings, unit));
+            twin.add(buildThing(a.thing, settings, unit, wrap));
             twin.matrixAutoUpdate = false;
             twinBone.pivot.add(twin);
           }
@@ -946,6 +951,61 @@ export class Creature {
       this.dropAttachment(rec);
       this.attached.delete(id);
     }
+  }
+
+  /**
+   * For a shrink-wrapped item: how far along its Z the creature's outer surface
+   * sits at each point of its drawing (in its own units), found by casting a
+   * ray from in front at every part, as posed now; the nearest hit wins, so an
+   * item on the body hugs whatever is in front of it there. Past the creature's
+   * edge, the nearest bit of surface. (The twin shows the same shape: the
+   * other side is this one mirrored.)
+   */
+  private wrapSurface(a: Attachment, bone: BoneRT): WrapSurface | undefined {
+    this.group.updateMatrixWorld(true);
+    const parts = this.list.flatMap((b) => {
+      const geo = b.mesh?.userData.baseGeo as THREE.BufferGeometry | undefined;
+      if (!b.mesh || !geo) return [];
+      if (!geo.boundingSphere) geo.computeBoundingSphere();
+      const toWorld = b.mesh.matrixWorld.clone();
+      return [{ bvh: bvhFor(geo), toWorld, toGeo: toWorld.clone().invert(), sphere: geo.boundingSphere!.clone().applyMatrix4(toWorld) }];
+    });
+    if (!parts.length) return undefined;
+    const place = new THREE.Matrix4().compose(new THREE.Vector3(...a.position), new THREE.Quaternion(...a.quaternion), new THREE.Vector3(...a.scale));
+    const thingToWorld = bone.pivot.matrixWorld.clone().multiply(place);
+    const toThing = thingToWorld.clone().invert();
+    const all = new THREE.Sphere();
+    new THREE.Box3().setFromPoints(parts.flatMap((q) => [q.sphere.center.clone().addScalar(-q.sphere.radius), q.sphere.center.clone().addScalar(q.sphere.radius)])).getBoundingSphere(all);
+    const down = new THREE.Vector3(0, 0, -1).transformDirection(thingToWorld);
+    const world = new THREE.Ray(), local = new THREE.Ray();
+    const p = new THREE.Vector3(), q = new THREE.Vector3(), best = new THREE.Vector3();
+    const hit = { point: new THREE.Vector3(), distance: 0, faceIndex: 0 };
+    return (x, y) => {
+      p.set(x, y, 0).applyMatrix4(thingToWorld);
+      // start well clear of the creature, in front of it
+      world.origin.copy(p).addScaledVector(down, -(all.radius * 2 + p.distanceTo(all.center)));
+      world.direction.copy(down);
+      let near = Infinity;
+      for (const part of parts) {
+        if (!world.intersectsSphere(part.sphere)) continue;
+        local.copy(world).applyMatrix4(part.toGeo);
+        const h = part.bvh.raycastFirst(local, THREE.DoubleSide);
+        if (!h) continue;
+        q.copy(h.point).applyMatrix4(part.toWorld);
+        const d = q.distanceTo(world.origin);
+        if (d < near) (near = d), best.copy(q);
+      }
+      if (near === Infinity) {
+        for (const part of parts) {
+          const h = part.bvh.closestPointToPoint(q.copy(p).applyMatrix4(part.toGeo), hit);
+          if (!h) continue;
+          q.copy(h.point).applyMatrix4(part.toWorld);
+          const d = q.distanceTo(p);
+          if (d < near) (near = d), best.copy(q);
+        }
+      }
+      return near === Infinity ? 0 : best.applyMatrix4(toThing).z;
+    };
   }
 
   private dropAttachment(rec: { main: THREE.Group; twin: THREE.Group | null }) {

@@ -300,6 +300,14 @@
             <label class="slider"><span>Bend</span><input id="thing-bend" type="range" min="-1" max="1" step="0.01" />
               <span class="ends"><em>edges forward</em><em>edges back</em></span></label>
           </div>
+          <div class="card thing-bend" id="thing-wrap-card">
+            <div class="sub-title">Wrap onto the body</div>
+            <p class="muted small">When it's worn with <i class="fa-slab-duo fa-regular fa-map" aria-hidden="true"></i> Wrap on, it's pressed onto the creature instead of bent.</p>
+            <label class="slider" title="How widely the body's surface is evened out first: low follows every dip and rib, high just the overall shape"><span>Smoothness</span><input id="thing-wrap-smooth" type="range" min="0" max="1" step="0.01" />
+              <span class="ends"><em>every dip</em><em>overall shape</em></span></label>
+            <label class="slider" title="How far it's pressed onto the body: part way keeps some of its flat shape"><span>Strength</span><input id="thing-wrap-strength" type="range" min="0" max="1" step="0.01" />
+              <span class="ends"><em>flat</em><em>hugs the body</em></span></label>
+          </div>
 
           <div class="card" id="piece-card" hidden>
             <div class="seg" id="piece-kind">
@@ -383,6 +391,9 @@
           <button data-gizmo="scale" class="seg-btn" title="Scale (R)"><i class="fa-slab-duo fa-regular fa-expand" aria-hidden="true"></i> Scale</button>
           <label id="attach-mirror-label" class="pill-toggle" title="Show a mirrored copy on the other side">
             <input id="attach-mirror" type="checkbox" /> <i class="fa-slab-duo fa-regular fa-arrow-right-arrow-left" aria-hidden="true"></i> Both sides
+          </label>
+          <label id="attach-wrap-label" class="pill-toggle" title="Shrink wrap: press the item onto the body part's surface, following its curve (used instead of the item's own Bend)">
+            <input id="attach-wrap" type="checkbox" /> <i class="fa-slab-duo fa-regular fa-map" aria-hidden="true"></i> Wrap
           </label>
           <button id="attach-mat" class="seg-btn" title="Material settings for this item"><i class="fa-slab-duo fa-regular fa-palette" aria-hidden="true"></i> Material</button>
           <button id="attach-copy" class="seg-btn" title="Copy" aria-label="Copy"><i class="fa-slab-duo fa-regular fa-copy" aria-hidden="true"></i></button>

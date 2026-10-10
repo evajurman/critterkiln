@@ -82,6 +82,10 @@ export interface Thing {
   bend?: number;
   /** axis = curve away from the centre line (a shield's curve, wings); radial = a dome around the crosshair */
   bendMode?: BendMode;
+  /** worn with Wrap on: 0..1, how widely the body's surface is evened out first (0 = into every dip) */
+  wrapSmooth?: number;
+  /** worn with Wrap on: 0..1, how far it's pressed onto the body (0 = flat as drawn) */
+  wrapStrength?: number;
 }
 
 export type BendMode = 'axis' | 'radial';
@@ -210,16 +214,21 @@ export function pieceLook(thing: Thing, p: Piece, wearer: Wearer): { style: Styl
 /**
  * Build the meshes for a thing. Pieces are tagged with userData.pieceId.
  * `unit` is how much the thing will be scaled up, so felt fuzz and toon ink
- * keep their real size.
+ * keep their real size. With a `wrap` surface it's pressed onto the body
+ * (instead of bent).
  */
-export function buildThing(thing: Thing, wearer: Wearer, unit = 1): THREE.Group {
+export function buildThing(thing: Thing, wearer: Wearer, unit = 1, wrap?: WrapSurface): THREE.Group {
   const group = new THREE.Group();
   const looks = thing.pieces.map((raw) => {
     const { style, k } = pieceLook(thing, raw, wearer);
     // low-poly and clay shape the mesh itself
     return { p: style === raw.style ? raw : { ...raw, style }, style, k };
   });
-  const shapes = blendedGeometries(looks.map((l) => l.p), thingBend(thing));
+  const shapes = blendedGeometries(
+    looks.map((l) => l.p),
+    wrap ? null : thingBend(thing),
+    wrap && { surface: wrap, smooth: thing.wrapSmooth ?? WRAP_SMOOTH, strength: thing.wrapStrength ?? WRAP_STRENGTH },
+  );
   looks.forEach(({ p, style, k }, i) => {
     const { geo, painted } = shapes[i];
     const mesh = new THREE.Mesh(geo, makeMaterial(style, p.color, k));
@@ -277,9 +286,17 @@ function thingBend(thing: Thing): ThingBend | null {
   const amount = thing.bend ?? 0;
   if (Math.abs(amount) < 0.005 || !thing.pieces.length) return null;
   const mode = thing.bendMode ?? 'axis';
-  // at full bend the farthest edge has turned a quarter circle
+  // at full bend the farthest edge has turned a quarter circle (pieces lifted
+  // or tilted off the board count where they are now)
   let reach = 0;
-  for (const p of thing.pieces) if (!p.place) for (const [x, y] of p.outline) reach = Math.max(reach, mode === 'axis' ? Math.abs(x) : Math.hypot(x, y));
+  const v = new THREE.Vector3();
+  for (const p of thing.pieces) {
+    const m = placeMatrix(p);
+    for (const [x, y] of p.outline) {
+      v.set(x, y, p.z).applyMatrix4(m);
+      reach = Math.max(reach, mode === 'axis' ? Math.abs(v.x) : Math.hypot(v.x, v.y));
+    }
+  }
   if (reach < 1e-4) return null;
   return { mode, r: reach / (amount * (Math.PI / 2)), reach };
 }
@@ -291,8 +308,8 @@ function thingBend(thing: Thing): ThingBend | null {
  * even mesh (about 7 degrees of the curve apart); anything else with edges
  * that long has them cut down. Already-fine meshes (puffy pieces) are left alone.
  */
-function refineForBend(src: THREE.BufferGeometry, bd: ThingBend): THREE.BufferGeometry {
-  return refine(src, Math.min(Math.max(Math.abs(bd.r) * 0.12, bd.reach / 40), bd.reach / 4));
+function bendStep(bd: ThingBend): number {
+  return Math.min(Math.max(Math.abs(bd.r) * 0.12, bd.reach / 40), bd.reach / 4);
 }
 
 /** A mesh with points no further than about `step` apart (see refineForBend). */
@@ -424,17 +441,41 @@ function remeshCaps(src: THREE.BufferGeometry, step: number): THREE.BufferGeomet
 
 const bentCache = new WeakMap<THREE.BufferGeometry, Map<string, THREE.BufferGeometry>>();
 
-function bentGeometry(src: THREE.BufferGeometry, bd: ThingBend): THREE.BufferGeometry {
-  const key = `${bd.mode}:${bd.r.toFixed(5)}`;
+/**
+ * A piece's mesh, made fine enough to curve, taken from its own space into the
+ * thing's (through its placement `m`), handed to `shape` to move its points,
+ * and brought back. A clone shares the source's userData: its faces aren't flat
+ * any more, and its ink and shared normals get worked out again for the new shape.
+ */
+function reshaped(src: THREE.BufferGeometry, step: number, m: THREE.Matrix4, shape: (g: THREE.BufferGeometry) => void): THREE.BufferGeometry {
+  const refined = refine(src, step);
+  const g = refined === src ? src.clone() : refined;
+  g.userData = {};
+  g.deleteAttribute('inkNormal');
+  const placed = !m.equals(IDENTITY);
+  if (placed) g.applyMatrix4(m);
+  shape(g);
+  if (placed) g.applyMatrix4(m.clone().invert());
+  g.computeBoundingBox();
+  g.computeBoundingSphere();
+  return g;
+}
+const IDENTITY = new THREE.Matrix4();
+
+/** A piece bent with the thing, wherever it's placed (`m`, its placement). */
+function bentGeometry(src: THREE.BufferGeometry, bd: ThingBend, m: THREE.Matrix4): THREE.BufferGeometry {
+  const key = `${bd.mode}:${bd.r.toFixed(5)}:${m.elements.map((e) => e.toFixed(5)).join(',')}`;
   let per = bentCache.get(src);
   const hit = per?.get(key);
   if (hit) return hit;
-  const refined = refineForBend(src, bd);
-  const g = refined === src ? src.clone() : refined;
-  // a clone shares the source's userData: its faces aren't flat any more, and
-  // its ink and shared normals get worked out again for the curved shape
-  g.userData = {};
-  g.deleteAttribute('inkNormal');
+  const g = reshaped(src, bendStep(bd), m, (g) => bendPoints(g, bd));
+  if (!per) bentCache.set(src, (per = new Map()));
+  if (per.size > 16) per.clear();
+  per.set(key, g);
+  return g;
+}
+
+function bendPoints(g: THREE.BufferGeometry, bd: ThingBend) {
   const pos = g.getAttribute('position') as THREE.BufferAttribute;
   const nor = g.getAttribute('normal') as THREE.BufferAttribute | undefined;
   const r0 = bd.r;
@@ -463,12 +504,119 @@ function bentGeometry(src: THREE.BufferGeometry, bd: ThingBend): THREE.BufferGeo
       nor.setXYZ(i, nx + (nu2 - nu) * ux, ny + (nu2 - nu) * uy, -nu * sn + nz * c);
     }
   }
-  g.computeBoundingBox();
-  g.computeBoundingSphere();
-  if (!per) bentCache.set(src, (per = new Map()));
-  if (per.size > 8) per.clear();
-  per.set(key, g);
-  return g;
+}
+
+// ---------------------------------------------------------------------------
+// shrink wrap: an attached thing pressed onto the body like a decal. Each
+// point keeps where it is across the drawing and moves along the thing's Z by
+// how far the body's surface there sits in front of (or behind) the surface
+// at the attach point, so the gap there is kept and the rest follows the body.
+
+/** The body's surface height along the thing's Z at drawing point (x, y), in thing space. */
+export type WrapSurface = (x: number, y: number) => number;
+
+/** Wrap smoothness and strength when a thing doesn't set its own. */
+export const WRAP_SMOOTH = 0.3;
+export const WRAP_STRENGTH = 1;
+
+interface Wrap {
+  surface: WrapSurface;
+  /** 0..1: how widely the surface is evened out first (0 = into every dip) */
+  smooth: number;
+  /** 0..1: how far toward the surface it's pressed (0 = flat as drawn) */
+  strength: number;
+}
+
+/** How far the farthest drawn point is from the crosshair. */
+function thingReach(pieces: Piece[]): number {
+  let reach = 0;
+  const v = new THREE.Vector3();
+  for (const p of pieces) {
+    const m = placeMatrix(p);
+    for (const [x, y] of p.outline) reach = Math.max(reach, v.set(x, y, p.z).applyMatrix4(m).length());
+  }
+  return Math.max(reach, 1e-3);
+}
+
+/**
+ * The surface's height under the thing, read off a grid laid over it (and the
+ * crosshair), evened out by the smoothness like a sheet stretched over the
+ * body: it rests on the crests of a lumpy or ribbed body and spans the dips
+ * between them, so it's never pushed in under a bump. The grid is cast once,
+ * however fine the thing's mesh. Past the grid, its nearest edge.
+ */
+function wrapField(wrap: Wrap, box: THREE.Box3, reach: number): (x: number, y: number) => number {
+  const blur = wrap.smooth * reach * 0.6;
+  const margin = blur + reach / 20;
+  const minX = Math.min(box.min.x, 0) - margin, maxX = Math.max(box.max.x, 0) + margin;
+  const minY = Math.min(box.min.y, 0) - margin, maxY = Math.max(box.max.y, 0) + margin;
+  const cell = Math.max(reach / 40, (maxX - minX) / 120, (maxY - minY) / 120);
+  const nx = Math.ceil((maxX - minX) / cell) + 1, ny = Math.ceil((maxY - minY) / cell) + 1;
+  let h = new Float32Array(nx * ny);
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) h[j * nx + i] = wrap.surface(minX + i * cell, minY + j * cell);
+  // the outermost surface within the smoothing radius, then the innermost of
+  // that (dips narrower than it fill in; smooth slopes and domes stay as they
+  // are), then a gaussian blur; each a row pass then a column pass, clamped at the edges
+  const sigma = blur / cell / 2;
+  if (sigma > 0.3) {
+    const passes = (r: number, fold: (n: number, read: (t: number) => number) => number) => {
+      for (const [n, m, along] of [[nx, ny, 1], [ny, nx, nx]] as const) {
+        const out = new Float32Array(nx * ny);
+        const across = along === 1 ? nx : 1;
+        for (let b = 0; b < m; b++) {
+          for (let a = 0; a < n; a++) out[b * across + a * along] = fold(r, (t) => h[b * across + Math.min(n - 1, Math.max(0, a + t)) * along]);
+        }
+        h = out;
+      }
+    };
+    const spread = Math.round(sigma * 2);
+    passes(spread, (r, read) => {
+      let top = -Infinity;
+      for (let t = -r; t <= r; t++) top = Math.max(top, read(t));
+      return top;
+    });
+    passes(spread, (r, read) => {
+      let low = Infinity;
+      for (let t = -r; t <= r; t++) low = Math.min(low, read(t));
+      return low;
+    });
+    const r = Math.ceil(sigma * 3);
+    const k: number[] = [];
+    let sum = 0;
+    for (let t = -r; t <= r; t++) sum += k[t + r] = Math.exp(-(t * t) / (2 * sigma * sigma));
+    passes(r, (r, read) => {
+      let acc = 0;
+      for (let t = -r; t <= r; t++) acc += k[t + r] * read(t);
+      return acc / sum;
+    });
+  }
+  return (x, y) => {
+    const fx = Math.min(nx - 1, Math.max(0, (x - minX) / cell)), fy = Math.min(ny - 1, Math.max(0, (y - minY) / cell));
+    const i = Math.min(nx - 2, Math.floor(fx)), j = Math.min(ny - 2, Math.floor(fy));
+    const u = fx - i, v = fy - j;
+    const at = (a: number, b: number) => h[b * nx + a];
+    return (at(i, j) * (1 - u) + at(i + 1, j) * u) * (1 - v) + (at(i, j + 1) * (1 - u) + at(i + 1, j + 1) * u) * v;
+  };
+}
+
+function wrapPoints(g: THREE.BufferGeometry, field: (x: number, y: number) => number, strength: number, e: number) {
+  const pos = g.getAttribute('position') as THREE.BufferAttribute;
+  const nor = g.getAttribute('normal') as THREE.BufferAttribute | undefined;
+  const h0 = field(0, 0);
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i);
+    const dh = (field(x, y) - h0) * strength;
+    const hx = ((field(x + e, y) - field(x - e, y)) / (2 * e)) * strength;
+    const hy = ((field(x, y + e) - field(x, y - e)) / (2 * e)) * strength;
+    pos.setZ(i, pos.getZ(i) + dh);
+    if (nor) {
+      // (x, y, z) -> (x, y, z + h(x, y)) turns normals by the inverse transpose
+      const nz = nor.getZ(i);
+      const nx = nor.getX(i) - hx * nz, ny = nor.getY(i) - hy * nz;
+      const l = Math.hypot(nx, ny, nz) || 1;
+      nor.setXYZ(i, nx / l, ny / l, nz / l);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -495,9 +643,28 @@ const placeMatrix = (p: Piece) =>
     : new THREE.Matrix4();
 
 /** Each piece's geometry in its own space, fused and painted where it blends with its neighbours. */
-function blendedGeometries(pieces: Piece[], bend: ThingBend | null): { geo: THREE.BufferGeometry; painted: boolean }[] {
-  const shaped = (p: Piece, g: THREE.BufferGeometry) => (bend && !p.place ? bentGeometry(g, bend) : g);
+function blendedGeometries(pieces: Piece[], bend: ThingBend | null, wrap?: Wrap): { geo: THREE.BufferGeometry; painted: boolean }[] {
   const raw = pieces.map((p) => pieceGeometry(p));
+  let field: ((x: number, y: number) => number) | null = null;
+  let step = 0;
+  if (wrap) {
+    const reach = thingReach(pieces);
+    step = reach / 36;
+    const box = new THREE.Box3();
+    raw.forEach((g, i) => {
+      if (!g.boundingBox) g.computeBoundingBox();
+      box.union(g.boundingBox!.clone().applyMatrix4(placeMatrix(pieces[i])));
+    });
+    field = wrapField(wrap, box, reach);
+  }
+  const shaped = (p: Piece, g: THREE.BufferGeometry) => {
+    if (field) {
+      const w = reshaped(g, step, placeMatrix(p), (g) => wrapPoints(g, field!, wrap!.strength, step / 2));
+      w.userData.wrapped = true;
+      return w;
+    }
+    return bend ? bentGeometry(g, bend, placeMatrix(p)) : g;
+  };
   let base = pieces.map((p, i) => shaped(p, raw[i]));
   if (!pieces.some((p) => (p.blendShape ?? 0) > 0 || (p.blendColor ?? 0) > 0)) return base.map((geo) => ({ geo, painted: false }));
 
@@ -841,7 +1008,8 @@ export function disposeThing(group: THREE.Object3D) {
     const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
     if (Array.isArray(m)) m.forEach((x) => x.dispose());
     else m?.dispose();
-    if (o instanceof THREE.LineSegments) o.geometry.dispose();
+    // wrapped pieces are made for this one placement: nothing else shares them
+    if (o instanceof THREE.LineSegments || (o instanceof THREE.Mesh && o.geometry.userData.wrapped)) o.geometry.dispose();
   });
 }
 
