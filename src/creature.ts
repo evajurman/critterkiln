@@ -194,8 +194,8 @@ export interface Placement {
   y?: number;
   /** full 3D turn as a quaternion; when missing, just `yaw` */
   quat?: [number, number, number, number];
-  /** overall size (default 1) */
-  scale?: number;
+  /** overall size (default 1), or a size along each of the creature's own axes when stretched */
+  scale?: number | V3;
 }
 
 /** A settled seamless skin and what it was built from. */
@@ -760,7 +760,8 @@ export class Creature {
     this.root.position.set(p.x, p.y ?? 0, p.z);
     if (p.quat) this.root.quaternion.set(...p.quat);
     else this.root.rotation.set(0, p.yaw, 0);
-    this.root.scale.setScalar(p.scale ?? 1);
+    if (Array.isArray(p.scale)) this.root.scale.set(...p.scale);
+    else this.root.scale.setScalar(p.scale ?? 1);
   }
 
   /** Read the placement back from the root (after a gizmo drag). */
@@ -775,7 +776,9 @@ export class Creature {
     };
     if (Math.abs(this.root.position.y) > 1e-4) p.y = r(this.root.position.y);
     if (!upright) p.quat = q.toArray().map((v) => r(v, 1e5)) as [number, number, number, number];
-    if (Math.abs(this.root.scale.x - 1) > 1e-4) p.scale = r(this.root.scale.x);
+    const s = this.root.scale;
+    if (Math.abs(s.x - s.y) > 1e-4 || Math.abs(s.y - s.z) > 1e-4) p.scale = [r(s.x), r(s.y), r(s.z)];
+    else if (Math.abs(s.x - 1) > 1e-4) p.scale = r(s.x);
     this.state.placement = p;
   }
 
@@ -2238,7 +2241,8 @@ export class Creature {
     for (const eye of shown.flatMap((g) => g.children)) {
       const { pair, r, sgn } = eye.userData.eye as { pair: number; r: number; sgn: number };
       eye.getWorldPosition(sphere.center);
-      sphere.radius = r * eye.getWorldScale(at).x;
+      const ws = eye.getWorldScale(at);
+      sphere.radius = r * Math.max(ws.x, ws.y, ws.z);
       if (!ray.intersectSphere(sphere, at)) continue;
       const distance = at.distanceTo(ray.origin);
       if (!best || distance < best.distance) best = { pair, distance, sgn, bone: (eye.parent?.parent?.userData.boneId as string) ?? '' };

@@ -3390,7 +3390,53 @@ function deleteThing(t: Thing) {
 // ---------------------------------------------------------------------------
 // attaching stuff to body parts
 
-const gizmo = new TransformControls(camera, canvas);
+/**
+ * TransformControls whose centre scale cube follows the mouse sideways: left shrinks, right
+ * grows (every 150px halves or doubles). Stock, it measures from the centre, and the cube sits
+ * so close to it that there was hardly any room to shrink. The axis handles are the stock ones,
+ * kept from going through zero.
+ */
+class SideScaleControls extends TransformControls {
+  private scaleFromX = 0;
+  private readonly scaleFrom = new THREE.Vector3();
+
+  pointerDown(pointer: PointerEvent | null) {
+    super.pointerDown(pointer);
+    if (!this.dragging || !this.object || !pointer) return;
+    this.scaleFromX = pointer.x;
+    this.scaleFrom.copy(this.object.scale);
+  }
+
+  pointerMove(pointer: PointerEvent | null) {
+    const axis = this.axis;
+    const obj = this.object;
+    if (this.mode !== 'scale' || !this.dragging || !obj || !pointer || pointer.button !== -1) {
+      super.pointerMove(pointer);
+      return;
+    }
+    if (axis !== 'XYZ') {
+      // stock, an axis dragged through the centre goes to 0 and then negative, and jitter there
+      // flips the thing inside out every frame: stop each axis at 5% of where it started
+      super.pointerMove(pointer);
+      const s = obj.scale;
+      const f = this.scaleFrom;
+      if (s.x >= f.x * 0.05 && s.y >= f.y * 0.05 && s.z >= f.z * 0.05) return;
+      s.set(Math.max(s.x, f.x * 0.05), Math.max(s.y, f.y * 0.05), Math.max(s.z, f.z * 0.05));
+      obj.updateMatrixWorld();
+      this.dispatchEvent({ type: 'change' });
+      this.dispatchEvent({ type: 'objectChange' });
+      return;
+    }
+    // pointer.x runs -1..1 across the canvas
+    const px = ((pointer.x - this.scaleFromX) * (this.domElement as HTMLElement).clientWidth) / 2;
+    obj.scale.copy(this.scaleFrom).multiplyScalar(2 ** (px / 150));
+    obj.updateMatrixWorld();
+    this.dispatchEvent({ type: 'change' });
+    this.dispatchEvent({ type: 'objectChange' });
+  }
+}
+
+const gizmo = new SideScaleControls(camera, canvas);
 gizmo.setSpace('local');
 gizmo.setSize(0.8);
 scene.add(gizmo.getHelper());
@@ -3400,13 +3446,6 @@ gizmo.addEventListener('dragging-changed', (e) => {
 gizmo.addEventListener('objectChange', () => {
   invalidate();
   if (placing) {
-    // creatures only grow or shrink evenly: whichever handle moved sets the size
-    const s = creature.root.scale;
-    if (gizmo.mode === 'scale' && !(s.x === s.y && s.y === s.z)) {
-      const pick = [s.x, s.y, s.z].reduce((a, v) => (Math.abs(v - placeScale) > Math.abs(a - placeScale) ? v : a), placeScale);
-      s.setScalar(Math.max(0.02, pick));
-    }
-    placeScale = s.x;
     creature.capturePlacement();
     fitShadows();
     return;
@@ -3467,15 +3506,12 @@ function deselectAttachment() {
 // a whole creature anywhere in 3D
 
 let placing = false;
-/** the creature's size when the scale handles were last read */
-let placeScale = 1;
 type PlaceMode = 'translate' | 'rotate' | 'scale';
 
 function setPlaceMode(m: PlaceMode) {
   gizmo.setMode(m);
   // move along the scene's axes; turn and size about the creature's own
   gizmo.setSpace(m === 'translate' ? 'world' : 'local');
-  placeScale = creature.root.scale.x;
   document.querySelectorAll<HTMLButtonElement>('#place-bar [data-place]').forEach((b) => b.classList.toggle('on', b.dataset.place === m));
 }
 
@@ -3523,7 +3559,6 @@ $('#place-reset').onclick = () => {
   creature.root.rotation.set(0, yaw, 0);
   creature.root.scale.setScalar(1);
   creature.root.position.y = 0;
-  placeScale = 1;
   creature.capturePlacement();
   setKeepFloor(true);
   settleOnFloor();
