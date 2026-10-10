@@ -44,8 +44,23 @@ self.addEventListener('fetch', (e) => {
     // built files have their hash in the name, so a saved copy is always right
     // (ignoreVary: the page asks for them crossorigin, and servers answer "Vary: Origin")
     e.respondWith(caches.match(req, { ignoreVary: true }).then((hit) => hit ?? fetch(req)));
+  } else if (url.hostname === 'kit.fontawesome.com') {
+    // the icon kit's loader keeps its URL when the kit is rebuilt, and names the
+    // icon CSS to load: a saved one would load an old set (missing whole icon
+    // families, so duotone icons draw twice), so the newest one when online
+    e.respondWith(
+      caches.open(EXTRA).then((c) =>
+        fetch(req)
+          .then((res) => {
+            if (res.ok) c.put(req, res.clone());
+            return res;
+          })
+          .catch(async () => (await c.match(req, { ignoreVary: true })) ?? Response.error()),
+      ),
+    );
   } else if (url.protocol.startsWith('http')) {
     // fonts and icons: the saved copy straight away, refreshed in the background
+    // (these URLs change whenever their contents do)
     e.respondWith(
       caches.open(EXTRA).then(async (c) => {
         const hit = await c.match(req, { ignoreVary: true });
