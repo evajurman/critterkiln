@@ -1045,6 +1045,8 @@ float triH(sampler2D t, vec3 p, float k) { return triS(t, p, k).x; }
 `;
 
 function triplanar<T extends THREE.Material>(mat: T, o: TriOptions): T {
+  // laid out by position (see setTextureSpace), not by UVs
+  mat.userData.triplanar = true;
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.triTiling = { value: o.tiling };
     // where the texture is laid out: the creature's rest pose (see setTextureSpace)

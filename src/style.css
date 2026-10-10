@@ -507,6 +507,9 @@ body.ck-editing .panel.idle .idle-note { display: none; }
 #eye-pupil-look { margin-top: 8px; }
 #eye-look { margin-top: 8px; }
 .eye-swatches { grid-template-columns: repeat(8, 1fr); margin: 6px 0; }
+.eye-material-opts { margin-top: 6px; }
+.eye-material-opts .check { margin: 6px 0; }
+.eye-material-opts .check[hidden] { display: none; }
 
 .settle-badge {
   /* bottom middle, under the hint: clear of whatever is pinned to the bottom corners */

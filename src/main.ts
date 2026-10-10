@@ -4992,6 +4992,8 @@ function renderStyleParams(style: StyleId, el: HTMLElement = $('#style-params'),
         creature.sync();
         syncWorkbench();
         if (owner === state && floorPrefs.mode === 'material' && floorPrefs.style === style) buildFloorMesh();
+        // toon's ink width at 0 has no outline for the eyes to share
+        if (p.key === 'ink') renderEyes();
       });
     };
     input.oninput = () => {
@@ -5143,6 +5145,14 @@ function renderEyes() {
   if (shaped) {
     const finish = e.finish ?? 'body';
     document.querySelectorAll<HTMLButtonElement>('#eye-finish button').forEach((b) => b.classList.toggle('active', b.dataset.finish === finish));
+    // options that only mean something on some materials (the ink outline: on a toon part)
+    const inkable = creature.eyesCanInk();
+    const textured = creature.eyesTextured();
+    $('#eye-material-opts').hidden = !inkable && !textured;
+    $('#eye-ink-row').hidden = !inkable;
+    $('#eye-vary-row').hidden = !textured;
+    $<HTMLInputElement>('#eye-ink').checked = !!e.ink;
+    $<HTMLInputElement>('#eye-vary').checked = e.vary !== false;
     const current = (e.color ?? (e.style === 'bead' ? '#1d1a22' : '#2a2730')).toLowerCase();
     const sw = $('#eye-swatches');
     sw.innerHTML = '';
@@ -5203,6 +5213,8 @@ function setStyle(id: StyleId) {
   creature.markMergeDirty();
   commit();
   renderStyles();
+  // which eye options apply depends on the material (ink on toon, varying on a textured one)
+  renderEyes();
 }
 
 /**
@@ -6271,6 +6283,16 @@ $('#eye-shape-reset').onclick = () =>
     delete e.lidBottom;
     delete e.crescent;
     delete e.tilt;
+  });
+$<HTMLInputElement>('#eye-ink').onchange = (ev) =>
+  setEyeLook((e) => {
+    if ((ev.target as HTMLInputElement).checked) e.ink = true;
+    else delete e.ink;
+  });
+$<HTMLInputElement>('#eye-vary').onchange = (ev) =>
+  setEyeLook((e) => {
+    if ((ev.target as HTMLInputElement).checked) delete e.vary;
+    else e.vary = false;
   });
 document.querySelectorAll<HTMLButtonElement>('#eye-finish button').forEach((b) => {
   b.onclick = () => setEyeLook((e) => (e.finish = b.dataset.finish as EyeFinish));

@@ -11,6 +11,7 @@ import {
   makeFuzzShells,
   makeMaterial,
   makeOutlineMaterial,
+  inkNormals,
   makeStrayHairs,
   setTextureSpace,
   styleSettings,
@@ -108,6 +109,10 @@ export interface EyesState {
   finish?: EyeFinish;
   /** bead / dot / button color */
   color?: string;
+  /** bead / dot / button on a toon part: outlined in its ink (default off) */
+  ink?: boolean;
+  /** bead / dot / button in a textured material: each eye gets its own patch of it, not the same one (default on; false = all the same) */
+  vary?: boolean;
   /** googly: 1 glossy .. 0 matte (default glossy) */
   shine?: number;
   /** googly / sticker: pupil size, 0..1 (default 0.5) */
@@ -1776,16 +1781,28 @@ export class Creature {
       const x = new THREE.Vector3().crossVectors(y, z);
       const eye = new THREE.Group();
       eye.userData.eye = { pair: pairIndex, r, sgn };
+      // on a part with an ink outline, the eyes can have one too
+      eye.userData.inkable = partStyle === 'toon' && this.settingsFor(partStyle).ink > 0;
+      // (set once built, below)
+      eye.userData.textured = false;
       eye.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
       // stand-off: lift the eye out along its facing direction
       eye.position.copy(hit.point).addScaledVector(z, (pair.lift ?? e.lift ?? 0) * r * 1.2);
       const style = EYE_STYLES.some((o) => o.id === e.style) ? e.style : 'googly';
-      eye.add(buildEye(style, r, sgn, partStyle, this.settingsFor(partStyle), e));
+      const built = buildEye(style, r, sgn, partStyle, this.settingsFor(partStyle), e);
+      // a textured material lays out the same patch on every eye (they're the same shape) unless shifted
+      if (e.vary !== false) varyEyeTexture(built, hashString(`${part.def.id}:${pairIndex}:${sgn}`));
+      eye.add(built);
       eye.traverse((m) => {
         m.raycast = () => {};
         // glass casts no shadow, as with the body (see castsShadow): a glass
         // creature's glass beads would leave two shadows floating on the floor
-        m.castShadow = !(m instanceof THREE.Mesh && (m.material as THREE.MeshPhysicalMaterial).transmission > 0);
+        // (nor does ink, as on the body)
+        const mat = m instanceof THREE.Mesh ? (m.material as THREE.MeshPhysicalMaterial) : null;
+        m.castShadow = !!mat && !(mat.transmission > 0) && !mat.userData.ink;
+      });
+      eye.traverse((m) => {
+        if (((m as THREE.Mesh).material as THREE.Material | undefined)?.userData.triplanar) eye.userData.textured = true;
       });
       group.add(eye);
       // bare patch just inside the eye's own rim, so it stays hidden behind it
@@ -2143,6 +2160,16 @@ export class Creature {
    * don't take raycasts (clicks go through to the head), so each eye counts as
    * a ball of its own size.
    */
+  /** Whether any eye is made of a textured material (so its texture can be varied). */
+  eyesTextured(): boolean {
+    return this.eyes.some((g) => g.children.some((eye) => eye.userData.textured));
+  }
+
+  /** Whether any eye sits on a part drawn with an ink outline (so an outline would show on it). */
+  eyesCanInk(): boolean {
+    return this.eyes.some((g) => g.children.some((eye) => eye.userData.inkable));
+  }
+
   pickEye(ray: THREE.Ray): { pair: number; distance: number; sgn: number; bone: string } | null {
     const shown = this.eyes.filter((g) => g.parent && g.visible);
     let best: { pair: number; distance: number; sgn: number; bone: string } | null = null;
@@ -2490,9 +2517,57 @@ function buildEye(style: EyeStyle, r: number, sgn: number, headStyle: StyleId, h
       for (const a of [Math.PI / 4, -Math.PI / 4]) {
         const t = add(box, thread, [0, 0, R * 0.23], [o * 2 * Math.SQRT2 + R * 0.12, R * 0.06, R * 0.04]);
         t.rotation.z = a;
+        // too fine to ink: the outline would swallow it
+        t.userData.noInk = true;
       }
       break;
     }
   }
+  // a toon head can draw its eyes in the same ink as itself
+  if (e.ink && (style === 'bead' || style === 'dot' || style === 'button') && headStyle === 'toon' && headSettings.ink > 0) inkEye(g, headSettings);
   return g;
+}
+
+/**
+ * Give each piece of an eye its own patch of a textured material: the
+ * texture is laid out shifted and turned by an amount picked from `seed`,
+ * the same every time, so the eye keeps its look between rebuilds.
+ */
+function varyEyeTexture(g: THREE.Object3D, seed: number) {
+  let s = seed || 1;
+  // xorshift: a few repeatable random numbers 0..1
+  const rnd = () => {
+    s ^= s << 13;
+    s ^= s >>> 17;
+    s ^= s << 5;
+    return (s >>> 0) / 4294967296;
+  };
+  g.traverse((o) => {
+    if (!(o instanceof THREE.Mesh)) return;
+    const turn = new THREE.Quaternion().setFromEuler(new THREE.Euler(rnd() * Math.PI * 2, rnd() * Math.PI * 2, rnd() * Math.PI * 2));
+    const shift = new THREE.Vector3(rnd(), rnd(), rnd()).multiplyScalar(10);
+    // (the materials are the eye's own, made fresh for it)
+    setTextureSpace(o, new THREE.Matrix4().compose(shift, turn, new THREE.Vector3(1, 1, 1)));
+  });
+}
+
+/**
+ * Ink hulls round each solid piece of an eye. A piece's size is baked into its
+ * hull's shape, so the line is as wide as the body's, however the piece is squashed.
+ * Glints, holes and the clear dome (basic or see-through materials) go without.
+ */
+function inkEye(g: THREE.Object3D, k: StyleSettings) {
+  const meshes: THREE.Mesh[] = [];
+  g.traverse((o) => {
+    if (o instanceof THREE.Mesh && !o.userData.noInk) meshes.push(o);
+  });
+  for (const m of meshes) {
+    const mat = m.material as THREE.Material;
+    if (mat instanceof THREE.MeshBasicMaterial || mat.transparent) continue;
+    const geo = inkNormals(m.geometry.clone().scale(m.scale.x, m.scale.y, m.scale.z));
+    const ink = new THREE.Mesh(geo, makeOutlineMaterial(k.ink, true, k));
+    ink.position.copy(m.position);
+    ink.quaternion.copy(m.quaternion);
+    m.parent!.add(ink);
+  }
 }
