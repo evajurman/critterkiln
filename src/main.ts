@@ -3294,14 +3294,14 @@ function renderStuffPanel() {
       b.style.background = c;
       b.title = c;
       b.classList.toggle('active', c.toLowerCase() === p.color.toLowerCase());
-      b.onclick = () => updatePiece((q) => (q.color = c));
+      b.onclick = () => updatePieceColor((q) => (q.color = c));
       sw.append(b);
     }
     $<HTMLInputElement>('#piece-color').value = p.color;
     $<HTMLInputElement>('#piece-glow').value = String(p.glow ?? 0);
     pieceGlowFollow();
     // (only something to do with more than one piece)
-    $('#paint-thing').hidden = wb.pieces.length < 2;
+    $('#piece-color-scope').hidden = wb.pieces.length < 2;
     pieceSceneColors();
     const st = $('#piece-styles');
     st.innerHTML = '';
@@ -3432,41 +3432,37 @@ for (const [id, key] of [['#piece-thickness', 'thickness'], ['#piece-round', 'ro
   input.oninput = () => updatePiece((p) => (p[key] = parseFloat(input.value)), false);
   input.onchange = () => commit();
 }
-$('#paint-thing').onclick = () => {
-  const p = piece();
-  if (!p) return;
-  for (const q of workbench().pieces) {
-    q.color = p.color;
-    if (p.glow) q.glow = p.glow;
-    else delete q.glow;
-    if (p.glowFollow) q.glowFollow = p.glowFollow;
-    else delete q.glowFollow;
-  }
-  syncWorkbench();
-  commit();
-  renderStuffPanel();
-};
+/** Piece colors go on the picked piece, or (All) on every piece of the thing */
+let pieceColorAll = false;
+/** `updatePiece` for colors and glow: on every piece with All picked */
+function updatePieceColor(fn: (p: Piece) => void, doCommit = true) {
+  updatePiece((p) => {
+    for (const q of pieceColorAll ? workbench().pieces : [p]) fn(q);
+  }, doCommit);
+}
+scopeSeg('#piece-color-scope', () => pieceColorAll, (all) => (pieceColorAll = all));
 const pieceGlowFollow = glowFollowSeg(
   '#piece-glow-follow',
   () => piece(),
   (f) =>
-    updatePiece((q) => {
+    updatePieceColor((q) => {
       if (f) q.glowFollow = f;
       else delete q.glowFollow;
     }),
 );
-const pieceSceneColors = sceneColorRow($('#piece-scene-colors'), () => piece()?.color, (c) => updatePiece((q) => (q.color = c)));
+const pieceSceneColors = sceneColorRow($('#piece-scene-colors'), () => piece()?.color, (c) => updatePieceColor((q) => (q.color = c)));
 glowSlider(
   '#piece-glow',
-  (v) =>
-    updatePiece((p) => {
+  (v) => {
+    updatePieceColor((p) => {
       if (v > 0) p.glow = v;
       else delete p.glow;
-      pieceGlowFollow();
-    }, false),
+    }, false);
+    pieceGlowFollow();
+  },
   () => commit(),
 );
-$<HTMLInputElement>('#piece-color').oninput = (e) => updatePiece((p) => (p.color = (e.target as HTMLInputElement).value), false);
+$<HTMLInputElement>('#piece-color').oninput = (e) => updatePieceColor((p) => (p.color = (e.target as HTMLInputElement).value), false);
 $<HTMLInputElement>('#piece-color').onchange = () => {
   commit();
   renderStuffPanel();

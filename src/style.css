@@ -225,7 +225,7 @@ input[type=range] { accent-color: var(--accent); width: 100%; }
 .scene-colors { margin-top: 8px; }
 /* a piece's Custom color and Paint whole thing, side by side above the swatches */
 .paint-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
-.paint-row button[hidden] { display: none; }
+.paint-row > [hidden] { display: none; }
 /* where a glow comes from: under its Glow slider, only while it glows */
 .glow-follow { margin: -2px 0 8px; }
 .glow-follow[hidden] { display: none; }

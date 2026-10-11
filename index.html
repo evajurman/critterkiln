@@ -364,7 +364,10 @@
             <label class="slider" title="Fade into the colors of the pieces this one touches"><span>Blend color</span><input id="piece-blend-color" type="range" min="0" max="1" step="0.01" /></label>
             <div class="paint-row">
               <label class="color-pick"><input id="piece-color" type="color" /> Custom</label>
-              <button id="paint-thing" class="ghost" title="Give every piece of this thing this piece's color and glow"><i class="fa-duotone fa-regular fa-fill-drip" aria-hidden="true"></i> Paint whole thing</button>
+              <div class="seg scope-seg" id="piece-color-scope">
+                <button data-scope="part" title="Colors and glow go on the picked piece">Piece</button>
+                <button data-scope="all" title="Colors and glow go on every piece of this thing">All</button>
+              </div>
             </div>
             <div class="swatches" id="piece-swatches"></div>
             <div class="scene-colors" id="piece-scene-colors"></div>
