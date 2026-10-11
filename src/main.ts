@@ -5178,8 +5178,10 @@ const partGlowFollow = glowFollowSeg(
   '#glow-follow',
   () => (creature.bones.has(selected) ? selPart() : undefined),
   (f) => {
-    if (f) selPart().glowFollow = f;
-    else delete selPart().glowFollow;
+    for (const p of colorParts()) {
+      if (f) p.glowFollow = f;
+      else delete p.glowFollow;
+    }
     creature.sync();
     creature.markMergeDirty();
     commit();
@@ -5189,8 +5191,10 @@ const partSceneColors = sceneColorRow($('#scene-colors'), () => (creature.bones.
 glowSlider(
   '#glow',
   (v) => {
-    if (v > 0) selPart().glow = v;
-    else delete selPart().glow;
+    for (const p of colorParts()) {
+      if (v > 0) p.glow = v;
+      else delete p.glow;
+    }
     creature.sync();
     creature.markMergeDirty();
     partGlowFollow();
@@ -5199,8 +5203,7 @@ glowSlider(
 );
 
 function renderStyles() {
-  const onlyPart = $<HTMLInputElement>('#style-part').checked;
-  const current = onlyPart ? (selPart().style ?? state.style) : state.style;
+  const current = !styleAll ? (selPart().style ?? state.style) : state.style;
   const el = $('#styles');
   el.innerHTML = '';
   for (const s of STYLES) {
@@ -5532,8 +5535,43 @@ function renderUI() {
   syncIdle();
 }
 
+/** Colors go on the picked part, or (Everything) on the whole creature */
+let colorAll = false;
+/** Materials go on the whole creature, or (Part) just the picked part */
+let styleAll = true;
+/** the parts a color (and its glow) goes on */
+function colorParts(): PartState[] {
+  return colorAll ? Object.values(state.parts) : [selPart()];
+}
+
+/** A Part | Everything toggle: shows `get()`, and `set`s it when clicked. */
+function scopeSeg(id: string, get: () => boolean, set: (all: boolean) => void): () => void {
+  const buttons = [...$(id).querySelectorAll<HTMLButtonElement>('button')];
+  const render = () => {
+    for (const b of buttons) b.classList.toggle('active', (b.dataset.scope === 'all') === get());
+  };
+  for (const b of buttons) {
+    b.onclick = () => {
+      set(b.dataset.scope === 'all');
+      render();
+    };
+  }
+  render();
+  return render;
+}
+scopeSeg('#color-scope', () => colorAll, (all) => (colorAll = all));
+scopeSeg(
+  '#style-scope',
+  () => styleAll,
+  (all) => {
+    styleAll = all;
+    renderStyles();
+  },
+);
+
 function setColor(c: string, doCommit: boolean) {
-  selPart().color = c;
+  for (const p of colorParts()) p.color = c;
+  if (colorAll && doCommit && Object.keys(state.parts).length > 1) unlock('paint-all');
   creature.sync();
   creature.markMergeDirty();
   if (doCommit) {
@@ -5544,7 +5582,7 @@ function setColor(c: string, doCommit: boolean) {
 }
 
 function setStyle(id: StyleId) {
-  if ($<HTMLInputElement>('#style-part').checked) {
+  if (!styleAll) {
     selPart().style = id;
   } else {
     state.style = id;
@@ -6334,21 +6372,6 @@ $<HTMLInputElement>('#thickness').onchange = () => {
 
 $<HTMLInputElement>('#color').oninput = (e) => setColor((e.target as HTMLInputElement).value, false);
 $<HTMLInputElement>('#color').onchange = (e) => setColor((e.target as HTMLInputElement).value, true);
-$('#paint-all').onclick = () => {
-  const { color: c, glow, glowFollow } = selPart();
-  for (const p of Object.values(state.parts)) {
-    p.color = c;
-    if (glow) p.glow = glow;
-    else delete p.glow;
-    if (glowFollow) p.glowFollow = glowFollow;
-    else delete p.glowFollow;
-  }
-  creature.sync();
-  commit();
-  unlock('paint-all');
-  renderUI();
-};
-$<HTMLInputElement>('#style-part').onchange = () => renderStyles();
 
 function renderBackdrops() {
   const el = $('#backdrops');

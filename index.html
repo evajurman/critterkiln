@@ -137,7 +137,12 @@
           <div class="ck-tool" data-tool="floor"><button id="drop-floor" class="ghost" title="Move the whole creature so its lowest point touches the floor"><i class="fa-slab-duo fa-regular fa-arrow-down-to-line" aria-hidden="true"></i> Floor</button></div>
           <div class="ck-tool" data-tool="keep-floor"><label class="check" title="After you bend or resize something, the creature settles back onto the floor (if it was standing on it)"><input id="keep-floor" type="checkbox" checked /> Keep feet on the floor</label></div>
           <div class="ck-tool" data-tool="custom-color"><label class="color-pick"><input id="color" type="color" /> Custom</label></div>
-          <div class="ck-tool" data-tool="paint-all"><button id="paint-all" class="ghost"><i class="fa-duotone fa-regular fa-fill-drip" aria-hidden="true"></i> Paint whole creature</button></div>
+          <div class="ck-tool" data-tool="paint-all">
+            <div class="seg scope-seg" id="color-scope">
+              <button data-scope="part" title="Colors and glow go on the picked part">Part</button>
+              <button data-scope="all" title="Colors and glow go on the whole creature">Everything</button>
+            </div>
+          </div>
           <div class="ck-tool" data-tool="swatches"><div id="swatches" class="swatches"></div></div>
           <div class="ck-tool" data-tool="scene-colors"><div class="scene-colors" id="scene-colors"></div></div>
           <div class="ck-tool" data-tool="glow">
@@ -156,7 +161,12 @@
           </div>
           <div class="ck-tool" data-tool="materials"><div id="styles" class="styles"></div></div>
           <div class="ck-tool" data-tool="material-params"><div id="style-params" class="style-params"></div></div>
-          <div class="ck-tool" data-tool="style-part"><label class="check"><input id="style-part" type="checkbox" /> Only the selected part</label></div>
+          <div class="ck-tool" data-tool="style-part">
+            <div class="seg scope-seg" id="style-scope">
+              <button data-scope="part" title="A material just for the picked part">Part</button>
+              <button data-scope="all" title="One material for the whole creature">Everything</button>
+            </div>
+          </div>
           <div class="ck-tool" data-tool="arrange"><button id="cr-place" class="pill-toggle" title="Move, turn or resize this creature anywhere in the scene"><i class="fa-duotone fa-regular fa-arrows-up-down-left-right" aria-hidden="true"></i> Arrange</button></div>
           <div class="ck-tool" data-tool="pull">
             <label id="ik-pill" class="pill-toggle" title="Dragging a hand bends the elbow and shoulder too">
