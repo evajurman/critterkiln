@@ -3874,8 +3874,7 @@ function syncAttachBar() {
   if (!a) return;
   document.querySelectorAll<HTMLButtonElement>('#attach-bar [data-gizmo]').forEach((b) => b.classList.toggle('on', b.dataset.gizmo === gizmo.mode));
   const bone = creature.bones.get(a.bone);
-  const hasTwin = !!bone && !!creature.twinOf(bone);
-  $('#attach-mirror-label').hidden = !hasTwin;
+  $('#attach-mirror-label').hidden = !bone || !creature.mirrorBoneOf(bone);
   $<HTMLInputElement>('#attach-mirror').checked = a.mirror;
   $('#attach-mirror-label').classList.toggle('on', a.mirror);
   $<HTMLInputElement>('#attach-wrap').checked = !!a.wrap;

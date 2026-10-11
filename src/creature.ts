@@ -920,6 +920,11 @@ export class Creature {
     return this.bones.get(b.def.baseId + (b.def.sideSign === 1 ? 'R' : 'L')) ?? null;
   }
 
+  /** Where an attachment's mirrored copy goes: the twin limb, or (a middle part) the part itself, across the creature's middle. */
+  mirrorBoneOf(b: BoneRT): BoneRT | null {
+    return b.def.sideSign === 0 ? b : this.twinOf(b);
+  }
+
   syncAttachments() {
     const list = this.state.attachments ?? [];
     const alive = new Set<string>();
@@ -927,7 +932,7 @@ export class Creature {
       const bone = this.bones.get(a.bone);
       if (!bone) continue;
       alive.add(a.id);
-      const twinBone = a.mirror ? this.twinOf(bone) : null;
+      const twinBone = a.mirror ? this.mirrorBoneOf(bone) : null;
       // an item that inherits its material takes the material of the part it's on
       const part = this.state.parts[bone.src];
       const wearer = { style: part?.style ?? this.state.style, settingsFor: (st: StyleId) => this.settingsFor(st) };
@@ -1048,13 +1053,18 @@ export class Creature {
 
   /**
    * The twin limb's frame is this one mirrored across its local Z, so the
-   * mirrored copy uses M * A with M = diag(1, 1, -1).
+   * mirrored copy uses M * A with M = diag(1, 1, -1). On a middle part the
+   * copy rides the same part, mirrored across the creature's middle (x = 0 at
+   * rest): R^-1 * diag(-1, 1, 1) * R * A, with R the part's rest frame.
    */
   updateTwin(id: string) {
     const rec = this.attached.get(id);
     if (!rec?.twin) return;
     rec.main.updateMatrix();
-    rec.twin.matrix.makeScale(1, 1, -1).multiply(rec.main.matrix);
+    if (rec.twinBone === rec.bone) {
+      const r = rec.bone.restGroup;
+      rec.twin.matrix.copy(r).invert().multiply(new THREE.Matrix4().makeScale(-1, 1, 1)).multiply(r).multiply(rec.main.matrix);
+    } else rec.twin.matrix.makeScale(1, 1, -1).multiply(rec.main.matrix);
     rec.twin.matrixWorldNeedsUpdate = true;
   }
 
