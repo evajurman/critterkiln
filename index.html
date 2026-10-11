@@ -446,13 +446,32 @@
           <label id="attach-wrap-label" class="pill-toggle" title="Shrink wrap: press the item onto the body part's surface, following its curve (used instead of the item's own Bend)">
             <input id="attach-wrap" type="checkbox" /> <i class="fa-slab-duo fa-regular fa-map" aria-hidden="true"></i> Wrap
           </label>
-          <button id="attach-mat" class="seg-btn" title="Material settings for this item"><i class="fa-slab-duo fa-regular fa-palette" aria-hidden="true"></i> Material</button>
+          <button id="attach-mat" class="seg-btn" title="Color and material for this stuff"><i class="fa-slab-duo fa-regular fa-palette" aria-hidden="true"></i> Material</button>
           <button id="attach-copy" class="seg-btn" title="Copy" aria-label="Copy"><i class="fa-slab-duo fa-regular fa-copy" aria-hidden="true"></i></button>
           <button id="attach-remove" class="seg-btn" title="Remove"><i class="fa-slab-duo fa-regular fa-trash" aria-hidden="true"></i></button>
           <button id="attach-done">Done</button>
         </div>
         <div id="attach-mat-pop" class="popover attach-mat-pop" hidden>
-          <div class="pop-title">Item material <button id="attach-mat-close" class="pop-close" title="Close" aria-label="Close"><i class="fa-duotone fa-regular fa-xmark" aria-hidden="true"></i></button></div>
+          <div class="pop-title">Stuff material <button id="attach-mat-close" class="pop-close" title="Close" aria-label="Close"><i class="fa-duotone fa-regular fa-xmark" aria-hidden="true"></i></button></div>
+          <div class="attach-color">
+            <div class="attach-pieces" id="attach-pieces"></div>
+            <div class="paint-row">
+              <label class="color-pick"><input id="attach-color" type="color" /> Custom</label>
+              <div class="seg scope-seg" id="attach-color-scope">
+                <button data-scope="part" title="Colors and glow go on the picked piece">Piece</button>
+                <button data-scope="all" title="Colors and glow go on every piece of this thing">All</button>
+              </div>
+            </div>
+            <div class="swatches" id="attach-swatches"></div>
+            <div class="scene-colors" id="attach-scene-colors"></div>
+            <label class="slider glow-slider" title="Make the color shine with its own light"><span>Glow</span><input id="attach-glow" type="range" min="0" max="1" step="0.01" />
+              <span class="ends"><em>off</em><em>bright</em></span></label>
+            <div class="seg glow-follow" id="attach-glow-follow" title="Where the glow comes from">
+              <button data-follow="even" title="Glow evenly all over">Even</button>
+              <button data-follow="bright" title="Glow from the bright parts of the texture: cracks and dark patches stay dim">Bright</button>
+              <button data-follow="dark" title="Glow from the dark parts of the texture: cracks, seams, pits and patina">Dark</button>
+            </div>
+          </div>
           <div id="attach-mat-body"></div>
         </div>
         <div id="attach-pop" class="popover attach-pop" hidden>

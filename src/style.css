@@ -468,6 +468,16 @@ button.primary.slim { width: auto; flex: 1; padding: 8px 10px; font-size: 14px; 
 .attach-name { padding: 0 6px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
 .attach-bar[hidden], .attach-pop[hidden], .attach-mat-pop[hidden] { display: none; }
 .attach-mat-pop { width: 300px; max-height: 70%; overflow-y: auto; top: 64px; }
+.attach-color { padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid var(--line); }
+.attach-pieces { display: flex; flex-wrap: wrap; gap: 4px; }
+.attach-pieces[hidden] { display: none; }
+.attach-pieces .piece-pick { flex: none; border: 1px solid var(--line); background: none; }
+.attach-pieces .piece-pick.active { border-color: var(--accent); background: var(--accent-soft); }
+/* the same colors as the Stuff panel's, not the popovers' big tiles */
+.attach-color .swatches { grid-template-columns: repeat(8, 1fr); margin-bottom: 0; }
+.attach-color .swatches button { aspect-ratio: 1; border-radius: 50%; }
+.attach-color .scene-colors .swatches { grid-template-columns: repeat(10, 1fr); }
+.attach-color .scene-colors .swatches button { border-radius: 50%; }
 .thing-material { margin-top: 10px; }
 
 .dof-slider { grid-template-columns: 44px 1fr; font-size: 12px; }

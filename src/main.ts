@@ -3440,7 +3440,7 @@ function updatePieceColor(fn: (p: Piece) => void, doCommit = true) {
     for (const q of pieceColorAll ? workbench().pieces : [p]) fn(q);
   }, doCommit);
 }
-scopeSeg('#piece-color-scope', () => pieceColorAll, (all) => (pieceColorAll = all));
+const pieceColorScope = scopeSeg('#piece-color-scope', () => pieceColorAll, (all) => (pieceColorAll = all));
 const pieceGlowFollow = glowFollowSeg(
   '#piece-glow-follow',
   () => piece(),
@@ -3883,9 +3883,96 @@ function syncAttachBar() {
   if (!$('#attach-mat-pop').hidden) renderAttachMaterial();
 }
 
+/** The piece of the picked stuff its colors go on (picked in its Stuff material popover) */
+let attachPieceId = '';
+function attachPiece(): Piece | undefined {
+  const a = currentAttachment();
+  return a?.thing.pieces.find((p) => p.id === attachPieceId) ?? a?.thing.pieces[0];
+}
+/** Change the picked stuff's color or glow: on its piece, or (All) on every piece of it */
+function updateAttachColor(fn: (p: Piece) => void, doCommit = true) {
+  const a = currentAttachment();
+  const p = attachPiece();
+  if (!a || !p) return;
+  for (const q of pieceColorAll ? a.thing.pieces : [p]) fn(q);
+  creature.sync();
+  if (doCommit) {
+    commit();
+    renderAttachMaterial();
+  }
+}
+const attachColorScope = scopeSeg(
+  '#attach-color-scope',
+  () => pieceColorAll,
+  (all) => {
+    pieceColorAll = all;
+    pieceColorScope();
+  },
+);
+const attachGlowFollow = glowFollowSeg('#attach-glow-follow', attachPiece, (f) =>
+  updateAttachColor((q) => {
+    if (f) q.glowFollow = f;
+    else delete q.glowFollow;
+  }),
+);
+const attachSceneColors = sceneColorRow($('#attach-scene-colors'), () => attachPiece()?.color, (c) => updateAttachColor((q) => (q.color = c)));
+glowSlider(
+  '#attach-glow',
+  (v) => {
+    updateAttachColor((p) => {
+      if (v > 0) p.glow = v;
+      else delete p.glow;
+    }, false);
+    attachGlowFollow();
+  },
+  () => commit(),
+);
+$<HTMLInputElement>('#attach-color').oninput = (e) => updateAttachColor((p) => (p.color = (e.target as HTMLInputElement).value), false);
+$<HTMLInputElement>('#attach-color').onchange = () => {
+  commit();
+  renderAttachMaterial();
+};
+
 function renderAttachMaterial() {
   const a = currentAttachment();
   if (!a) return;
+  const p = attachPiece()!;
+  const several = a.thing.pieces.length > 1;
+  // which piece: a button per piece, in its color
+  const pieces = $('#attach-pieces');
+  pieces.hidden = !several;
+  pieces.replaceChildren(
+    ...a.thing.pieces.map((q, i) => {
+      const b = document.createElement('button');
+      b.className = 'piece-pick';
+      b.classList.toggle('active', q === p);
+      b.innerHTML = `<i style="background:${q.color}"></i>`;
+      b.append(` ${i + 1}`);
+      b.title = `Piece ${i + 1}`;
+      b.onclick = () => {
+        attachPieceId = q.id;
+        renderAttachMaterial();
+      };
+      return b;
+    }),
+  );
+  $('#attach-color-scope').hidden = !several;
+  attachColorScope();
+  const sw = $('#attach-swatches');
+  sw.replaceChildren(
+    ...SWATCHES.map((c) => {
+      const b = document.createElement('button');
+      b.style.background = c;
+      b.title = c;
+      b.classList.toggle('active', c.toLowerCase() === p.color.toLowerCase());
+      b.onclick = () => updateAttachColor((q) => (q.color = c));
+      return b;
+    }),
+  );
+  $<HTMLInputElement>('#attach-color').value = p.color;
+  $<HTMLInputElement>('#attach-glow').value = String(p.glow ?? 0);
+  attachGlowFollow();
+  attachSceneColors();
   const part = state.parts[creature.bones.get(a.bone)?.src ?? ''];
   renderThingMaterial(a.thing, [...new Set(a.thing.pieces.map((p) => p.style))], $('#attach-mat-body'), part?.style ?? state.style);
 }
