@@ -64,11 +64,11 @@
 
       <aside class="panel">
         <div id="creature-bar" class="creature-bar">
-          <div id="creature-rows" class="creature-rows"></div>
           <div class="creature-foot">
             <button id="cr-add" class="ghost creature-new" title="Add a new creature to the scene"><i class="fa-duotone fa-regular fa-plus" aria-hidden="true"></i> New</button>
             <button id="ck-menu-btn" class="piece-icon ck-menu-btn" title="Sections: bring back hidden ones, gizmos, and arranging this tab" aria-label="Sections"><i class="fa-duotone fa-regular fa-ellipsis" aria-hidden="true"></i></button>
           </div>
+          <div id="creature-rows" class="creature-rows"></div>
           <div id="ck-banner" class="ck-banner" hidden></div>
         </div>
         <p class="idle-note muted">Click a creature to start shaping it, or pick one above.</p>
@@ -136,14 +136,14 @@
           <div class="ck-tool" data-tool="stand"><button id="reset-pose" class="ghost" title="Straighten every joint back out"><i class="fa-duotone fa-regular fa-person" aria-hidden="true"></i> Stand up straight</button></div>
           <div class="ck-tool" data-tool="floor"><button id="drop-floor" class="ghost" title="Move the whole creature so its lowest point touches the floor"><i class="fa-slab-duo fa-regular fa-arrow-down-to-line" aria-hidden="true"></i> Floor</button></div>
           <div class="ck-tool" data-tool="keep-floor"><label class="check" title="After you bend or resize something, the creature settles back onto the floor (if it was standing on it)"><input id="keep-floor" type="checkbox" checked /> Keep feet on the floor</label></div>
-          <div class="ck-tool" data-tool="swatches">
-            <div id="swatches" class="swatches"></div>
-            <div class="scene-colors" id="scene-colors"></div>
-            <label class="slider glow-slider" title="Make the color shine with its own light"><span>Glow</span><input id="glow" type="range" min="0" max="1" step="0.01" />
-              <span class="ends"><em>off</em><em>bright</em></span></label>
-          </div>
           <div class="ck-tool" data-tool="custom-color"><label class="color-pick"><input id="color" type="color" /> Custom</label></div>
           <div class="ck-tool" data-tool="paint-all"><button id="paint-all" class="ghost"><i class="fa-duotone fa-regular fa-fill-drip" aria-hidden="true"></i> Paint whole creature</button></div>
+          <div class="ck-tool" data-tool="swatches"><div id="swatches" class="swatches"></div></div>
+          <div class="ck-tool" data-tool="scene-colors"><div class="scene-colors" id="scene-colors"></div></div>
+          <div class="ck-tool" data-tool="glow">
+            <label class="slider" title="Make the color shine with its own light"><span>Glow</span><input id="glow" type="range" min="0" max="1" step="0.01" />
+              <span class="ends"><em>off</em><em>bright</em></span></label>
+          </div>
           <div class="ck-tool" data-tool="color-blend">
             <label class="slider wide-label" id="color-blend-row" title="Also merge touching parts of different colors, fading one color into the other. 0 keeps colors apart.">
               <span>Blend colors</span><input id="color-blend" type="range" min="0" max="0.4" step="0.005" />
@@ -337,8 +337,11 @@
             <label class="slider"><span>Opacity</span><input id="piece-opacity" type="range" min="0.05" max="1" step="0.01" /></label>
             <label class="slider" title="Fuse into the pieces this one touches with a smooth fillet"><span>Blend shape</span><input id="piece-blend-shape" type="range" min="0" max="1" step="0.01" /></label>
             <label class="slider" title="Fade into the colors of the pieces this one touches"><span>Blend color</span><input id="piece-blend-color" type="range" min="0" max="1" step="0.01" /></label>
+            <div class="paint-row">
+              <label class="color-pick"><input id="piece-color" type="color" /> Custom</label>
+              <button id="paint-thing" class="ghost" title="Give every piece of this thing this piece's color and glow"><i class="fa-duotone fa-regular fa-fill-drip" aria-hidden="true"></i> Paint whole thing</button>
+            </div>
             <div class="swatches" id="piece-swatches"></div>
-            <label class="color-pick"><input id="piece-color" type="color" /> Custom</label>
             <div class="scene-colors" id="piece-scene-colors"></div>
             <label class="slider glow-slider" title="Make the color shine with its own light"><span>Glow</span><input id="piece-glow" type="range" min="0" max="1" step="0.01" />
               <span class="ends"><em>off</em><em>bright</em></span></label>

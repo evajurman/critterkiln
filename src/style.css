@@ -223,6 +223,9 @@ input[type=range] { accent-color: var(--accent); width: 100%; }
 .color-pick input { width: 30px; height: 30px; border: 0; padding: 0; background: none; cursor: var(--cursor-click); }
 /* the colors already used in the scene, under each color picker */
 .scene-colors { margin-top: 8px; }
+/* a piece's Custom color and Paint whole thing, side by side above the swatches */
+.paint-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.paint-row button[hidden] { display: none; }
 .scene-colors[hidden] { display: none; }
 .scene-colors .sub-title { margin-bottom: 4px; }
 .scene-colors .swatches { grid-template-columns: repeat(10, 1fr); gap: 4px; }
@@ -974,7 +977,8 @@ html.theme-color :is(button.primary, .parts button.active, .eye-pairs button.act
   .trophy-icon, .toast-icon, .creation-badge) [class*="fa-"] { --ic: initial; color: inherit; }
 
 /* ---------- sections: each tab's tools in the sidebar, on the view's corners, or hidden (src/layout.ts) ---------- */
-.creature-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; }
+/* above the creatures: New and the sections menu */
+.creature-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
 .creature-foot .creature-new { margin-top: 0; }
 .ck-menu-btn[hidden] { display: none; }
 .ck-menu-btn.on { opacity: 1; background: rgba(127,127,127,.18); }

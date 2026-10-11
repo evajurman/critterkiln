@@ -66,6 +66,8 @@ const TOOLS: Record<string, ToolDef> = {
   floor: { name: 'Floor', icon: slab('arrow-down-to-line'), kind: 'button' },
   'keep-floor': { name: 'Keep feet on the floor', icon: duo('square-check'), kind: 'wide' },
   swatches: { name: 'Colors', icon: slab('palette'), kind: 'wide' },
+  'scene-colors': { name: 'Colors in the scene', icon: duo('swatchbook'), kind: 'wide' },
+  glow: { name: 'Glow', icon: duo('lightbulb'), kind: 'wide' },
   'custom-color': { name: 'Custom color', icon: duo('eye-dropper'), kind: 'button' },
   'paint-all': { name: 'Paint whole creature', icon: duo('fill-drip'), kind: 'button' },
   'color-blend': { name: 'Blend colors', icon: duo('sliders'), kind: 'wide' },
@@ -145,7 +147,7 @@ const SECTIONS: Omit<Sec, 'place'>[] = [
   { id: 'part', name: 'This part', icon: 'pencil', color: '#e5823a', tools: ['name', 'draw', 'thickness', 'width0', 'width1', 'reset-shape'] },
   { id: 'grow', name: 'Grow', icon: 'scissors', color: '#d0486a', tools: ['bone', 'extend', 'split', 'detach', 'dup', 'del'] },
   { id: 'pose', name: 'Pose', icon: 'face-smile', color: '#e9a51f', tools: ['stand', 'floor', 'keep-floor'] },
-  { id: 'color', name: 'Color', icon: 'palette', color: '#a66ad6', tools: ['swatches', 'custom-color', 'paint-all', 'color-blend'] },
+  { id: 'color', name: 'Color', icon: 'palette', color: '#a66ad6', tools: ['custom-color', 'paint-all', 'swatches', 'scene-colors', 'glow', 'color-blend'] },
   { id: 'material', name: 'Material', icon: 'cloud', color: '#5fa0d8', tools: ['materials', 'material-params', 'style-part'] },
   { id: 'quick', name: 'Arrange', icon: 'expand', color: '#3b82f6', tools: ['arrange', 'pull'] },
   { id: 'mirror', name: 'Mirror', icon: 'arrow-right-arrow-left', color: '#14a596', tools: ['mirror'] },
@@ -181,7 +183,7 @@ function defaults(t: Tab): Layout {
   return { sections: SECTIONS.map((s) => ({ ...s, tools: [...s.tools], place: DEFAULT_PLACES[b][s.id] })), gizmos: DEFAULT_GIZMOS[b] };
 }
 
-/** A saved layout, with anything stale dropped and any tool it's missing (new in the app) put back home. */
+/** A saved layout, with anything stale dropped and any tool it's missing (new in the app) put back home, where it sits by default. */
 function repair(raw: unknown, t: Tab): Layout {
   const d = defaults(t);
   if (!raw || typeof raw !== 'object' || !Array.isArray((raw as Layout).sections)) return d;
@@ -207,7 +209,18 @@ function repair(raw: unknown, t: Tab): Layout {
     });
   }
   for (const b of d.sections) if (!sections.some((s) => s.id === b.id)) sections.push({ ...b, tools: [] });
-  for (const id of Object.keys(TOOLS)) if (!seen.has(id)) sections.find((s) => s.id === HOME.get(id))!.tools.push(id);
+  for (const id of Object.keys(TOOLS)) {
+    if (seen.has(id)) continue;
+    const home = sections.find((s) => s.id === HOME.get(id))!;
+    // after the nearest tool that comes before it there by default (or before the nearest after it)
+    const order = SECTIONS.find((s) => s.id === home.id)!.tools;
+    const at = order.indexOf(id);
+    const before = order.slice(0, at).reverse().find((o) => home.tools.includes(o));
+    const after = order.slice(at + 1).find((o) => home.tools.includes(o));
+    const i = before ? home.tools.indexOf(before) + 1 : after ? home.tools.indexOf(after) : home.tools.length;
+    home.tools.splice(i, 0, id);
+    seen.add(id);
+  }
   return { sections, gizmos: ['full', 'part', 'none'].includes(r.gizmos) ? r.gizmos : d.gizmos };
 }
 

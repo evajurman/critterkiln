@@ -3314,6 +3314,8 @@ function renderStuffPanel() {
     }
     $<HTMLInputElement>('#piece-color').value = p.color;
     $<HTMLInputElement>('#piece-glow').value = String(p.glow ?? 0);
+    // (only something to do with more than one piece)
+    $('#paint-thing').hidden = wb.pieces.length < 2;
     pieceSceneColors();
     const st = $('#piece-styles');
     st.innerHTML = '';
@@ -3444,6 +3446,18 @@ for (const [id, key] of [['#piece-thickness', 'thickness'], ['#piece-round', 'ro
   input.oninput = () => updatePiece((p) => (p[key] = parseFloat(input.value)), false);
   input.onchange = () => commit();
 }
+$('#paint-thing').onclick = () => {
+  const p = piece();
+  if (!p) return;
+  for (const q of workbench().pieces) {
+    q.color = p.color;
+    if (p.glow) q.glow = p.glow;
+    else delete q.glow;
+  }
+  syncWorkbench();
+  commit();
+  renderStuffPanel();
+};
 const pieceSceneColors = sceneColorRow($('#piece-scene-colors'), () => piece()?.color, (c) => updatePiece((q) => (q.color = c)));
 glowSlider(
   '#piece-glow',
