@@ -276,6 +276,8 @@ function nextToast() {
 
 /** The "trophy unlocked" card: flies in from the left, wobbles to a stop at the top right. */
 function showToast(t: Trophy) {
+  // (the update notice may have made it already)
+  toastBox ??= document.querySelector<HTMLElement>('.toasts');
   if (!toastBox) {
     toastBox = document.createElement('div');
     toastBox.className = 'toasts';

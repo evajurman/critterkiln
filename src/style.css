@@ -731,6 +731,12 @@ details.fine[open] > summary { margin-bottom: 6px; }
 .toast-kicker { font-size: 11px; font-weight: var(--w-heavy); text-transform: uppercase; letter-spacing: .08em; color: var(--gold-ink); }
 .toast-title { font-weight: var(--w-heavy); font-size: 16px; }
 .toast-desc { font-size: 13px; color: var(--muted); }
+/* the update notice: a toast that stays until closed */
+.update-toast { position: relative; align-items: flex-start; padding-right: 34px; width: min(340px, calc(100vw - 28px)); }
+.update-toast:hover { border-color: var(--gold-line); }
+.update-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.update-actions button.primary.slim { flex: none; font-size: 13px; padding: 7px 10px; }
+.update-close { position: absolute; top: 6px; right: 6px; margin: 0; }
 @keyframes toast-in {
   0% { transform: translateX(-100vw) rotate(-10deg); }
   55% { transform: translateX(18px) rotate(4deg); }

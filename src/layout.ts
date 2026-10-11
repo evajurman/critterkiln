@@ -143,12 +143,12 @@ const pick = <T>(a: T[]) => a[Math.floor(Math.random() * a.length)];
 
 const SECTIONS: Omit<Sec, 'place'>[] = [
   { id: 'plan', name: 'Body plan', icon: 'hand', color: '#c98f5a', tools: ['plan'] },
-  { id: 'parts', name: 'Parts', icon: 'square', color: '#f07a32', tools: ['parts', 'blend', 'opacity', 'seamless', 'worn'] },
+  { id: 'parts', name: 'Parts', icon: 'square', color: '#f07a32', tools: ['parts', 'blend', 'seamless', 'worn'] },
   { id: 'part', name: 'This part', icon: 'pencil', color: '#e5823a', tools: ['name', 'draw', 'thickness', 'width0', 'width1', 'reset-shape'] },
   { id: 'grow', name: 'Grow', icon: 'scissors', color: '#d0486a', tools: ['bone', 'extend', 'split', 'detach', 'dup', 'del'] },
   { id: 'pose', name: 'Pose', icon: 'face-smile', color: '#e9a51f', tools: ['stand', 'floor', 'keep-floor'] },
-  { id: 'color', name: 'Color', icon: 'palette', color: '#a66ad6', tools: ['custom-color', 'paint-all', 'swatches', 'scene-colors', 'glow', 'color-blend'] },
-  { id: 'material', name: 'Material', icon: 'cloud', color: '#5fa0d8', tools: ['materials', 'material-params', 'style-part'] },
+  { id: 'color', name: 'Color', icon: 'palette', color: '#a66ad6', tools: ['custom-color', 'paint-all', 'swatches', 'scene-colors', 'glow', 'color-blend', 'opacity'] },
+  { id: 'material', name: 'Material', icon: 'cloud', color: '#5fa0d8', tools: ['style-part', 'materials', 'material-params'] },
   { id: 'quick', name: 'Arrange', icon: 'expand', color: '#3b82f6', tools: ['arrange', 'pull'] },
   { id: 'mirror', name: 'Mirror', icon: 'arrow-right-arrow-left', color: '#14a596', tools: ['mirror'] },
   { id: 'eyes', name: 'Eyes', icon: 'eye', color: '#5b6170', tools: ['eyes'] },
@@ -164,7 +164,7 @@ const DEFAULT_PLACES: Record<Base, Record<string, Place>> = {
     quick: 'tl', mirror: 'tl', eyes: 'tl', attach: 'tl', camera: 'br', backdrop: 'hidden', photo: 'hidden',
   },
   look: {
-    plan: 'hidden', parts: 'side', part: 'hidden', grow: 'hidden', pose: 'hidden', color: 'side', material: 'side',
+    plan: 'hidden', parts: 'hidden', part: 'hidden', grow: 'hidden', pose: 'hidden', color: 'side', material: 'side',
     quick: 'tl', mirror: 'hidden', eyes: 'tl', attach: 'tl', camera: 'br', backdrop: 'tr', photo: 'tr',
   },
 };
@@ -242,11 +242,14 @@ const tabs: TabDef[] = (Array.isArray(saved.tabs) ? (saved.tabs as Partial<TabDe
 );
 /** Off: the tabs along the top are just their icons (Shape, Look and Stuff too) */
 let showTabNames = saved.showTabNames !== false;
+const toolIds = (raw: unknown) => (Array.isArray(raw) ? (raw as unknown[]).filter((id): id is string => typeof id === 'string' && !!TOOLS[id]) : []);
 const layouts: Record<Tab, Layout> = { shape: repair(saved.shape, 'shape'), look: repair(saved.look, 'look') };
 for (const t of tabs) layouts[t.id] = repair(saved[t.id], t.id);
+/** options the notice was told never to mention again */
+let quietTools = new Set(toolIds(saved.quietTools));
 function save() {
   try {
-    localStorage.setItem(KEY, JSON.stringify({ ...layouts, tabs, showTabNames }));
+    localStorage.setItem(KEY, JSON.stringify({ ...layouts, tabs, showTabNames, quietTools: quietTools.size ? [...quietTools] : undefined }));
   } catch {}
 }
 
@@ -347,6 +350,8 @@ export function initLayout(opts: { onGizmos: () => void; onTabs: () => void; swi
     else if (e.key === 'Escape' && editing && !(e.target as HTMLElement).closest('input')) setEditing(false);
   });
   render();
+  const missing = noticeTools();
+  if (missing.length) showUpdateNotice(missing);
 }
 
 function container(p: Place): HTMLElement {
@@ -586,10 +591,62 @@ function deleteSection(id: string) {
   render();
 }
 
+/** What the notice mentions: tools no tab shows (new ones go where they sit by default, so only ones hidden away), unless told not to */
+function noticeTools(): string[] {
+  const shown = new Set(Object.values(layouts).flatMap((L) => L.sections.filter((s) => s.place !== 'hidden').flatMap((s) => s.tools)));
+  return Object.keys(TOOLS).filter((id) => !shown.has(id) && !quietTools.has(id));
+}
+
+/** Options missing from the tabs (from an update, or a change made to them): stays until closed; × brings it back next time. */
+function showUpdateNotice(missing: string[]) {
+  const box = document.querySelector('.toasts') ?? document.body.appendChild(el('div', 'toasts'));
+  const names = missing.map((id) => TOOLS[id].name);
+  const card = el(
+    'div',
+    'toast update-toast',
+    `<span class="toast-icon">${fa('fa-solid fa-wand-magic-sparkles')}</span>
+    <span class="toast-text">
+      <span class="toast-kicker">${fa('fa-solid fa-sliders')} Your tabs</span>
+      <span class="toast-title">${names.length > 1 ? 'Some options aren’t' : 'An option isn’t'} showing in your tabs</span>
+      <span class="toast-desc"><b>${names.map(esc).join(', ')}</b>: new in a recent update, or tucked away by a change to your tabs</span>
+      <span class="update-actions">
+        <button class="primary slim" data-act="reset">Reset Tabs to show all options</button>
+        <button class="ghost" data-act="forever">Dismiss this for ${names.length > 1 ? `these ${names.length} options` : esc(names[0])}</button>
+      </span>
+    </span>
+    <button class="pop-close update-close" data-act="close" title="Close (it'll be back next time)" aria-label="Close">${fa(duo('xmark'))}</button>`,
+  );
+  card.setAttribute('role', 'status');
+  const leave = () => {
+    card.classList.add('leaving');
+    card.addEventListener('animationend', () => card.remove(), { once: true });
+    setTimeout(() => card.remove(), 600);
+  };
+  card.querySelectorAll<HTMLButtonElement>('[data-act]').forEach((b) => {
+    b.onclick = () => {
+      const act = b.dataset.act;
+      if (act === 'reset') {
+        // Shape and Look back to how they start out (keeping which handles show)
+        for (const t of ['shape', 'look']) layouts[t] = { ...defaults(t), gizmos: layouts[t].gizmos };
+        quietTools.clear();
+        closePops();
+        render();
+        onGizmos();
+      }
+      if (act === 'forever') for (const id of missing) quietTools.add(id);
+      if (act !== 'close') save();
+      leave();
+    };
+  });
+  box.append(card);
+}
+
 function resetTab() {
   const back = made(tab!) ? `the way ${tabName(baseOf(tab!))} starts out` : 'the way it started';
   if (!tab || !confirm(`Put the ${tabName(tab)} tab back ${back}? Sections you made for it go.`)) return;
   layouts[tab] = defaults(tab);
+  // the tabs notice can mention anything this hid again
+  quietTools.clear();
   save();
   closePops();
   render();
