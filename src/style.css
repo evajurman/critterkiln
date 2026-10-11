@@ -221,6 +221,13 @@ input[type=range] { accent-color: var(--accent); width: 100%; }
 .row { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; gap: 8px; }
 .color-pick { display: flex; align-items: center; gap: 6px; font-weight: var(--w-bold); font-size: 13px; cursor: var(--cursor-click); }
 .color-pick input { width: 30px; height: 30px; border: 0; padding: 0; background: none; cursor: var(--cursor-click); }
+/* the colors already used in the scene, under each color picker */
+.scene-colors { margin-top: 8px; }
+.scene-colors[hidden] { display: none; }
+.scene-colors .sub-title { margin-bottom: 4px; }
+.scene-colors .swatches { grid-template-columns: repeat(10, 1fr); gap: 4px; }
+.popover .scene-colors .swatches { grid-template-columns: repeat(8, 1fr); margin-bottom: 0; }
+.popover .scene-colors .swatches button { aspect-ratio: 1; border-radius: 6px; }
 
 .styles { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .styles button {

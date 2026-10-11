@@ -853,6 +853,12 @@ function openMenu() {
 }
 
 /** Icon and color for a section or a tab (`key` names it, so a second click on the same one closes the picker). */
+/** the colors in use in the scene (main.ts), offered under the icon color too */
+let sceneColors: () => string[] = () => [];
+export function setSceneColors(fn: () => string[]) {
+  sceneColors = fn;
+}
+
 function openPicker(s: { icon: string; color: string }, anchor: HTMLElement, key: string, changed: () => void) {
   const again = picker?.dataset.key === key;
   closePops();
@@ -904,8 +910,27 @@ function openPicker(s: { icon: string; color: string }, anchor: HTMLElement, key
     colors.querySelectorAll('button').forEach((o) => o.classList.remove('active'));
     update();
   };
+  // the scene's own colors, to match an icon to a creature
+  const inScene = el('div', 'scene-colors');
+  const used = sceneColors();
+  inScene.hidden = !used.length;
+  const usedRow = el('div', 'swatches');
+  for (const c of used) {
+    const b = el('button', c === s.color.toLowerCase() ? 'active' : '');
+    b.style.background = c;
+    b.title = c;
+    b.onclick = () => {
+      s.color = c;
+      ci.value = c;
+      colors.querySelectorAll('button').forEach((o) => o.classList.remove('active'));
+      usedRow.querySelectorAll('button').forEach((o) => o.classList.toggle('active', o === b));
+      update();
+    };
+    usedRow.append(b);
+  }
+  inScene.append(el('div', 'sub-title', 'In the scene'), usedRow);
   fill();
-  picker.append(search, grid, el('div', 'pop-sub', 'Color'), colors, custom);
+  picker.append(search, grid, el('div', 'pop-sub', 'Color'), colors, custom, inScene);
   popAt(picker, anchor);
   search.focus();
 }

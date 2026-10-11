@@ -20,6 +20,8 @@ export interface SkinPart {
   /** part local space -> skin space */
   toSkin: THREE.Matrix4;
   color: THREE.Color;
+  /** 0..1: how much its color glows */
+  glow?: number;
   /** fillet size where this part joins others */
   k: number;
   /** low-poly: this part's facet size */
@@ -770,6 +772,7 @@ function fadeDistances(geo: THREE.BufferGeometry, parts: SkinPart[], need: numbe
 export function paintSkin(geo: THREE.BufferGeometry, parts: SkinPart[], colorBlend: number, lowPoly: boolean): boolean {
   const pos = geo.getAttribute('position') as THREE.BufferAttribute;
   const n = pos.count;
+  paintGlow(geo, parts, colorBlend);
   const blend = colorBlend > 0 && parts.some((p) => !p.color.equals(parts[0].color));
   if (!blend && !lowPoly) {
     if (geo.getAttribute('color')) geo.deleteAttribute('color');
@@ -817,4 +820,39 @@ export function paintSkin(geo: THREE.BufferGeometry, parts: SkinPart[], colorBle
   }
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   return blend;
+}
+
+/**
+ * Where a skin's parts glow differently, how much each point glows (a `glow`
+ * attribute): faded across the seams like the colors when they blend, else
+ * each point glowing as the part it's on. Removed when they all glow alike.
+ */
+function paintGlow(geo: THREE.BufferGeometry, parts: SkinPart[], colorBlend: number) {
+  const glow = (p: SkinPart) => p.glow ?? 0;
+  if (parts.every((p) => glow(p) === glow(parts[0]))) {
+    if (geo.getAttribute('glow')) geo.deleteAttribute('glow');
+    return;
+  }
+  const n = geo.getAttribute('position').count;
+  const out = new Float32Array(n);
+  const kc = colorBlend;
+  // with no fade, just near enough to tell which part a point is on (fillets included)
+  const fade = fadeDistances(geo, parts, kc > 0 ? 2 * kc : 0.1);
+  for (let v = 0; v < n; v++) {
+    let wsum = 0, g = 0;
+    let nearest = 0, nearestD = Infinity;
+    for (let e = fade.start[v]; e < fade.start[v + 1]; e++) {
+      const d = fade.d[e];
+      if (d < nearestD) {
+        nearestD = d;
+        nearest = fade.part[e];
+      }
+      if (kc <= 0 || d >= 2 * kc) continue;
+      const w = 1 / (Math.max(d, 0) + 0.25 * kc) ** 2;
+      g += glow(parts[fade.part[e]]) * w;
+      wsum += w;
+    }
+    out[v] = wsum > 0 ? g / wsum : glow(parts[nearest]);
+  }
+  geo.setAttribute('glow', new THREE.BufferAttribute(out, 1));
 }

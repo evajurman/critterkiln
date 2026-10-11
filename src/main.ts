@@ -8,6 +8,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
 import { BokehPass } from 'three/examples/jsm/postprocessing/BokehPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { FullScreenQuad, Pass } from 'three/examples/jsm/postprocessing/Pass.js';
 import {
@@ -53,9 +54,22 @@ import {
   type Thing,
   type Wearer,
 } from './stuff';
-import { FUR_LAYER, STYLE_PARAMS, STYLES, makeMaterial, setFuzzQuality, setGlassEnvironment, setSketchPixelRatio, styleSettings, type StyleId } from './materials';
+import {
+  FUR_LAYER,
+  STYLE_PARAMS,
+  STYLES,
+  glowWithFlash,
+  makeMaterial,
+  setFuzzQuality,
+  setGlassEnvironment,
+  setGlow,
+  setSketchPixelRatio,
+  styleSettings,
+  type GlowInfo,
+  type StyleId,
+} from './materials';
 import { installScrollbars } from './scrollbars';
-import { customTabs, gizmos, initLayout, setLayoutIdle, setLayoutTab, type Tab } from './layout';
+import { customTabs, gizmos, initLayout, setLayoutIdle, setLayoutTab, setSceneColors, type Tab } from './layout';
 import { installCursorPress } from './cursorPress';
 import { deleteCreation, getCreation, keepStorage, listCreations, putCreation, type Creation } from './library';
 import {
@@ -215,8 +229,8 @@ scene.add(ground);
 
 type FloorMode = 'none' | 'shadow' | 'mirror' | 'material';
 const FLOOR_KEY = 'creature-creator/floor';
-const floorPrefs: { mode: FloorMode; style: StyleId; color: string; reflect: number } = (() => {
-  const defaults = { mode: 'shadow' as FloorMode, style: 'clay' as StyleId, color: '#d6c7b3', reflect: 0.55 };
+const floorPrefs: { mode: FloorMode; style: StyleId; color: string; glow: number; reflect: number } = (() => {
+  const defaults = { mode: 'shadow' as FloorMode, style: 'clay' as StyleId, color: '#d6c7b3', glow: 0, reflect: 0.55 };
   try {
     return { ...defaults, ...JSON.parse(localStorage.getItem(FLOOR_KEY) ?? '{}') };
   } catch {
@@ -264,7 +278,10 @@ function sizeMirror() {
 function buildFloorMesh() {
   const settings = styleSettings(floorPrefs.style, state.materialSettings?.[floorPrefs.style]);
   const key = JSON.stringify([floorPrefs.style, floorPrefs.color, settings]);
-  if (floorMesh && key === floorKey) return;
+  if (floorMesh && key === floorKey) {
+    setGlow(floorMesh, floorPrefs.color, floorPrefs.glow);
+    return;
+  }
   floorKey = key;
   if (floorMesh) {
     scene.remove(floorMesh);
@@ -290,6 +307,7 @@ function buildFloorMesh() {
   floorMesh = new THREE.Mesh(geo, makeMaterial(floorPrefs.style, floorPrefs.color, settings));
   floorMesh.position.y = -0.002;
   floorMesh.receiveShadow = true;
+  setGlow(floorMesh, floorPrefs.color, floorPrefs.glow);
   scene.add(floorMesh);
 }
 
@@ -544,6 +562,131 @@ class FurPass extends Pass {
 }
 const furPass = new FurPass();
 composer.addPass(furPass);
+
+/**
+ * Glowing colors (materials.ts glowMaterial) get a soft halo: the scene is
+ * drawn again, small, with each glowing thing in just its glow and everything
+ * else black (so it still hides what's behind it), and that is blurred over
+ * the picture. Fuzz, see-through things and handles don't hide the glow.
+ * Skipped while nothing in view glows.
+ */
+class GlowPass extends Pass {
+  private mask = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType });
+  private bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.4, 0, 0);
+  private over = new FullScreenQuad(
+    new THREE.ShaderMaterial({
+      uniforms: { tDiffuse: { value: null }, tBloom: { value: null } },
+      vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+      // the picture with the halo added (its alpha, a transparent photo's, as it was)
+      fragmentShader:
+        'uniform sampler2D tDiffuse; uniform sampler2D tBloom; varying vec2 vUv; void main() { vec4 c = texture2D(tDiffuse, vUv); gl_FragColor = vec4(c.rgb + texture2D(tBloom, vUv).rgb, c.a); }',
+      blending: THREE.NoBlending,
+      depthTest: false,
+      depthWrite: false,
+    }),
+  );
+  /** stands in for anything that hides the glow behind it, per side */
+  private black = new Map<THREE.Side, THREE.MeshBasicMaterial>();
+  /** draws nothing at all */
+  private skip = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false });
+  private glows = new Map<string, THREE.MeshBasicMaterial>();
+
+  constructor() {
+    super();
+    this.needsSwap = false;
+    // mostly the finest blurs: a halo that hugs what glows, not a haze over the whole picture
+    this.bloom.compositeMaterial.uniforms.bloomFactors.value = [1, 0.4, 0.1, 0.02, 0];
+  }
+
+  setSize(w: number, h: number) {
+    this.mask.setSize(Math.max(1, Math.round(w / 2)), Math.max(1, Math.round(h / 2)));
+    this.bloom.setSize(w, h);
+  }
+
+  private glowMat(g: GlowInfo, src: THREE.Material): THREE.MeshBasicMaterial {
+    const see = src.transparent && src.opacity < 1;
+    const key = [...g.color.toArray(), g.painted, g.attr, src.side, see ? src.opacity : 1].join();
+    let m = this.glows.get(key);
+    if (m) return m;
+    if (this.glows.size > 64) {
+      for (const o of this.glows.values()) o.dispose();
+      this.glows.clear();
+    }
+    m = new THREE.MeshBasicMaterial({ color: g.color, vertexColors: g.painted || g.attr, side: src.side, transparent: see, opacity: see ? src.opacity : 1 });
+    // unpainted with a glow attribute: the vertex colors are missing, and the color is all in `color`
+    if (g.attr) m.defines = { GLOW_ATTR: '', GLOW_MASK: '' };
+    if (g.attr && !g.painted) m.vertexColors = false;
+    this.glows.set(key, m);
+    return m;
+  }
+
+  private blackMat(side: THREE.Side) {
+    let m = this.black.get(side);
+    if (!m) this.black.set(side, (m = new THREE.MeshBasicMaterial({ color: 0x000000, side })));
+    return m;
+  }
+
+  render(renderer: THREE.WebGLRenderer, writeBuffer: THREE.WebGLRenderTarget, readBuffer: THREE.WebGLRenderTarget) {
+    this.needsSwap = false;
+    const swaps: [THREE.Mesh, THREE.Material | THREE.Material[]][] = [];
+    const hidden: THREE.Object3D[] = [];
+    let glowing = false;
+    scene.traverseVisible((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh) {
+        if ((o as THREE.Line).isLine || (o as THREE.Points).isPoints || (o as THREE.Sprite).isSprite) hidden.push(o);
+        return;
+      }
+      // a mirror draws the whole scene again
+      if ((o as THREE.Mesh & { isReflector?: boolean }).isReflector) return void hidden.push(o);
+      const m = mesh.material;
+      let use: THREE.Material = this.skip;
+      if (!Array.isArray(m) && m.visible) {
+        const g = m.userData.glow as GlowInfo | undefined;
+        if (g) {
+          use = this.glowMat(g, m);
+          glowing = true;
+        } else if (!o.userData.fx && m.depthTest && m.depthWrite && m.colorWrite && !m.transparent && !(m as THREE.MeshPhysicalMaterial).transmission) {
+          use = this.blackMat(m.side);
+        }
+      }
+      swaps.push([mesh, m]);
+      mesh.material = use;
+    });
+    if (glowing) {
+      for (const o of hidden) o.visible = false;
+      const background = scene.background, fog = scene.fog;
+      const shadows = renderer.shadowMap.autoUpdate;
+      const clear = renderer.getClearColor(new THREE.Color()), clearAlpha = renderer.getClearAlpha();
+      scene.background = null;
+      scene.fog = null;
+      renderer.shadowMap.autoUpdate = false;
+      renderer.setRenderTarget(this.mask);
+      renderer.setClearColor(0x000000, 1);
+      renderer.clear();
+      renderer.render(scene, view);
+      renderer.setClearColor(clear, clearAlpha);
+      renderer.shadowMap.autoUpdate = shadows;
+      scene.background = background;
+      scene.fog = fog;
+      for (const o of hidden) o.visible = true;
+    }
+    for (const [mesh, m] of swaps) mesh.material = m;
+    if (!glowing) return;
+    // blurred into the bloom's own targets (it also adds itself onto the mask, which is just thrown away)
+    this.bloom.render(renderer, this.mask, this.mask, 0, false);
+    // into the other buffer, not drawn over this one: drawing into the
+    // (multisampled) picture again would undo the ambient occlusion laid on it
+    const u = (this.over.material as THREE.ShaderMaterial).uniforms;
+    u.tDiffuse.value = readBuffer.texture;
+    u.tBloom.value = this.bloom.renderTargetsHorizontal[0].texture;
+    renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
+    this.over.render(renderer);
+    this.needsSwap = true;
+  }
+}
+const glowPass = new GlowPass();
+composer.addPass(glowPass);
 // lights have to share the fuzz's layer to light it
 for (const l of [hemi, key, fill, rim]) l.layers.enable(FUR_LAYER);
 // optional macro-photo depth of field, focused on whatever the camera orbits
@@ -641,6 +784,8 @@ const opened = {
 let state: CreatureState = world.creatures[world.active];
 const creatures: Creature[] = [];
 let creature: Creature;
+/** redraws each color picker's "In the scene" row (see sceneColorRow) */
+const sceneColorRows: (() => void)[] = [];
 let selected = '';
 /** Nothing picked: no creature or part shows as selected (no handles, no part editor) until one is clicked. */
 let idle = true;
@@ -716,6 +861,7 @@ let hIndex = -1;
 
 function commit() {
   invalidate();
+  renderSceneColors();
   world.creatures[world.active] = state;
   const snap = JSON.stringify(world);
   if (snap === history[hIndex]) return;
@@ -3036,8 +3182,7 @@ function flashPiece(k: number) {
     if (!m.userData.pieceId || !(m as THREE.Mesh).isMesh) return;
     const mat = (m as THREE.Mesh).material as THREE.MeshStandardMaterial;
     if (!mat || !('emissive' in mat)) return;
-    if (m.userData.pieceId === selectedPiece && k > 0) mat.emissive.setRGB(1, 0.42, 0.29).multiplyScalar(0.45 * k);
-    else mat.emissive.setScalar(0);
+    glowWithFlash(mat, m.userData.pieceId === selectedPiece && k > 0 ? new THREE.Color(1, 0.42, 0.29).multiplyScalar(0.45 * k) : undefined);
   });
 }
 
@@ -3168,6 +3313,8 @@ function renderStuffPanel() {
       sw.append(b);
     }
     $<HTMLInputElement>('#piece-color').value = p.color;
+    $<HTMLInputElement>('#piece-glow').value = String(p.glow ?? 0);
+    pieceSceneColors();
     const st = $('#piece-styles');
     st.innerHTML = '';
     // an item that inherits its material shows the wearer's instead
@@ -3297,6 +3444,16 @@ for (const [id, key] of [['#piece-thickness', 'thickness'], ['#piece-round', 'ro
   input.oninput = () => updatePiece((p) => (p[key] = parseFloat(input.value)), false);
   input.onchange = () => commit();
 }
+const pieceSceneColors = sceneColorRow($('#piece-scene-colors'), () => piece()?.color, (c) => updatePiece((q) => (q.color = c)));
+glowSlider(
+  '#piece-glow',
+  (v) =>
+    updatePiece((p) => {
+      if (v > 0) p.glow = v;
+      else delete p.glow;
+    }, false),
+  () => commit(),
+);
 $<HTMLInputElement>('#piece-color').oninput = (e) => updatePiece((p) => (p.color = (e.target as HTMLInputElement).value), false);
 $<HTMLInputElement>('#piece-color').onchange = () => {
   commit();
@@ -4814,6 +4971,69 @@ const SWATCHES = [
   '#b9a3e3', '#f6a5b5', '#e86aa6', '#c98b5e', '#8d6e63', '#fdfaf4', '#9a9aa6', '#3a3340',
 ];
 
+/**
+ * Every color in use: the creatures, their eyes and what they wear, the thing
+ * on the bench, the floor and the backdrop. The most used first.
+ */
+function sceneColors(): string[] {
+  const used = new Map<string, number>();
+  const add = (c?: string) => {
+    if (!c || !/^#[0-9a-f]{6}$/i.test(c)) return;
+    c = c.toLowerCase();
+    used.set(c, (used.get(c) ?? 0) + 1);
+  };
+  for (const s of world.creatures) {
+    for (const p of Object.values(s.parts)) add(p.color);
+    if (s.eyes.enabled && (s.eyes.style === 'bead' || s.eyes.style === 'dot' || s.eyes.style === 'button')) add(s.eyes.color);
+    for (const a of s.attachments ?? []) for (const p of a.thing.pieces) add(p.color);
+  }
+  for (const p of world.workbench?.pieces ?? []) add(p.color);
+  if (floorPrefs.mode === 'material') add(floorPrefs.color);
+  add(backdrop);
+  return [...used].sort((a, b) => b[1] - a[1]).map(([c]) => c);
+}
+
+/** A color picker's "In the scene" row, kept up to date as colors change anywhere. */
+function sceneColorRow(el: HTMLElement, current: () => string | undefined, pick: (c: string) => void): () => void {
+  const render = () => {
+    const colors = sceneColors();
+    const now = current()?.toLowerCase();
+    el.hidden = !colors.length;
+    const sw = document.createElement('div');
+    sw.className = 'swatches';
+    for (const c of colors) {
+      const b = document.createElement('button');
+      b.style.background = c;
+      b.title = c;
+      b.classList.toggle('active', c === now);
+      b.onclick = () => pick(c);
+      sw.append(b);
+    }
+    const title = document.createElement('div');
+    title.className = 'sub-title';
+    title.textContent = 'In the scene';
+    el.replaceChildren(title, sw);
+  };
+  sceneColorRows.push(render);
+  return render;
+}
+function renderSceneColors() {
+  // (not before the first creature is up)
+  if (!creature) return;
+  for (const r of sceneColorRows) r();
+}
+setSceneColors(sceneColors);
+
+/** A Glow slider: `set` while it's dragged, `done` when let go. */
+function glowSlider(id: string, set: (v: number) => void, done: () => void) {
+  const input = $<HTMLInputElement>(id);
+  input.oninput = () => {
+    set(parseFloat(input.value));
+    invalidate();
+  };
+  input.onchange = () => done();
+}
+
 function partLabel(src: string): string {
   const b = creature.bones.get(src)!;
   return b.def.sideSign !== 0 ? b.def.name.replace(/ \((L|R)\)$/, '') : b.def.name;
@@ -4916,7 +5136,20 @@ function renderColors() {
     el.append(btn);
   }
   $<HTMLInputElement>('#color').value = p.color;
+  $<HTMLInputElement>('#glow').value = String(p.glow ?? 0);
+  partSceneColors();
 }
+const partSceneColors = sceneColorRow($('#scene-colors'), () => (creature.bones.has(selected) ? selPart().color : undefined), (c) => setColor(c, true));
+glowSlider(
+  '#glow',
+  (v) => {
+    if (v > 0) selPart().glow = v;
+    else delete selPart().glow;
+    creature.sync();
+    creature.markMergeDirty();
+  },
+  () => commit(),
+);
 
 function renderStyles() {
   const onlyPart = $<HTMLInputElement>('#style-part').checked;
@@ -5224,6 +5457,8 @@ function renderEyes() {
       sw.append(b);
     }
     $<HTMLInputElement>('#eye-color').value = current;
+    $<HTMLInputElement>('#eye-glow').value = String(e.glow ?? 0);
+    eyeSceneColors();
     // the lids, crescent and tilt reshape a bead or a dot; a button stays round
     $('#eye-shape').hidden = e.style === 'button';
     $<HTMLInputElement>('#eye-lid-top').value = String(e.lidTop ?? 1);
@@ -6052,8 +6287,12 @@ $<HTMLInputElement>('#thickness').onchange = () => {
 $<HTMLInputElement>('#color').oninput = (e) => setColor((e.target as HTMLInputElement).value, false);
 $<HTMLInputElement>('#color').onchange = (e) => setColor((e.target as HTMLInputElement).value, true);
 $('#paint-all').onclick = () => {
-  const c = selPart().color;
-  for (const p of Object.values(state.parts)) p.color = c;
+  const { color: c, glow } = selPart();
+  for (const p of Object.values(state.parts)) {
+    p.color = c;
+    if (glow) p.glow = glow;
+    else delete p.glow;
+  }
   creature.sync();
   commit();
   unlock('paint-all');
@@ -6077,7 +6316,13 @@ function renderBackdrops() {
     el.append(btn);
   }
   $<HTMLInputElement>('#backdrop-color').value = backdrop;
+  renderSceneColors();
 }
+sceneColorRow($('#backdrop-scene-colors'), () => backdrop, (c) => {
+  setBackdrop(c);
+  unlock('backdrop');
+  renderBackdrops();
+});
 /** The Backdrop section's controls, showing what's set (src/layout.ts puts them wherever the tab has them). */
 function renderBackdropUI() {
   renderBackdrops();
@@ -6128,7 +6373,18 @@ function renderFloorUI() {
     b.onclick = () => updateFloor(() => (floorPrefs.color = c));
     sw.append(b);
   }
+  $<HTMLInputElement>('#floor-glow').value = String(floorPrefs.glow);
+  renderSceneColors();
 }
+sceneColorRow($('#floor-scene-colors'), () => floorPrefs.color, (c) => updateFloor(() => (floorPrefs.color = c)));
+glowSlider(
+  '#floor-glow',
+  (v) => {
+    floorPrefs.glow = v;
+    applyFloor();
+  },
+  () => saveFloor(),
+);
 
 function updateFloor(fn: () => void) {
   fn();
@@ -6356,6 +6612,16 @@ $<HTMLInputElement>('#eye-vary').onchange = (ev) =>
 document.querySelectorAll<HTMLButtonElement>('#eye-finish button').forEach((b) => {
   b.onclick = () => setEyeLook((e) => (e.finish = b.dataset.finish as EyeFinish));
 });
+const eyeSceneColors = sceneColorRow($('#eye-scene-colors'), () => state.eyes.color, (c) => setEyeLook((x) => (x.color = c)));
+glowSlider(
+  '#eye-glow',
+  (v) => {
+    if (v > 0) state.eyes.glow = v;
+    else delete state.eyes.glow;
+    creature.sync();
+  },
+  () => commit(),
+);
 $<HTMLInputElement>('#eye-color').oninput = (ev) => {
   state.eyes.color = (ev.target as HTMLInputElement).value;
   creature.sync();

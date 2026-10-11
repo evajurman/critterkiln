@@ -136,7 +136,12 @@
           <div class="ck-tool" data-tool="stand"><button id="reset-pose" class="ghost" title="Straighten every joint back out"><i class="fa-duotone fa-regular fa-person" aria-hidden="true"></i> Stand up straight</button></div>
           <div class="ck-tool" data-tool="floor"><button id="drop-floor" class="ghost" title="Move the whole creature so its lowest point touches the floor"><i class="fa-slab-duo fa-regular fa-arrow-down-to-line" aria-hidden="true"></i> Floor</button></div>
           <div class="ck-tool" data-tool="keep-floor"><label class="check" title="After you bend or resize something, the creature settles back onto the floor (if it was standing on it)"><input id="keep-floor" type="checkbox" checked /> Keep feet on the floor</label></div>
-          <div class="ck-tool" data-tool="swatches"><div id="swatches" class="swatches"></div></div>
+          <div class="ck-tool" data-tool="swatches">
+            <div id="swatches" class="swatches"></div>
+            <div class="scene-colors" id="scene-colors"></div>
+            <label class="slider glow-slider" title="Make the color shine with its own light"><span>Glow</span><input id="glow" type="range" min="0" max="1" step="0.01" />
+              <span class="ends"><em>off</em><em>bright</em></span></label>
+          </div>
           <div class="ck-tool" data-tool="custom-color"><label class="color-pick"><input id="color" type="color" /> Custom</label></div>
           <div class="ck-tool" data-tool="paint-all"><button id="paint-all" class="ghost"><i class="fa-duotone fa-regular fa-fill-drip" aria-hidden="true"></i> Paint whole creature</button></div>
           <div class="ck-tool" data-tool="color-blend">
@@ -208,6 +213,9 @@
                   </div>
                   <div class="swatches eye-swatches" id="eye-swatches"></div>
                   <label class="color-pick"><input id="eye-color" type="color" /> Eye color</label>
+                  <div class="scene-colors" id="eye-scene-colors"></div>
+                  <label class="slider glow-slider" title="Make the color shine with its own light"><span>Glow</span><input id="eye-glow" type="range" min="0" max="1" step="0.01" />
+              <span class="ends"><em>off</em><em>bright</em></span></label>
                   <div id="eye-shape">
                     <div class="sub-title">Expression</div>
                     <label class="slider" title="Bring the upper lid down over the eye"><span>Upper lid</span><input id="eye-lid-top" type="range" min="-0.8" max="1" step="0.01" />
@@ -228,6 +236,7 @@
           <div class="ck-tool" data-tool="backdrop-color">
             <div id="backdrops" class="swatches"></div>
             <label class="color-pick"><input id="backdrop-color" type="color" /> Custom color</label>
+            <div class="scene-colors" id="backdrop-scene-colors"></div>
           </div>
           <div class="ck-tool" data-tool="ground">
             <div class="sub-title">Floor</div>
@@ -244,6 +253,9 @@
               <div class="mini-styles" id="floor-styles"></div>
               <div class="swatches floor-swatches" id="floor-swatches"></div>
               <label class="color-pick"><input id="floor-color" type="color" /> Floor color</label>
+              <div class="scene-colors" id="floor-scene-colors"></div>
+              <label class="slider glow-slider" title="Make the color shine with its own light"><span>Glow</span><input id="floor-glow" type="range" min="0" max="1" step="0.01" />
+              <span class="ends"><em>off</em><em>bright</em></span></label>
             </div>
           </div>
           <div class="ck-tool" data-tool="light-turn">
@@ -327,6 +339,9 @@
             <label class="slider" title="Fade into the colors of the pieces this one touches"><span>Blend color</span><input id="piece-blend-color" type="range" min="0" max="1" step="0.01" /></label>
             <div class="swatches" id="piece-swatches"></div>
             <label class="color-pick"><input id="piece-color" type="color" /> Custom</label>
+            <div class="scene-colors" id="piece-scene-colors"></div>
+            <label class="slider glow-slider" title="Make the color shine with its own light"><span>Glow</span><input id="piece-glow" type="range" min="0" max="1" step="0.01" />
+              <span class="ends"><em>off</em><em>bright</em></span></label>
             <div class="mini-styles" id="piece-styles"></div>
             <div class="thing-material" id="piece-style-params"></div>
           </div>

@@ -5,7 +5,10 @@ import { buildSkin, paintSkin, type SkinPart } from './skin';
 import { buildInflatedGeometry, defaultOutline, getMeshDetail, type Solid, type Vec2 } from './inflate';
 import {
   castsShadow,
+  glowMaterial,
+  glowWithFlash,
   isTextured,
+  setGlow,
   setFuzzMask,
   setOpacity,
   makeFuzzShells,
@@ -38,6 +41,8 @@ export interface PartState {
   more?: PartShape[];
   thickness: number;
   color: string;
+  /** 0..1: the color shines with its own light (0 / unset = not at all) */
+  glow?: number;
   style?: StyleId;
   /** 1 = solid, lower = see-through */
   opacity?: number;
@@ -109,6 +114,8 @@ export interface EyesState {
   finish?: EyeFinish;
   /** bead / dot / button color */
   color?: string;
+  /** bead / dot / button: 0..1, the color shines with its own light */
+  glow?: number;
   /** bead / dot / button on a toon part: outlined in its ink (default off) */
   ink?: boolean;
   /** bead / dot / button in a textured material: each eye gets its own patch of it, not the same one (default on; false = all the same) */
@@ -277,6 +284,8 @@ function seamlessOn(s: CreatureState): boolean {
 
 // how long one frame may spend fusing parts (see updateMerge)
 const MERGE_BUDGET_MS = 8;
+/** scratch: the selection flash's glow */
+const FLASH = new THREE.Color();
 
 const geoCache = new Map<string, THREE.BufferGeometry>();
 function cachedGeometry(key: string, make: () => THREE.BufferGeometry) {
@@ -538,6 +547,8 @@ export class Creature {
   /** the part in drawFocus is being drawn from the side */
   private drawSide = false;
   private mergeDirty = true;
+  /** the parts' glows the skins were last dressed for */
+  private glowKey = '';
   /** where the next frame's fusing picks up (see updateMerge) */
   private mergeCursor = 0;
   // seamless skins: built when idle, thrown away on any change
@@ -797,6 +808,13 @@ export class Creature {
   sync() {
     const s = this.state;
     this.applyPlacement();
+    // a glow change alone (painting the whole creature, undo) leaves every
+    // part's mesh as it is, but the skins still need it
+    const glowKey = JSON.stringify(Object.values(s.parts).map((p) => p.glow ?? 0));
+    if (glowKey !== this.glowKey) {
+      this.glowKey = glowKey;
+      this.mergeDirty = true;
+    }
     for (const b of this.list) {
       const p = s.parts[b.src];
       const style = p.style ?? s.style;
@@ -811,7 +829,10 @@ export class Creature {
       };
       const geoKey = JSON.stringify([shapes, geoOpts, getMeshDetail()]);
       const key = geoKey + style + p.color + JSON.stringify(k) + (p.opacity ?? 1) + bendKey(bendOf(b.def, b.length));
-      if (key === b.meshKey) continue;
+      if (key === b.meshKey) {
+        this.glowPart(b);
+        continue;
+      }
       b.meshKey = key;
       this.mergeDirty = true;
       if (b.mesh) {
@@ -877,6 +898,7 @@ export class Creature {
       setTextureSpace(mesh, b.restGroup);
       b.pivot.add(mesh);
       b.mesh = mesh;
+      this.glowPart(b);
     }
     this.applyPose();
     this.syncEyes();
@@ -1203,6 +1225,15 @@ export class Creature {
       if (painted) m.color.setRGB(1, 1, 1);
       else m.color.copy(m.userData.baseColor as THREE.Color);
     }
+    mesh.userData.painted = painted;
+    this.glowPart(b);
+  }
+
+  /** A part's glow, on its mesh (tinted by baked colors when it has them). */
+  private glowPart(b: BoneRT) {
+    if (!b.mesh) return;
+    const p = this.state.parts[b.src];
+    setGlow(b.mesh, p.color, p.glow ?? 0, { painted: !!b.mesh.userData.painted });
   }
 
   // -------------------------------------------------------------------------
@@ -1287,6 +1318,7 @@ export class Creature {
           // textured materials lay their textures out in the rest pose
           toRest: textured ? b.restGroup.clone().multiply(b.mesh!.matrix) : undefined,
           color: this.shownColor(b),
+          glow: s.parts[b.src].glow ?? 0,
           k: Math.max(0.005, Math.min(kMax, 0.6 * radius(b))),
           facet: geo.userData.facet as number | undefined,
         }));
@@ -1314,7 +1346,7 @@ export class Creature {
         parts,
         lowPoly,
         painted: !!geo.userData.painted,
-        colorKey: JSON.stringify([parts.map((p) => p.color.getHex()), kc]),
+        colorKey: JSON.stringify([parts.map((p) => [p.color.getHex(), p.glow]), kc]),
       });
     }
     if (version !== this.skinVersion) return false;
@@ -1365,8 +1397,11 @@ export class Creature {
     const kc = s.mergeColors ? (s.colorBlend ?? 0.12) : 0;
 
     // repaint only if the colors (or the fade width) changed
-    sk.parts.forEach((p, i) => p.color.copy(this.shownColor(sk.owners[i])));
-    const colorKey = JSON.stringify([sk.parts.map((p) => p.color.getHex()), kc]);
+    sk.parts.forEach((p, i) => {
+      p.color.copy(this.shownColor(sk.owners[i]));
+      p.glow = s.parts[sk.owners[i].src].glow ?? 0;
+    });
+    const colorKey = JSON.stringify([sk.parts.map((p) => [p.color.getHex(), p.glow]), kc]);
     if (colorKey !== sk.colorKey) {
       sk.painted = paintSkin(sk.mesh.geometry, sk.parts, kc, sk.lowPoly);
       sk.colorKey = colorKey;
@@ -1374,7 +1409,7 @@ export class Creature {
 
     // nothing about the look changed (e.g. another part was edited): keep the
     // current dressing; rebuilding felt fuzz and stray hairs is expensive
-    const lookKey = JSON.stringify([style, part.color, k, part.opacity ?? 1, sk.painted, colorKey, [...this.eyeSpots]]);
+    const lookKey = JSON.stringify([style, part.color, part.glow ?? 0, k, part.opacity ?? 1, sk.painted, colorKey, [...this.eyeSpots]]);
     if (lookKey === sk.lookKey) {
       for (const b of sk.members) if (b.mesh) b.mesh.visible = false;
       return;
@@ -1416,6 +1451,9 @@ export class Creature {
       if (k.hairs > 0) mesh.add(makeStrayHairs(geo, part.color, 11, k.hairs, sk.painted, 1, k.fuzz));
     }
     setOpacity(mesh, part.opacity ?? 1);
+    // parts that glow differently carry their glow per point
+    const attr = !!geo.getAttribute('glow');
+    setGlow(mesh, part.color, attr ? 1 : (part.glow ?? 0), { painted: sk.painted, attr });
     // laid out from the rest positions the skin was built with
     if (geo.getAttribute('restPos')) setTextureSpace(mesh, 'attributes');
 
@@ -1897,10 +1935,7 @@ export class Creature {
     const src = id ? this.bones.get(id)?.src : null;
     for (const b of this.list) {
       const m = b.mesh?.material as THREE.MeshStandardMaterial | undefined;
-      if (m && 'emissive' in m) {
-        if (b.src === src && k > 0) m.emissive.setRGB(1, 0.42, 0.29).multiplyScalar(0.45 * k);
-        else m.emissive.setScalar(0);
-      }
+      if (m && 'emissive' in m) glowWithFlash(m, b.src === src && k > 0 ? FLASH.setRGB(1, 0.42, 0.29).multiplyScalar(0.45 * k) : undefined);
       // A part under a seamless skin is hidden, so its own glow can't be
       // seen: glow a copy of its surface, puffed out a touch, over the skin.
       let hl = this.highlights.get(b);
@@ -2473,6 +2508,12 @@ function eyeMaterial(finish: EyeFinish, color: string, headStyle: StyleId, headS
   }
 }
 
+/** An eye's material, glowing in its color as much as the eyes are set to. */
+function eyeGlow(m: THREE.Material, color: string, e: EyesState): THREE.Material {
+  glowMaterial(m, color, e.glow ?? 0);
+  return m;
+}
+
 /** Pupil size as a scale on the default, 0.5x .. 1.5x. */
 function pupilScale(e: EyesState): number {
   return 0.5 + (e.pupil ?? 0.5);
@@ -2552,21 +2593,24 @@ function buildEye(style: EyeStyle, r: number, sgn: number, headStyle: StyleId, h
     }
     case 'bead': {
       // a bead, by default in the creature's own material
-      add(shapedEye(r * 0.8, r * 0.8, r * 0.8, sgn, e), eyeMaterial(finish, e.color ?? '#1d1a22', headStyle, headSettings), [0, 0, -r * 0.3], [1, 1, 1]);
+      add(shapedEye(r * 0.8, r * 0.8, r * 0.8, sgn, e), eyeGlow(eyeMaterial(finish, e.color ?? '#1d1a22', headStyle, headSettings), e.color ?? '#1d1a22', e), [0, 0, -r * 0.3], [1, 1, 1]);
       break;
     }
     case 'dot': {
       // a flat disc of dark wool/clay pressed onto the face
-      add(shapedEye(r * 0.95, r * 0.95, r * 0.28, sgn, e), eyeMaterial(finish, e.color ?? '#2a2730', headStyle, headSettings), [0, 0, 0], [1, 1, 1]);
+      add(shapedEye(r * 0.95, r * 0.95, r * 0.28, sgn, e), eyeGlow(eyeMaterial(finish, e.color ?? '#2a2730', headStyle, headSettings), e.color ?? '#2a2730', e), [0, 0, 0], [1, 1, 1]);
       break;
     }
     case 'button': {
       const R = r * 1.05;
       // buttons are glossy plastic unless a finish is chosen
-      const mat =
+      const mat = eyeGlow(
         finish === 'body'
           ? new THREE.MeshPhysicalMaterial({ color: e.color ?? 0x2a2230, roughness: 0.35, clearcoat: 1, clearcoatRoughness: 0.2 })
-          : eyeMaterial(finish, e.color ?? '#2a2230', headStyle, headSettings);
+          : eyeMaterial(finish, e.color ?? '#2a2230', headStyle, headSettings),
+        e.color ?? '#2a2230',
+        e,
+      );
       const body = new THREE.CylinderGeometry(1, 0.94, 1, 40);
       body.rotateX(Math.PI / 2);
       add(body, mat, [0, 0, R * 0.1], [R, R, R * 0.2]);

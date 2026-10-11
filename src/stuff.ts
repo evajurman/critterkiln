@@ -11,6 +11,7 @@ import {
   makeMaterial,
   makeOutlineMaterial,
   makeStrayHairs,
+  setGlow,
   setOpacity,
   styleSettings,
   type StyleId,
@@ -47,6 +48,8 @@ export interface Piece {
   /** flat: how rounded the edges are, 0..1 */
   round: number;
   color: string;
+  /** 0..1: the color shines with its own light (0 / unset = not at all) */
+  glow?: number;
   style: StyleId;
   /** layer offset along Z (in front of / behind other pieces) */
   z: number;
@@ -260,6 +263,7 @@ export function buildThing(thing: Thing, wearer: Wearer, unit = 1, wrap?: WrapSu
       }
     }
     setOpacity(mesh, p.opacity ?? 1);
+    setGlow(mesh, p.color, p.glow ?? 0, { painted });
     if (p.place) {
       mesh.position.set(...p.place.position);
       mesh.quaternion.set(...p.place.quaternion);
