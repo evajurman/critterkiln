@@ -226,6 +226,9 @@ input[type=range] { accent-color: var(--accent); width: 100%; }
 /* a piece's Custom color and Paint whole thing, side by side above the swatches */
 .paint-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
 .paint-row button[hidden] { display: none; }
+/* where a glow comes from: under its Glow slider, only while it glows */
+.glow-follow { margin: -2px 0 8px; }
+.glow-follow[hidden] { display: none; }
 .scene-colors[hidden] { display: none; }
 .scene-colors .sub-title { margin-bottom: 4px; }
 .scene-colors .swatches { grid-template-columns: repeat(10, 1fr); gap: 4px; }

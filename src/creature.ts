@@ -19,6 +19,7 @@ import {
   setTextureSpace,
   styleSettings,
   surfaceColor,
+  type GlowFollow,
   type StyleId,
   type FuzzSpot,
   type StyleSettings,
@@ -43,6 +44,8 @@ export interface PartState {
   color: string;
   /** 0..1: the color shines with its own light (0 / unset = not at all) */
   glow?: number;
+  /** where in its texture it glows from (unset = evenly all over) */
+  glowFollow?: GlowFollow;
   style?: StyleId;
   /** 1 = solid, lower = see-through */
   opacity?: number;
@@ -116,6 +119,8 @@ export interface EyesState {
   color?: string;
   /** bead / dot / button: 0..1, the color shines with its own light */
   glow?: number;
+  /** bead / dot / button: where in its texture it glows from (unset = evenly) */
+  glowFollow?: GlowFollow;
   /** bead / dot / button on a toon part: outlined in its ink (default off) */
   ink?: boolean;
   /** bead / dot / button in a textured material: each eye gets its own patch of it, not the same one (default on; false = all the same) */
@@ -810,7 +815,7 @@ export class Creature {
     this.applyPlacement();
     // a glow change alone (painting the whole creature, undo) leaves every
     // part's mesh as it is, but the skins still need it
-    const glowKey = JSON.stringify(Object.values(s.parts).map((p) => p.glow ?? 0));
+    const glowKey = JSON.stringify(Object.values(s.parts).map((p) => [p.glow ?? 0, p.glowFollow]));
     if (glowKey !== this.glowKey) {
       this.glowKey = glowKey;
       this.mergeDirty = true;
@@ -1233,7 +1238,7 @@ export class Creature {
   private glowPart(b: BoneRT) {
     if (!b.mesh) return;
     const p = this.state.parts[b.src];
-    setGlow(b.mesh, p.color, p.glow ?? 0, { painted: !!b.mesh.userData.painted });
+    setGlow(b.mesh, p.color, p.glow ?? 0, { painted: !!b.mesh.userData.painted, follow: p.glowFollow });
   }
 
   // -------------------------------------------------------------------------
@@ -1409,7 +1414,9 @@ export class Creature {
 
     // nothing about the look changed (e.g. another part was edited): keep the
     // current dressing; rebuilding felt fuzz and stray hairs is expensive
-    const lookKey = JSON.stringify([style, part.color, part.glow ?? 0, k, part.opacity ?? 1, sk.painted, colorKey, [...this.eyeSpots]]);
+    // a skin glows from where its first glowing part does
+    const follow = sk.owners.map((b) => s.parts[b.src]).find((p) => p.glow)?.glowFollow;
+    const lookKey = JSON.stringify([style, part.color, part.glow ?? 0, follow, k, part.opacity ?? 1, sk.painted, colorKey, [...this.eyeSpots]]);
     if (lookKey === sk.lookKey) {
       for (const b of sk.members) if (b.mesh) b.mesh.visible = false;
       return;
@@ -1453,7 +1460,7 @@ export class Creature {
     setOpacity(mesh, part.opacity ?? 1);
     // parts that glow differently carry their glow per point
     const attr = !!geo.getAttribute('glow');
-    setGlow(mesh, part.color, attr ? 1 : (part.glow ?? 0), { painted: sk.painted, attr });
+    setGlow(mesh, part.color, attr ? 1 : (part.glow ?? 0), { painted: sk.painted, attr, follow });
     // laid out from the rest positions the skin was built with
     if (geo.getAttribute('restPos')) setTextureSpace(mesh, 'attributes');
 
@@ -2510,7 +2517,7 @@ function eyeMaterial(finish: EyeFinish, color: string, headStyle: StyleId, headS
 
 /** An eye's material, glowing in its color as much as the eyes are set to. */
 function eyeGlow(m: THREE.Material, color: string, e: EyesState): THREE.Material {
-  glowMaterial(m, color, e.glow ?? 0);
+  glowMaterial(m, color, e.glow ?? 0, { follow: e.glowFollow });
   return m;
 }
 

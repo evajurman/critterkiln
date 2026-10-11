@@ -14,6 +14,7 @@ import {
   setGlow,
   setOpacity,
   styleSettings,
+  type GlowFollow,
   type StyleId,
   type StyleSettings,
 } from './materials';
@@ -50,6 +51,8 @@ export interface Piece {
   color: string;
   /** 0..1: the color shines with its own light (0 / unset = not at all) */
   glow?: number;
+  /** where in its texture it glows from (unset = evenly all over) */
+  glowFollow?: GlowFollow;
   style: StyleId;
   /** layer offset along Z (in front of / behind other pieces) */
   z: number;
@@ -263,7 +266,7 @@ export function buildThing(thing: Thing, wearer: Wearer, unit = 1, wrap?: WrapSu
       }
     }
     setOpacity(mesh, p.opacity ?? 1);
-    setGlow(mesh, p.color, p.glow ?? 0, { painted });
+    setGlow(mesh, p.color, p.glow ?? 0, { painted, follow: p.glowFollow });
     if (p.place) {
       mesh.position.set(...p.place.position);
       mesh.quaternion.set(...p.place.quaternion);

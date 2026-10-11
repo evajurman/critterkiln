@@ -63,9 +63,10 @@ import {
   setFuzzQuality,
   setGlassEnvironment,
   setGlow,
+  setGlowMaskOut,
   setSketchPixelRatio,
   styleSettings,
-  type GlowInfo,
+  type GlowFollow,
   type StyleId,
 } from './materials';
 import { installScrollbars } from './scrollbars';
@@ -229,7 +230,7 @@ scene.add(ground);
 
 type FloorMode = 'none' | 'shadow' | 'mirror' | 'material';
 const FLOOR_KEY = 'creature-creator/floor';
-const floorPrefs: { mode: FloorMode; style: StyleId; color: string; glow: number; reflect: number } = (() => {
+const floorPrefs: { mode: FloorMode; style: StyleId; color: string; glow: number; glowFollow?: GlowFollow; reflect: number } = (() => {
   const defaults = { mode: 'shadow' as FloorMode, style: 'clay' as StyleId, color: '#d6c7b3', glow: 0, reflect: 0.55 };
   try {
     return { ...defaults, ...JSON.parse(localStorage.getItem(FLOOR_KEY) ?? '{}') };
@@ -279,7 +280,7 @@ function buildFloorMesh() {
   const settings = styleSettings(floorPrefs.style, state.materialSettings?.[floorPrefs.style]);
   const key = JSON.stringify([floorPrefs.style, floorPrefs.color, settings]);
   if (floorMesh && key === floorKey) {
-    setGlow(floorMesh, floorPrefs.color, floorPrefs.glow);
+    setGlow(floorMesh, floorPrefs.color, floorPrefs.glow, { follow: floorPrefs.glowFollow });
     return;
   }
   floorKey = key;
@@ -307,7 +308,7 @@ function buildFloorMesh() {
   floorMesh = new THREE.Mesh(geo, makeMaterial(floorPrefs.style, floorPrefs.color, settings));
   floorMesh.position.y = -0.002;
   floorMesh.receiveShadow = true;
-  setGlow(floorMesh, floorPrefs.color, floorPrefs.glow);
+  setGlow(floorMesh, floorPrefs.color, floorPrefs.glow, { follow: floorPrefs.glowFollow });
   scene.add(floorMesh);
 }
 
@@ -565,9 +566,10 @@ composer.addPass(furPass);
 
 /**
  * Glowing colors (materials.ts glowMaterial) get a soft halo: the scene is
- * drawn again, small, with each glowing thing in just its glow and everything
- * else black (so it still hides what's behind it), and that is blurred over
- * the picture. Fuzz, see-through things and handles don't hide the glow.
+ * drawn again, small, with each glowing thing putting out just its glow (in
+ * its own material, so the halo follows its texture too) and everything else
+ * black (so it still hides what's behind it), and that is blurred over the
+ * picture. Fuzz, see-through things and handles don't hide the glow.
  * Skipped while nothing in view glows.
  */
 class GlowPass extends Pass {
@@ -589,7 +591,6 @@ class GlowPass extends Pass {
   private black = new Map<THREE.Side, THREE.MeshBasicMaterial>();
   /** draws nothing at all */
   private skip = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false });
-  private glows = new Map<string, THREE.MeshBasicMaterial>();
 
   constructor() {
     super();
@@ -601,23 +602,6 @@ class GlowPass extends Pass {
   setSize(w: number, h: number) {
     this.mask.setSize(Math.max(1, Math.round(w / 2)), Math.max(1, Math.round(h / 2)));
     this.bloom.setSize(w, h);
-  }
-
-  private glowMat(g: GlowInfo, src: THREE.Material): THREE.MeshBasicMaterial {
-    const see = src.transparent && src.opacity < 1;
-    const key = [...g.color.toArray(), g.painted, g.attr, src.side, see ? src.opacity : 1].join();
-    let m = this.glows.get(key);
-    if (m) return m;
-    if (this.glows.size > 64) {
-      for (const o of this.glows.values()) o.dispose();
-      this.glows.clear();
-    }
-    m = new THREE.MeshBasicMaterial({ color: g.color, vertexColors: g.painted || g.attr, side: src.side, transparent: see, opacity: see ? src.opacity : 1 });
-    // unpainted with a glow attribute: the vertex colors are missing, and the color is all in `color`
-    if (g.attr) m.defines = { GLOW_ATTR: '', GLOW_MASK: '' };
-    if (g.attr && !g.painted) m.vertexColors = false;
-    this.glows.set(key, m);
-    return m;
   }
 
   private blackMat(side: THREE.Side) {
@@ -641,14 +625,13 @@ class GlowPass extends Pass {
       if ((o as THREE.Mesh & { isReflector?: boolean }).isReflector) return void hidden.push(o);
       const m = mesh.material;
       let use: THREE.Material = this.skip;
-      if (!Array.isArray(m) && m.visible) {
-        const g = m.userData.glow as GlowInfo | undefined;
-        if (g) {
-          use = this.glowMat(g, m);
+      if (!Array.isArray(m) && m.visible && !o.userData.fx) {
+        if (m.userData.glow) {
+          // drawn as it is, putting out only its glow (glowMaskOut)
           glowing = true;
-        } else if (!o.userData.fx && m.depthTest && m.depthWrite && m.colorWrite && !m.transparent && !(m as THREE.MeshPhysicalMaterial).transmission) {
-          use = this.blackMat(m.side);
+          return;
         }
+        if (m.depthTest && m.depthWrite && m.colorWrite && !m.transparent && !(m as THREE.MeshPhysicalMaterial).transmission) use = this.blackMat(m.side);
       }
       swaps.push([mesh, m]);
       mesh.material = use;
@@ -664,7 +647,9 @@ class GlowPass extends Pass {
       renderer.setRenderTarget(this.mask);
       renderer.setClearColor(0x000000, 1);
       renderer.clear();
+      setGlowMaskOut(true);
       renderer.render(scene, view);
+      setGlowMaskOut(false);
       renderer.setClearColor(clear, clearAlpha);
       renderer.shadowMap.autoUpdate = shadows;
       scene.background = background;
@@ -3314,6 +3299,7 @@ function renderStuffPanel() {
     }
     $<HTMLInputElement>('#piece-color').value = p.color;
     $<HTMLInputElement>('#piece-glow').value = String(p.glow ?? 0);
+    pieceGlowFollow();
     // (only something to do with more than one piece)
     $('#paint-thing').hidden = wb.pieces.length < 2;
     pieceSceneColors();
@@ -3453,11 +3439,22 @@ $('#paint-thing').onclick = () => {
     q.color = p.color;
     if (p.glow) q.glow = p.glow;
     else delete q.glow;
+    if (p.glowFollow) q.glowFollow = p.glowFollow;
+    else delete q.glowFollow;
   }
   syncWorkbench();
   commit();
   renderStuffPanel();
 };
+const pieceGlowFollow = glowFollowSeg(
+  '#piece-glow-follow',
+  () => piece(),
+  (f) =>
+    updatePiece((q) => {
+      if (f) q.glowFollow = f;
+      else delete q.glowFollow;
+    }),
+);
 const pieceSceneColors = sceneColorRow($('#piece-scene-colors'), () => piece()?.color, (c) => updatePiece((q) => (q.color = c)));
 glowSlider(
   '#piece-glow',
@@ -3465,6 +3462,7 @@ glowSlider(
     updatePiece((p) => {
       if (v > 0) p.glow = v;
       else delete p.glow;
+      pieceGlowFollow();
     }, false),
   () => commit(),
 );
@@ -5038,6 +5036,28 @@ function renderSceneColors() {
 }
 setSceneColors(sceneColors);
 
+/**
+ * Where a glow comes from (Even / Bright / Dark, under its Glow slider; only
+ * shown while it glows). Returns its redraw.
+ */
+function glowFollowSeg(id: string, get: () => { glow?: number; glowFollow?: GlowFollow } | undefined, set: (f: GlowFollow | undefined) => void): () => void {
+  const el = $(id);
+  const buttons = [...el.querySelectorAll<HTMLButtonElement>('button')];
+  const render = () => {
+    const o = get();
+    el.hidden = !o?.glow;
+    for (const b of buttons) b.classList.toggle('active', b.dataset.follow === (o?.glowFollow ?? 'even'));
+  };
+  for (const b of buttons) {
+    b.onclick = () => {
+      const f = b.dataset.follow as GlowFollow;
+      set(f === 'even' ? undefined : f);
+      render();
+    };
+  }
+  return render;
+}
+
 /** A Glow slider: `set` while it's dragged, `done` when let go. */
 function glowSlider(id: string, set: (v: number) => void, done: () => void) {
   const input = $<HTMLInputElement>(id);
@@ -5152,7 +5172,19 @@ function renderColors() {
   $<HTMLInputElement>('#color').value = p.color;
   $<HTMLInputElement>('#glow').value = String(p.glow ?? 0);
   partSceneColors();
+  partGlowFollow();
 }
+const partGlowFollow = glowFollowSeg(
+  '#glow-follow',
+  () => (creature.bones.has(selected) ? selPart() : undefined),
+  (f) => {
+    if (f) selPart().glowFollow = f;
+    else delete selPart().glowFollow;
+    creature.sync();
+    creature.markMergeDirty();
+    commit();
+  },
+);
 const partSceneColors = sceneColorRow($('#scene-colors'), () => (creature.bones.has(selected) ? selPart().color : undefined), (c) => setColor(c, true));
 glowSlider(
   '#glow',
@@ -5161,6 +5193,7 @@ glowSlider(
     else delete selPart().glow;
     creature.sync();
     creature.markMergeDirty();
+    partGlowFollow();
   },
   () => commit(),
 );
@@ -5472,6 +5505,7 @@ function renderEyes() {
     }
     $<HTMLInputElement>('#eye-color').value = current;
     $<HTMLInputElement>('#eye-glow').value = String(e.glow ?? 0);
+    eyeGlowFollow();
     eyeSceneColors();
     // the lids, crescent and tilt reshape a bead or a dot; a button stays round
     $('#eye-shape').hidden = e.style === 'button';
@@ -6301,11 +6335,13 @@ $<HTMLInputElement>('#thickness').onchange = () => {
 $<HTMLInputElement>('#color').oninput = (e) => setColor((e.target as HTMLInputElement).value, false);
 $<HTMLInputElement>('#color').onchange = (e) => setColor((e.target as HTMLInputElement).value, true);
 $('#paint-all').onclick = () => {
-  const { color: c, glow } = selPart();
+  const { color: c, glow, glowFollow } = selPart();
   for (const p of Object.values(state.parts)) {
     p.color = c;
     if (glow) p.glow = glow;
     else delete p.glow;
+    if (glowFollow) p.glowFollow = glowFollow;
+    else delete p.glowFollow;
   }
   creature.sync();
   commit();
@@ -6388,14 +6424,25 @@ function renderFloorUI() {
     sw.append(b);
   }
   $<HTMLInputElement>('#floor-glow').value = String(floorPrefs.glow);
+  floorGlowFollow();
   renderSceneColors();
 }
+const floorGlowFollow = glowFollowSeg(
+  '#floor-glow-follow',
+  () => floorPrefs,
+  (f) =>
+    updateFloor(() => {
+      if (f) floorPrefs.glowFollow = f;
+      else delete floorPrefs.glowFollow;
+    }),
+);
 sceneColorRow($('#floor-scene-colors'), () => floorPrefs.color, (c) => updateFloor(() => (floorPrefs.color = c)));
 glowSlider(
   '#floor-glow',
   (v) => {
     floorPrefs.glow = v;
     applyFloor();
+    floorGlowFollow();
   },
   () => saveFloor(),
 );
@@ -6626,6 +6673,15 @@ $<HTMLInputElement>('#eye-vary').onchange = (ev) =>
 document.querySelectorAll<HTMLButtonElement>('#eye-finish button').forEach((b) => {
   b.onclick = () => setEyeLook((e) => (e.finish = b.dataset.finish as EyeFinish));
 });
+const eyeGlowFollow = glowFollowSeg(
+  '#eye-glow-follow',
+  () => state.eyes,
+  (f) =>
+    setEyeLook((e) => {
+      if (f) e.glowFollow = f;
+      else delete e.glowFollow;
+    }),
+);
 const eyeSceneColors = sceneColorRow($('#eye-scene-colors'), () => state.eyes.color, (c) => setEyeLook((x) => (x.color = c)));
 glowSlider(
   '#eye-glow',
@@ -6633,6 +6689,7 @@ glowSlider(
     if (v > 0) state.eyes.glow = v;
     else delete state.eyes.glow;
     creature.sync();
+    eyeGlowFollow();
   },
   () => commit(),
 );

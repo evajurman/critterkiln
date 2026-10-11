@@ -143,6 +143,11 @@
           <div class="ck-tool" data-tool="glow">
             <label class="slider" title="Make the color shine with its own light"><span>Glow</span><input id="glow" type="range" min="0" max="1" step="0.01" />
               <span class="ends"><em>off</em><em>bright</em></span></label>
+            <div class="seg glow-follow" id="glow-follow" title="Where the glow comes from">
+              <button data-follow="even" title="Glow evenly all over">Even</button>
+              <button data-follow="bright" title="Glow from the bright parts of the texture: cracks and dark patches stay dim">Bright</button>
+              <button data-follow="dark" title="Glow from the dark parts of the texture: cracks, seams, pits and patina">Dark</button>
+            </div>
           </div>
           <div class="ck-tool" data-tool="color-blend">
             <label class="slider wide-label" id="color-blend-row" title="Also merge touching parts of different colors, fading one color into the other. 0 keeps colors apart.">
@@ -216,6 +221,11 @@
                   <div class="scene-colors" id="eye-scene-colors"></div>
                   <label class="slider glow-slider" title="Make the color shine with its own light"><span>Glow</span><input id="eye-glow" type="range" min="0" max="1" step="0.01" />
               <span class="ends"><em>off</em><em>bright</em></span></label>
+                  <div class="seg glow-follow" id="eye-glow-follow" title="Where the glow comes from">
+                    <button data-follow="even" title="Glow evenly all over">Even</button>
+                    <button data-follow="bright" title="Glow from the bright parts of the texture: cracks and dark patches stay dim">Bright</button>
+                    <button data-follow="dark" title="Glow from the dark parts of the texture: cracks, seams, pits and patina">Dark</button>
+                  </div>
                   <div id="eye-shape">
                     <div class="sub-title">Expression</div>
                     <label class="slider" title="Bring the upper lid down over the eye"><span>Upper lid</span><input id="eye-lid-top" type="range" min="-0.8" max="1" step="0.01" />
@@ -256,6 +266,11 @@
               <div class="scene-colors" id="floor-scene-colors"></div>
               <label class="slider glow-slider" title="Make the color shine with its own light"><span>Glow</span><input id="floor-glow" type="range" min="0" max="1" step="0.01" />
               <span class="ends"><em>off</em><em>bright</em></span></label>
+              <div class="seg glow-follow" id="floor-glow-follow" title="Where the glow comes from">
+                <button data-follow="even" title="Glow evenly all over">Even</button>
+                <button data-follow="bright" title="Glow from the bright parts of the texture: cracks and dark patches stay dim">Bright</button>
+                <button data-follow="dark" title="Glow from the dark parts of the texture: cracks, seams, pits and patina">Dark</button>
+              </div>
             </div>
           </div>
           <div class="ck-tool" data-tool="light-turn">
@@ -345,6 +360,11 @@
             <div class="scene-colors" id="piece-scene-colors"></div>
             <label class="slider glow-slider" title="Make the color shine with its own light"><span>Glow</span><input id="piece-glow" type="range" min="0" max="1" step="0.01" />
               <span class="ends"><em>off</em><em>bright</em></span></label>
+            <div class="seg glow-follow" id="piece-glow-follow" title="Where the glow comes from">
+              <button data-follow="even" title="Glow evenly all over">Even</button>
+              <button data-follow="bright" title="Glow from the bright parts of the texture: cracks and dark patches stay dim">Bright</button>
+              <button data-follow="dark" title="Glow from the dark parts of the texture: cracks, seams, pits and patina">Dark</button>
+            </div>
             <div class="mini-styles" id="piece-styles"></div>
             <div class="thing-material" id="piece-style-params"></div>
           </div>

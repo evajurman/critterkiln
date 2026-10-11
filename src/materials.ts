@@ -1384,7 +1384,10 @@ export function makeMaterial(style: StyleId, color: string, settings: StyleSetti
               diffuseColor.rgb = mix(diffuseColor.rgb, stoneVein, sd.b * stoneVeins);
               // dirt settles in the pits and cracks
               diffuseColor.rgb *= 1.0 - max(0.0, 0.5 - sb.r) * 1.6 * stonePits;
-              diffuseColor.rgb *= 1.0 - stoneCrack(sb.g) * 0.88;`,
+              diffuseColor.rgb *= 1.0 - stoneCrack(sb.g) * 0.88;
+              #ifdef GLOW
+                glowCrack = stoneCrack(sb.g);
+              #endif`,
           },
         },
       );
@@ -1683,64 +1686,126 @@ export function setOpacity(root: THREE.Object3D, opacity: number) {
 }
 
 // ---------------------------------------------------------------------------
-// Glow: a color can shine with its own light. The material's emissive is the
-// color times the glow (on top of which the selection flash adds), and the
-// scene's glow pass (main.ts) blooms whatever has `userData.glow` set.
-// Under baked colors (blended parts and pieces) the glow is tinted per vertex
-// by them (GLOW_VCOLOR); a skin that blends glowing and plain parts also
-// carries how much each point glows (GLOW_ATTR, a `glow` attribute).
+// Glow: a color can shine with its own light. It's worked out in the shader
+// after the material's textures, so it can follow them: evenly all over, from
+// the bright parts (cracks and dark patches stay dim), or from the dark parts
+// (cracks, seams and patina light up). The scene's glow pass (main.ts) blooms
+// whatever glows by drawing it again with glowMaskOut on: just its glow.
+// Under baked colors (blended parts and pieces) the glow is tinted by them per
+// vertex; a skin that blends glowing and plain parts also carries how much
+// each point glows (GLOW_ATTR, a `glow` attribute).
 
-/** emissive at full glow, as a multiple of the color */
+/** the glow at full strength, as a multiple of the color */
 export const GLOW_GAIN = 1.6;
+
+/** where a glow comes from: all over, or the bright or the dark parts of the texture */
+export type GlowFollow = 'even' | 'bright' | 'dark';
+const FOLLOW: Record<GlowFollow, number> = { even: 0, bright: 1, dark: 2 };
+
+/** on while the glow pass draws: glowing materials put out just their glow */
+const GLOW_MASK_OUT = { value: false };
+export function setGlowMaskOut(on: boolean) {
+  GLOW_MASK_OUT.value = on;
+}
 
 THREE.ShaderChunk.color_pars_vertex += '\n#ifdef GLOW_ATTR\nattribute float glow;\nvarying float vGlow;\n#endif';
 THREE.ShaderChunk.color_vertex += '\n#ifdef GLOW_ATTR\nvGlow = glow;\n#endif';
 THREE.ShaderChunk.color_pars_fragment += '\n#ifdef GLOW_ATTR\nvarying float vGlow;\n#endif';
-// the glow pass's mask (an unlit material): just the glowing points
-THREE.ShaderChunk.color_fragment += '\n#ifdef GLOW_MASK\ndiffuseColor.rgb *= vGlow;\n#endif';
-THREE.ShaderChunk.emissivemap_fragment +=
-  '\n#if defined( GLOW_VCOLOR ) && defined( USE_COLOR )\ntotalEmissiveRadiance *= vColor.rgb;\n#endif\n#ifdef GLOW_ATTR\ntotalEmissiveRadiance *= vGlow;\n#endif';
+// a material's own code can say where it's cracked (stone does), for the glow
+THREE.ShaderChunk.color_fragment += '\n#ifdef GLOW\nfloat glowCrack = 0.0;\n#endif';
+THREE.ShaderChunk.emissivemap_pars_fragment += '\n#ifdef GLOW\nuniform vec3 glowTint;\nuniform bool glowMaskOut;\n#endif';
+THREE.ShaderChunk.emissivemap_fragment += /* glsl */ `
+#ifdef GLOW
+{
+  // the color before any texture, and how the texture has shifted it
+  vec3 glowBase = diffuse;
+  vec3 glowE = glowTint;
+  #ifdef USE_COLOR
+    glowBase *= vColor.rgb;
+    glowE *= vColor.rgb;
+  #endif
+  const vec3 glowLuma = vec3(0.2126, 0.7152, 0.0722);
+  float glowShift = clamp(dot(diffuseColor.rgb, glowLuma) / max(dot(glowBase, glowLuma), 1e-3), 0.0, 1.5);
+  #if GLOW == 1
+    // the bright parts, in the texture's own colors; cracks stay dark
+    glowE *= clamp(diffuseColor.rgb / max(glowBase, vec3(1e-3)), 0.0, 1.5) * glowShift * (1.0 - glowCrack);
+  #elif GLOW == 2
+    // the dark parts (cracks, seams, patina, pits), in the picked color
+    glowE *= max(glowCrack, 1.0 - smoothstep(0.4, 0.9, glowShift));
+  #endif
+  #ifdef GLOW_ATTR
+    glowE *= vGlow;
+  #endif
+  if (glowMaskOut) {
+    gl_FragColor = vec4(glowE, diffuseColor.a);
+    return;
+  }
+  totalEmissiveRadiance += glowE;
+}
+#endif`;
 
-/** What the glow pass blooms for a material: its glow color, tinted by vertex colors (`painted`) and by the glow attribute (`attr`). */
+/** What the glow pass needs to know: that a material glows (it then draws it with glowMaskOut on). */
 export interface GlowInfo {
-  color: THREE.Color;
-  painted: boolean;
-  attr: boolean;
+  follow: GlowFollow;
 }
 
 /**
  * How a mesh's glow is laid on: `painted` = its color comes from baked vertex
  * colors; `attr` = a per-vertex `glow` attribute says how much each point
- * glows (and `glow` is then just whether anything does).
+ * glows (and `glow` is then just whether anything does); `follow` = where
+ * in its texture it glows from.
  */
 export interface GlowBake {
   painted?: boolean;
   attr?: boolean;
+  follow?: GlowFollow;
 }
 
-function setDefine(m: THREE.Material, name: string, on: boolean) {
-  if ((!!m.defines && name in m.defines) === on) return;
+function setDefine(m: THREE.Material, name: string, value: string | null) {
+  const now = m.defines && name in m.defines ? String(m.defines[name]) : null;
+  if (now === value) return;
   const d = { ...m.defines };
-  if (on) d[name] = '';
-  else delete d[name];
+  if (value === null) delete d[name];
+  else d[name] = value;
   m.defines = d;
   m.needsUpdate = true;
 }
 
+/** Give a material the glow's uniforms (once), keeping its own shader hooks and program key. */
+function hookGlow(m: THREE.Material): THREE.IUniform<THREE.Color> {
+  if (m.userData.glowTint) return m.userData.glowTint;
+  const tint = { value: new THREE.Color() };
+  m.userData.glowTint = tint;
+  const before = m.onBeforeCompile;
+  // a material with no key of its own is told apart by its hook's source: keep that
+  const key = Object.prototype.hasOwnProperty.call(m, 'customProgramCacheKey') ? m.customProgramCacheKey.bind(m) : () => before.toString();
+  m.onBeforeCompile = (shader, renderer) => {
+    before.call(m, shader, renderer);
+    shader.uniforms.glowTint = tint;
+    shader.uniforms.glowMaskOut = GLOW_MASK_OUT;
+  };
+  m.customProgramCacheKey = () => key() + '|glow';
+  return tint;
+}
+
 /** Make a material glow in `color`, 0 = off .. 1 = bright. */
 export function glowMaterial(m: THREE.Material, color: THREE.ColorRepresentation, glow = 0, bake: GlowBake = {}) {
-  const em = (m as THREE.MeshStandardMaterial).emissive;
-  if (!em || m.userData.ink) return;
+  if (!(m as THREE.MeshStandardMaterial).emissive || m.userData.ink) return;
   const on = glow > 0;
-  const painted = on && !!bake.painted;
-  const attr = on && !!bake.attr;
-  const c = painted ? new THREE.Color(1, 1, 1) : new THREE.Color(color);
-  c.multiplyScalar(on ? (attr ? 1 : glow) * GLOW_GAIN : 0);
-  m.userData.glowEmissive = c;
-  m.userData.glow = on ? ({ color: c, painted, attr } satisfies GlowInfo) : undefined;
-  em.copy(c);
-  setDefine(m, 'GLOW_VCOLOR', painted);
-  setDefine(m, 'GLOW_ATTR', attr);
+  if (!on) {
+    m.userData.glow = undefined;
+    setDefine(m, 'GLOW', null);
+    setDefine(m, 'GLOW_ATTR', null);
+    return;
+  }
+  const follow = bake.follow ?? 'even';
+  // under baked colors the color is in the vertices
+  hookGlow(m)
+    .value.set(bake.painted ? 0xffffff : color)
+    .multiplyScalar((bake.attr ? 1 : glow) * GLOW_GAIN);
+  m.userData.glow = { follow } satisfies GlowInfo;
+  setDefine(m, 'GLOW', String(FOLLOW[follow]));
+  setDefine(m, 'GLOW_ATTR', bake.attr ? '' : null);
 }
 
 /** glowMaterial on a mesh and its fuzz shells (not its toon ink or stray hairs). */
@@ -1752,14 +1817,12 @@ export function setGlow(mesh: THREE.Mesh, color: THREE.ColorRepresentation, glow
   }
 }
 
-/** A material's emissive as its glow alone, with `flash` (the selection's glow) added. */
+/** Set a material's selection flash (its emissive; the glow has its own). */
 export function glowWithFlash(m: THREE.Material, flash?: THREE.Color) {
   const em = (m as THREE.MeshStandardMaterial).emissive;
   if (!em) return;
-  const base = m.userData.glowEmissive as THREE.Color | undefined;
-  if (base) em.copy(base);
+  if (flash) em.copy(flash);
   else em.setScalar(0);
-  if (flash) em.add(flash);
 }
 
 /** Glass shouldn't cast a solid black shadow. */
