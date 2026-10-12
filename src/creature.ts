@@ -1936,12 +1936,30 @@ export class Creature {
     return q;
   }
 
-  /** The middle of a part's drawing, side to side, in its own frame: a hand-placed pair of eyes mirrors across it. */
-  partMid(b: BoneRT): number {
+  /**
+   * How a pair placed by hand mirrors on a part (in its own frame): across the
+   * creature's left-right, through the part's middle. A part may be laid out
+   * with its own sideways axis pointing anywhere (a head built facing up), so
+   * this is the creature's sideways seen from the part, without any along its
+   * length (a limb pointing sideways mirrors across its width instead).
+   * `leftFrame`: the spot is in a right twin's left-twin frame (Z mirrored).
+   */
+  eyeMirror(b: BoneRT, leftFrame = false): { across: THREE.Vector3; mid: THREE.Vector3 } {
     const geo = (b.mesh?.userData.baseGeo as THREE.BufferGeometry | undefined) ?? b.mesh?.geometry;
-    if (!geo) return 0;
-    if (!geo.boundingBox) geo.computeBoundingBox();
-    return (geo.boundingBox!.min.x + geo.boundingBox!.max.x) / 2;
+    const mid = new THREE.Vector3();
+    if (geo) {
+      if (!geo.boundingBox) geo.computeBoundingBox();
+      geo.boundingBox!.getCenter(mid);
+    }
+    const across = new THREE.Vector3(1, 0, 0).transformDirection(b.restWorld.clone().invert());
+    across.y = 0;
+    if (across.length() < 0.5) across.set(1, 0, 0);
+    across.normalize();
+    if (leftFrame && b.def.sideSign === -1) {
+      across.z = -across.z;
+      mid.z = -mid.z;
+    }
+    return { across, mid };
   }
 
   /** Stick one pair (or single eye) onto a part, found by aiming at it from the creature's front. */
@@ -1994,7 +2012,7 @@ export class Creature {
     const aims: { sgn: number; from: THREE.Vector3; dir: THREE.Vector3; near?: THREE.Vector3 }[] = [];
     if (pair.at) {
       if (!geo.boundingBox) geo.computeBoundingBox();
-      const mid = this.partMid(part);
+      const { across, mid } = this.eyeMirror(part);
       const reach = geo.boundingBox!.getSize(new THREE.Vector3()).length();
       const at = new THREE.Vector3(...pair.at);
       const n = new THREE.Vector3(...(pair.n ?? [0, 0, 1])).normalize();
@@ -2004,14 +2022,15 @@ export class Creature {
         n.z = -n.z;
       }
       // a pair dropped on the middle line is pushed apart so the two don't overlap
-      if (!pair.single && Math.abs(at.x - mid) < r * 1.15) at.x = mid + (at.x < mid ? -1 : 1) * r * 1.15;
+      const off = at.clone().sub(mid).dot(across);
+      if (!pair.single && Math.abs(off) < r * 1.15) at.addScaledVector(across, (off < 0 ? -1 : 1) * r * 1.15 - off);
       const spin = (pair.turn ?? e.turn ?? 0) * (part.def.sideSign === -1 ? -1 : 1);
       const Y = new THREE.Vector3(0, 1, 0);
       for (const sgn of pair.single ? [0] : [1, -1]) {
         const p = at.clone(), d = n.clone();
         if (sgn === -1) {
-          p.x = 2 * mid - p.x;
-          d.x = -d.x;
+          p.addScaledVector(across, -2 * p.clone().sub(mid).dot(across));
+          d.addScaledVector(across, -2 * d.dot(across));
         }
         // Facing turns them round the part
         p.applyAxisAngle(Y, spin);
@@ -2182,6 +2201,8 @@ export class Creature {
   private skeletonShown = false;
   /** Gizmos: handles on every part, or only on the picked part (and its twin) */
   static handleScope: 'all' | 'part' = 'all';
+  /** Settings › Rig controls: Simple keeps just the roll ring of the size gizmo; dragging a tip stretches the part (or limb) to follow instead */
+  static simpleRig = false;
 
   setSkeletonVisible(v: boolean) {
     this.skeletonShown = v;
@@ -2234,6 +2255,8 @@ export class Creature {
     const box = b?.mesh?.userData.straightBox as THREE.Box3 | undefined;
     this.sizer.visible = !!b && !!box && this.skeletonShown && !this.drawFocus;
     if (!b || !box || !this.sizer.visible) return;
+    this.sizerBox.visible = !Creature.simpleRig;
+    for (const h of this.sizerHandles) h.visible = !Creature.simpleRig || h.userData.kind === 'roll';
     if (this.sizer.parent !== b.pivot) b.pivot.add(this.sizer);
     const sc = b.mesh!.scale;
     // laid out round the straight part (in its stretched size), then bent onto it
@@ -2385,7 +2408,8 @@ export class Creature {
   }
 
   handles(): THREE.Object3D[] {
-    return [...this.sizerHandles, ...this.list.flatMap((b) => b.bendHandles), ...this.list.map((b) => b.startHandle), this.rootHandle, ...this.list.map((b) => b.tip)];
+    // (the size grips only while their frame is shown)
+    return [...(this.sizer.visible ? this.sizerHandles : []), ...this.list.flatMap((b) => b.bendHandles), ...this.list.map((b) => b.startHandle), this.rootHandle, ...this.list.map((b) => b.tip)];
   }
 
   meshes(): THREE.Object3D[] {
@@ -2462,13 +2486,19 @@ export class Creature {
     b.pivot.updateMatrixWorld(true);
   }
 
-  /** Drag a bone tip toward `target`, optionally bending up to `chain` ancestors (CCD IK). */
-  dragTip(id: string, target: THREE.Vector3, ik: boolean): BoneRT[] {
+  /**
+   * Drag a bone tip toward `target`, optionally bending up to `reach` bones
+   * (it and its ancestors, stopping at an anchored part) with CCD IK. With
+   * `ownLimb` it also stops below a part other things grow from too (a head
+   * with ears): an ear moves by itself, not the head it's on.
+   */
+  dragTip(id: string, target: THREE.Vector3, ik: boolean, reach = 3, ownLimb = false): BoneRT[] {
     const b = this.bones.get(id)!;
     const chain: BoneRT[] = [b];
+    const branches = (p: BoneRT) => this.list.filter((c) => c.parent === p).length > 1;
     if (ik) {
       let p = b.parent;
-      while (p && chain.length < 3 && !p.def.anchor) {
+      while (p && chain.length < reach && !p.def.anchor && !(ownLimb && branches(p))) {
         chain.push(p);
         p = p.parent;
       }
@@ -2478,7 +2508,7 @@ export class Creature {
     // were, so it rears up or leans over its feet instead of tipping the whole critter
     const legs = b.parent ? [] : this.list.filter((c) => c.parent === b && this.reachesFloor(c));
     const legQ = legs.map((c) => c.pivot.getWorldQuaternion(new THREE.Quaternion()));
-    const iterations = chain.length > 1 ? 12 : 1;
+    const iterations = chain.length > 1 ? Math.max(12, chain.length * 4) : 1;
     const tipPos = new THREE.Vector3();
     for (let it = 0; it < iterations; it++) {
       for (const j of chain) {

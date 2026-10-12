@@ -309,6 +309,7 @@
           <button data-view="right" title="View from the right">Right</button>
           <button data-view="top" title="View from above">Top</button>
           <button data-view="quarter" title="Three-quarter view">¾</button>
+          <button data-view="selection" title="Frame the creature you're editing (F)" hidden>Selection</button>
           <button data-view="all" title="Frame everyone (Shift+A)">All</button>
           <span id="view-proj" class="view-proj">
             <button data-proj="persp" title="Perspective: things further away look smaller" aria-label="Perspective"><i class="fa-regular fa-cube" aria-hidden="true"></i></button>
@@ -401,10 +402,11 @@
         <!-- what each handle does: top middle, while handles show (Gizmos: Full or Selected part) -->
         <div class="legend" id="shape-legend">
           <span><b class="dot orange"></b> bend</span>
-          <span><b class="dot teal tri"></b> stretch</span>
+          <span class="adv-rig"><b class="dot teal tri"></b> stretch</span>
           <span><b class="dot purple square"></b> slide</span>
           <span title="Drag to curve the part; double-click to straighten it"><b class="dot green diamond"></b> curve</span>
           <span><b class="dot blue square"></b> move</span>
+          <span class="legend-tip" title="Scroll on an orange tip or a purple base: Tip and Base width (a drawn part grows or shrinks whole)"><b class="dot orange"></b><b class="dot purple square"></b> scroll to change size</span>
         </div>
         <div id="hint" class="hint">
           <span class="hint-text"></span>
@@ -523,6 +525,11 @@
             <button data-theme="color" title="Colorful icons, and each mode tints the panels">Color</button>
           </div>
           <label class="check" title="Simpler, easier-to-read lettering everywhere"><input id="set-plain" type="checkbox" /> Plain text</label>
+          <div class="pop-sub">Rig controls</div>
+          <div class="seg" id="set-rig">
+            <button data-rig="advanced" title="Every handle: bend, stretch, slide, curve and roll">Advanced</button>
+            <button data-rig="simple" title="No stretch arrows: drag an orange ball and the part stretches to follow">Simple</button>
+          </div>
           <div class="pop-sub">Seamless joins</div>
           <div class="seg" id="set-seamless">
             <button data-seamless="on" title="Every creature">On</button>

@@ -1003,6 +1003,16 @@ let drag: {
    * stands for), the part's bend and on-screen frame before the drag, how far
    * from the grip the press was, the sizes found so far, and the drawing before the drag
    */
+  /** where the pointer last was (Simple rig controls: scrolling pushes a tip nearer or further from there) */
+  last?: THREE.Vector2;
+  /**
+   * Simple rig controls: a tip pulled past the limb's reach stretches it, and
+   * one pushed nearer its base than it started shrinks it. The skeleton before
+   * the drag, the limb's straight reach and how far the tip was from its base
+   * then (in the scene), how much it's stretched now, and each part's
+   * lengthening (for its drawing)
+   */
+  stretch?: { base: string; reach?: number; from?: number; k: number; kY: Map<string, number> };
   /** a bend grip on one of the bone's bend points: which one */
   node?: number;
   /** a waiting (dotted) bend grip: the gap it sits in, and where (in the bone's frame); it becomes a bend point once it moves */
@@ -1188,6 +1198,8 @@ function widenJoint(id: string, at: 'start' | 'end', step: number) {
   const drawn = (x: { src: string }) => !!state.parts[x.src]?.outline;
   const k = step > 0 ? 1.08 : 1 / 1.08;
   const grow = (w: number) => Math.min(1.2, Math.max(0.02, Math.round(w * k * 1000) / 1000));
+  // a drawing sets its own widths: either end grows or shrinks the whole part instead, drawing, length and curve alike
+  if (drawn(b)) return scaleDrawnPart(id, k);
   const ends: { def: BoneDef; end: 'base' | 'tip' }[] = [];
   const add = (x: (typeof creature.list)[number], end: 'base' | 'tip') => {
     const d = defOf(x);
@@ -1198,10 +1210,7 @@ function widenJoint(id: string, at: 'start' | 'end', step: number) {
     add(b, 'tip');
     for (const c of creature.list) if (c.parent === b && !c.attach) add(c, 'base');
   }
-  if (!ends.length) {
-    hint('This part has a drawing, which sets its own widths. Reset shape to use these.', 2200);
-    return;
-  }
+  if (!ends.length) return;
   for (const { def, end } of ends) {
     if (end === 'base') {
       // the tip keeps the width it had (it followed the base while unset)
@@ -1212,6 +1221,27 @@ function widenJoint(id: string, at: 'start' | 'end', step: number) {
   creature.relayout(state.rig);
   creature.sync();
   hint(step > 0 ? 'Wider' : 'Thinner', 900);
+  clearTimeout(widenCommit);
+  widenCommit = window.setTimeout(() => {
+    settleOnFloor();
+    commitBoneEdit();
+  }, 400);
+}
+
+/** Grow a drawn part (and its twin) by `k` all over, rebuilt at its new size. */
+function scaleDrawnPart(id: string, k: number) {
+  const b = creature.bones.get(id);
+  const part = b && state.parts[b.src];
+  if (!b || !part) return;
+  creature.capturePose();
+  const kY = scaleBone(state.rig, id, k, k);
+  const def = state.rig.bones.find((d) => d.id === b.def.baseId);
+  const r4 = (v: number) => Math.round(v * 1e4) / 1e4;
+  if (def?.bendNodes) def.bendNodes = def.bendNodes.map((n) => n.map((v) => r4(v * k)) as V3);
+  setPartShapes(part, partShapes(part).map((sh) => ({ ...sh, outline: sh.outline.map(([x, y]) => [r4(x * k), r4(y * kY)] as Vec2) })));
+  if (!state.rig.base.startsWith('custom')) state.rig.base = 'custom';
+  buildCreature();
+  hint(k > 1 ? 'Bigger' : 'Smaller', 900);
   clearTimeout(widenCommit);
   widenCommit = window.setTimeout(() => {
     settleOnFloor();
@@ -1399,7 +1429,8 @@ canvas.addEventListener('pointerdown', (e) => {
     creature.invalidateSkin();
   }
   if (kind === 'root') gapBefore = floorGap();
-  drag = { id, kind, plane, offset, startHit: pos, moved: false, rigBase: reshape ? JSON.stringify(state.rig) : undefined, toDef, sizer, roll, node: h.userData.node as number | undefined, gap: h.userData.gap === undefined ? undefined : { at: h.userData.gap as number, pos: h.position.clone() } };
+  const stretch = kind === 'end' && settings.rig === 'simple' ? { base: JSON.stringify(state.rig), k: 1, kY: new Map<string, number>() } : undefined;
+  drag = { id, kind, plane, offset, stretch, startHit: pos, moved: false, rigBase: reshape ? JSON.stringify(state.rig) : undefined, toDef, sizer, roll, node: h.userData.node as number | undefined, gap: h.userData.gap === undefined ? undefined : { at: h.userData.gap as number, pos: h.position.clone() } };
 });
 
 canvas.addEventListener('pointermove', (e) => {
@@ -1506,8 +1537,8 @@ canvas.addEventListener('pointermove', (e) => {
       creature.group.position.copy(creature.root.worldToLocal(hit).add(drag.offset));
       creature.group.position.y = Math.max(creature.group.position.y, -1);
     } else if (drag.kind === 'end') {
-      const chain = creature.dragTip(drag.id, hit, $<HTMLInputElement>('#ik').checked);
-      if (rigLocked()) creature.mirrorPose(chain);
+      drag.last = new THREE.Vector2(e.clientX, e.clientY);
+      dragTipTo(drag.id, hit);
     }
     return;
   }
@@ -1518,10 +1549,67 @@ canvas.addEventListener('pointermove', (e) => {
   }
 });
 
+/**
+ * Pose by an orange tip. With Pull limbs the joints above bend too: in Simple
+ * rig controls the whole limb (up to the body, or a part it branches from), in
+ * Advanced up to 3 parts. Simple also stretches the part (or limb) to follow.
+ */
+function dragTipTo(id: string, hit: THREE.Vector3) {
+  const simple = settings.rig === 'simple';
+  const ik = $<HTMLInputElement>('#ik').checked;
+  let chain = creature.dragTip(id, hit, ik, simple ? Infinity : 3, simple);
+  const st = drag?.stretch;
+  if (st) {
+    // out of reach: every part of the limb lengthens alike, just enough (and back to its own size within reach)
+    // (in between, it bends to reach as usual)
+    const at = (o: THREE.Object3D) => o.getWorldPosition(new THREE.Vector3());
+    const base = at(chain[chain.length - 1].pivot);
+    st.reach ??= chain.reduce((sum, b) => sum + at(b.tip).distanceTo(at(b.pivot)), 0);
+    st.from ??= Math.min(base.distanceTo(drag!.startHit), st.reach);
+    const d = base.distanceTo(hit);
+    const k = d > st.reach ? d / Math.max(st.reach, 1e-4) : d < st.from ? Math.max(0.1, d / Math.max(st.from, 1e-4)) : 1;
+    if (Math.abs(k - st.k) > 1e-3) {
+      // (relayout re-seats the stored pose: keep the one just reached)
+      creature.capturePose();
+      state.rig = JSON.parse(st.base) as RigState;
+      st.kY.clear();
+      for (const b of chain) {
+        st.kY.set(b.src, scaleBone(state.rig, b.def.id, k, 1));
+        // a curve through bend points grows with the part, the same shape
+        const def = state.rig.bones.find((x) => x.id === b.def.baseId);
+        if (def?.bendNodes) def.bendNodes = def.bendNodes.map((n) => n.map((v) => Math.round(v * k * 1e4) / 1e4) as V3);
+      }
+      creature.relayout(state.rig);
+      // the meshes re-bent to their new lengths, as they'll be rebuilt on letting go
+      for (const b of chain) creature.previewBend(b.def.id);
+      st.k = k;
+      chain = creature.dragTip(id, hit, ik, Infinity, true);
+    }
+  }
+  if (rigLocked()) creature.mirrorPose(chain);
+}
+
 // scrolling on a solid bend grip rounds or sharpens the curve there (instead of zooming)
 $('#viewport').addEventListener(
   'wheel',
   (e) => {
+    // Simple rig controls: scrolling while dragging a tip pushes it away or pulls it nearer
+    if (drag?.kind === 'end' && settings.rig === 'simple') {
+      e.preventDefault();
+      e.stopPropagation();
+      const at = drag.plane.coplanarPoint(new THREE.Vector3());
+      const toward = view.position.clone().sub(at);
+      const step = Math.min(toward.length() * 0.06, 0.25) * (e.deltaY > 0 ? -1 : 1);
+      drag.plane.translate(toward.normalize().multiplyScalar(step));
+      const last = drag.last ?? new THREE.Vector2(pointer.downX, pointer.downY);
+      setRay(last.x, last.y);
+      const hit = raycaster.ray.intersectPlane(drag.plane, new THREE.Vector3());
+      if (hit) {
+        drag.moved = true;
+        dragTipTo(drag.id, hit);
+      }
+      return;
+    }
     if (!handlesVisible() || drag) return;
     const h = pickHandle(e.clientX, e.clientY);
     const kind = h?.userData.kind;
@@ -1584,6 +1672,18 @@ canvas.addEventListener('pointerup', (e) => {
       return;
     }
     creature.capturePose();
+    if (d.stretch && d.stretch.k !== 1) {
+      // a limb stretched to reach: drawn parts lengthen with it, and the meshes are rebuilt at their new lengths
+      const r4 = (v: number) => Math.round(v * 1e4) / 1e4;
+      for (const [src, kY] of d.stretch.kY) {
+        const part = state.parts[src];
+        const shapes = part ? partShapes(part) : [];
+        if (shapes.length) setPartShapes(part, shapes.map((sh) => ({ ...sh, outline: sh.outline.map(([x, y]) => [x, r4(y * kY)] as Vec2) })));
+      }
+      if (!state.rig.base.startsWith('custom')) state.rig.base = 'custom';
+      buildCreature();
+      creature.boing(d.id);
+    }
     // a double tap on the grip resets it (see onDoubleClick)
     if (!d.moved && doubleTapped(e)) return;
     if (d.moved) {
@@ -1769,8 +1869,9 @@ function moveEyesTo(index: number, sgn: number, x: number, y: number): boolean {
   at.applyAxisAngle(Y, -spin);
   n.applyAxisAngle(Y, -spin);
   if (sgn === -1) {
-    at.x = 2 * creature.partMid(hit.bone) - at.x;
-    n.x = -n.x;
+    const { across, mid } = creature.eyeMirror(hit.bone, true);
+    at.addScaledVector(across, -2 * at.clone().sub(mid).dot(across));
+    n.addScaledVector(across, -2 * n.dot(across));
   }
   pair.at = round4(at);
   pair.n = round4(n.normalize());
@@ -1927,9 +2028,10 @@ const VIEWS: Record<string, THREE.Vector3> = {
 };
 
 function viewFrom(name: string) {
-  if (name === 'all') {
+  if (name === 'all' || name === 'selection') {
     if (mode === 'stuff') focusOnBoard();
-    else frameAll();
+    else if (name === 'all') frameAll();
+    else frameCreature();
     return;
   }
   const dir = VIEWS[name];
@@ -3889,6 +3991,8 @@ $('#place-done').onclick = () => {
 function renderCreatureBar() {
   const el = $('#creature-rows');
   el.innerHTML = '';
+  // with others around, the camera can frame just this one
+  $('#view-bar [data-view="selection"]').hidden = world.creatures.length < 2;
   // one row per creature, like the pieces in Stuff: pick (or rename) it, copy it, or remove it
   world.creatures.forEach((s, i) => {
     const row = document.createElement('div');
@@ -6296,8 +6400,9 @@ function hint(text: string, ms = 2000, warn = false) {
 
 const SETTINGS_KEY = 'creature-creator/settings';
 type Theme = 'light' | 'dark' | 'color';
-const settings: { numbers: boolean; plainText: boolean; theme: Theme; seamless: SeamlessMode; seamlessLowPoly: boolean; quality: Quality } = (() => {
-  const defaults = { numbers: false, plainText: false, theme: 'light' as Theme, seamless: 'on' as SeamlessMode, seamlessLowPoly: false, quality };
+type RigControls = 'advanced' | 'simple';
+const settings: { numbers: boolean; plainText: boolean; theme: Theme; seamless: SeamlessMode; seamlessLowPoly: boolean; quality: Quality; rig: RigControls } = (() => {
+  const defaults = { numbers: false, plainText: false, theme: 'light' as Theme, seamless: 'on' as SeamlessMode, seamlessLowPoly: false, quality, rig: 'advanced' as RigControls };
   try {
     return { ...defaults, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') };
   } catch {
@@ -6306,6 +6411,7 @@ const settings: { numbers: boolean; plainText: boolean; theme: Theme; seamless: 
 })();
 setSeamlessMode(settings.seamless);
 setSeamlessLowPoly(settings.seamlessLowPoly);
+Creature.simpleRig = settings.rig === 'simple';
 
 function saveSettings() {
   try {
@@ -6329,6 +6435,9 @@ function renderSettings() {
   // nothing to apply it to while seamless joins are off
   $<HTMLInputElement>('#set-seamless-lp').disabled = settings.seamless === 'off';
   $('#set-seamless-lp-row').style.opacity = settings.seamless === 'off' ? '.45' : '1';
+  document.querySelectorAll<HTMLButtonElement>('#set-rig button').forEach((b) => b.classList.toggle('active', b.dataset.rig === settings.rig));
+  // Simple: the key lists only the handles there are
+  document.body.classList.toggle('simple-rig', settings.rig === 'simple');
   document.querySelectorAll<HTMLButtonElement>('#set-quality button').forEach((b) => b.classList.toggle('active', b.dataset.quality === quality));
   if (settings.numbers) syncSliderNumbers();
 }
@@ -6392,6 +6501,16 @@ function syncSliderNumbers() {
   });
 }
 
+document.querySelectorAll<HTMLButtonElement>('#set-rig button').forEach((b) => {
+  b.onclick = () => {
+    settings.rig = b.dataset.rig as RigControls;
+    Creature.simpleRig = settings.rig === 'simple';
+    saveSettings();
+    renderSettings();
+    updateSkeletonVisibility();
+    hint(settings.rig === 'simple' ? 'Simple: drag an orange ball and the part stretches to follow (scroll while dragging for depth)' : 'Advanced: every handle, stretch arrows and corners too', 2600);
+  };
+});
 $('#settings-btn').onclick = () => {
   if (togglePopover('#settings-pop')) renderSettings();
 };
