@@ -632,8 +632,6 @@ body.show-nums .slider input.num, body.show-nums .bar-slider input.num { display
 /* a how-to after the key, set off by a divider */
 .legend .legend-tip { gap: 3px; padding-left: 10px; border-left: 1px solid var(--line); }
 .legend .legend-tip .dot:last-of-type { margin-right: 2px; }
-.dot.teal { background: #14b8a6; }
-.dot.tri { width: 0; height: 0; border-radius: 0; background: none; border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 10px solid #14b8a6; }
 @media (max-width: 960px) { .legend { display: none; } }
 
 details.fine { margin-top: 10px; }
@@ -1199,6 +1197,3 @@ html.theme-color[data-mode="custom"] {
 .ck-tab-row .piece-icon { flex: none; width: 30px; height: 30px; opacity: 1; background: var(--card); border-radius: 8px; }
 .ck-tab-row .ck-tab-name { color: var(--ink); }
 .ck-menu-links { display: flex; justify-content: space-between; gap: 8px; margin-top: 10px; }
-
-/* Settings › Rig controls › Simple: no stretch frame (the tips stretch parts instead) */
-body.simple-rig .legend .adv-rig { display: none; }

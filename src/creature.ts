@@ -24,7 +24,7 @@ import {
   type FuzzSpot,
   type StyleSettings,
 } from './materials';
-import { MAX_BEND, bendCurve, expandRig, onCurve, stretchBend, type BendCurve, type ExpandedBone, type ExpandedRig, type RigState, type V3 } from './rigs';
+import { MAX_BEND, bendCurve, expandRig, onCurve, type BendCurve, type ExpandedBone, type ExpandedRig, type RigState, type V3 } from './rigs';
 import { buildThing, disposeThing, type Thing, type WrapSurface } from './stuff';
 
 /** One drawn shape of a part, puffed up on its own: drawn from the front (the default) or from the side. */
@@ -319,16 +319,14 @@ const bendMat = new THREE.MeshBasicMaterial({ color: 0x22c55e, depthTest: false,
 // a bend grip not used yet: a faint diamond with a dotted outline
 const bendGhostMat = new THREE.MeshBasicMaterial({ color: 0x22c55e, depthTest: false, transparent: true, opacity: 0.12 });
 const bendDotMat = new THREE.LineDashedMaterial({ color: 0x16a34a, depthTest: false, transparent: true, dashSize: 0.009, gapSize: 0.007 });
-// the size gizmo around the selected part
-const sizerMat = new THREE.MeshBasicMaterial({ color: 0x14b8a6, depthTest: false, transparent: true });
-const sizerLineMat = new THREE.LineDashedMaterial({ color: 0x14b8a6, depthTest: false, transparent: true, opacity: 0.8, dashSize: 0.035, gapSize: 0.025 });
-for (const m of [tipMat, tipHoverMat, rootMat, lineMat, outlineLineMat, planeMat, startMat, bendMat, bendGhostMat, bendDotMat, sizerMat, sizerLineMat]) m.userData.shared = true;
+// the roll ring round the selected part, and the axis it turns the part about
+const rollMat = new THREE.MeshBasicMaterial({ color: 0x14b8a6, depthTest: false, transparent: true });
+const rollLineMat = new THREE.LineDashedMaterial({ color: 0x14b8a6, depthTest: false, transparent: true, opacity: 0.8, dashSize: 0.035, gapSize: 0.025 });
+for (const m of [tipMat, tipHoverMat, rootMat, lineMat, outlineLineMat, planeMat, startMat, bendMat, bendGhostMat, bendDotMat, rollMat, rollLineMat]) m.userData.shared = true;
 const tipGeo = new THREE.SphereGeometry(0.032, 16, 12);
 const startGeo = new THREE.BoxGeometry(0.055, 0.055, 0.055);
 const bendGeo = new THREE.OctahedronGeometry(0.042);
 const bendEdges = new THREE.EdgesGeometry(bendGeo);
-const arrowGeo = new THREE.ConeGeometry(0.034, 0.075, 16);
-const cornerGeo = new THREE.BoxGeometry(0.05, 0.05, 0.05);
 /** The roll ring: a thin hoop round the line from a part's base to its tip (radius 1, scaled to fit). */
 function rollRingGeo(r: number): THREE.BufferGeometry {
   return new THREE.TorusGeometry(r, 0.012, 8, 64).rotateX(Math.PI / 2);
@@ -435,19 +433,6 @@ function bendVector(bd: Bend, phi: number, x: number, y: number, z: number): [nu
   const u2 = cp * u + sp * y;
   const y2 = -sp * u + cp * y;
   return [c * u2 - s * w, y2, s * u2 + c * w];
-}
-
-/** How the bend turns things at the straight-bone point (x, y, z). */
-function bendTurn(bd: Bend, x: number, y: number, z: number): THREE.Quaternion {
-  if (bd.curve) {
-    const f = onCurve(bd.curve, bd.len, x, y, z);
-    const m = new THREE.Matrix4().makeBasis(new THREE.Vector3(...f.x), new THREE.Vector3(...f.t), new THREE.Vector3(...f.z));
-    return new THREE.Quaternion().setFromRotationMatrix(m);
-  }
-  if (!bd.theta) return new THREE.Quaternion();
-  const phi = bendPoint(bd, x, y, z)[3];
-  // the bend turns its direction toward -Y by phi, about the axis square to both
-  return new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(-Math.sin(bd.dir), 0, Math.cos(bd.dir)), -phi);
 }
 
 /** Curve a part's geometry (and its merge spheres) to follow its bent bone. */
@@ -671,10 +656,9 @@ export class Creature {
   lastChange = performance.now();
   /** eye spots in each part's own space (by bone id), for keeping felt fuzz off them */
   private eyeSpots = new Map<string, FuzzSpot[]>();
-  /** the size gizmo: a dashed box round the selected part with grips to stretch and fatten it */
-  private sizer = new THREE.Group();
-  private sizerBox: THREE.LineLoop;
-  readonly sizerHandles: THREE.Mesh[] = [];
+  /** the roll gizmo on the selected part: a ring to turn it about its length, and that axis */
+  private rollGizmo = new THREE.Group();
+  private rollRing: THREE.Mesh;
   private rollAxis: THREE.Line;
   /** a roll is being dragged: keep its axis showing */
   rolling = false;
@@ -706,29 +690,18 @@ export class Creature {
     this.rootHandle.userData.handle = 'root';
     this.list[0].pivot.parent!.add(this.rootHandle);
     this.rootHandle.position.copy(this.list[0].pivot.position);
-    this.sizerBox = new THREE.LineLoop(new THREE.BufferGeometry(), sizerLineMat);
-    this.sizerBox.renderOrder = 999;
-    this.sizer.add(this.sizerBox);
-    // [kind, sign]: 'len' stretches along the bone, 'wid' fattens it, 'size' does both, 'roll' turns it about its length
-    const grips = [['len', 1], ['wid', -1], ['wid', 1], ['size', -1], ['size', 1], ['roll', 1]] as const;
-    for (const [kind, sign] of grips) {
-      // (the roll ring's hoop is sized to the part in updateSizer)
-      const h = new THREE.Mesh(kind === 'size' ? cornerGeo : kind === 'roll' ? new THREE.BufferGeometry() : arrowGeo, sizerMat);
-      if (kind === 'wid') h.rotation.z = (-sign * Math.PI) / 2;
-      if (kind === 'size') h.rotation.z = Math.PI / 4;
-      if (kind === 'roll') h.userData.ring = 0;
-      h.renderOrder = 1000;
-      h.userData.kind = kind;
-      h.userData.sign = sign;
-      this.sizerHandles.push(h);
-      this.sizer.add(h);
-    }
+    // (its hoop is sized to the part in updateRollRing)
+    this.rollRing = new THREE.Mesh(new THREE.BufferGeometry(), rollMat);
+    this.rollRing.renderOrder = 1000;
+    this.rollRing.userData.kind = 'roll';
+    this.rollRing.userData.ring = 0;
+    this.rollGizmo.add(this.rollRing);
     // what rolling turns the part round: shown while the ring is hovered or dragged
-    this.rollAxis = new THREE.Line(new THREE.BufferGeometry(), sizerLineMat);
+    this.rollAxis = new THREE.Line(new THREE.BufferGeometry(), rollLineMat);
     this.rollAxis.renderOrder = 999;
     this.rollAxis.visible = false;
-    this.sizer.add(this.rollAxis);
-    this.sizer.visible = false;
+    this.rollGizmo.add(this.rollAxis);
+    this.rollGizmo.visible = false;
     this.sync();
   }
 
@@ -894,7 +867,7 @@ export class Creature {
     // reshaping keeps the pose: bones stay bent the way they were
     this.applyPose();
     this.mergeDirty = true;
-    this.updateSizer();
+    this.updateRollRing();
   }
 
   settingsFor(style: StyleId): StyleSettings {
@@ -951,7 +924,6 @@ export class Creature {
       else if (m && !m.userData.shared) m.dispose();
     });
     for (const b of this.list) (b.mesh?.userData.mergeGeo as THREE.BufferGeometry | undefined)?.dispose();
-    this.sizerBox.geometry.dispose();
   }
 
   sync() {
@@ -1010,7 +982,7 @@ export class Creature {
           : cachedGeometry(geoKey + bendKey(bd), () => joinShapes(shapes.map((sh, i) => shapeGeo(sh, i, geoOpts))));
       const mesh = new THREE.Mesh(geo, makeMaterial(style, p.color, k));
       mesh.userData.baseGeo = geo;
-      // the size gizmo frames the part as if it were straight, then bends along with it
+      // the roll ring is sized to the part as if it were straight (and stretching a tip re-bends it from straight)
       const straightBox = new THREE.Box3();
       shapes.forEach((sh, i) => {
         const g = straightGeo(sh, i, geoOpts).geo;
@@ -1053,7 +1025,7 @@ export class Creature {
     this.syncEyes();
     this.syncAttachments();
     this.refreshHighlight();
-    this.updateSizer();
+    this.updateRollRing();
   }
 
   // -------------------------------------------------------------------------
@@ -2189,7 +2161,7 @@ export class Creature {
       b.mesh!.castShadow = !dim && castsShadow(style);
       for (const c of b.mesh!.children) c.visible = !id;
     }
-    this.updateSizer();
+    this.updateRollRing();
     for (const g of this.eyes) g.visible = !id;
     for (const rec of this.attached.values()) {
       rec.main.visible = !id;
@@ -2201,8 +2173,6 @@ export class Creature {
   private skeletonShown = false;
   /** Gizmos: handles on every part, or only on the picked part (and its twin) */
   static handleScope: 'all' | 'part' = 'all';
-  /** Settings › Rig controls: Simple keeps just the roll ring of the size gizmo; dragging a tip stretches the part (or limb) to follow instead */
-  static simpleRig = false;
 
   setSkeletonVisible(v: boolean) {
     this.skeletonShown = v;
@@ -2218,7 +2188,7 @@ export class Creature {
     }
     // the move-everything square belongs to the first part
     this.rootHandle.visible = v && (!only || !sel!.parent);
-    this.updateSizer();
+    this.updateRollRing();
   }
 
   private boingAt = 0;
@@ -2249,127 +2219,38 @@ export class Creature {
     return true;
   }
 
-  /** Fit the size gizmo round the selected part, as it's shown right now. */
-  updateSizer() {
+  /** Fit the roll ring round the selected part, as it's shown right now. */
+  updateRollRing() {
     const b = this.selected ? this.bones.get(this.selected) : null;
     const box = b?.mesh?.userData.straightBox as THREE.Box3 | undefined;
-    this.sizer.visible = !!b && !!box && this.skeletonShown && !this.drawFocus;
-    if (!b || !box || !this.sizer.visible) return;
-    this.sizerBox.visible = !Creature.simpleRig;
-    for (const h of this.sizerHandles) h.visible = !Creature.simpleRig || h.userData.kind === 'roll';
-    if (this.sizer.parent !== b.pivot) b.pivot.add(this.sizer);
+    this.rollGizmo.visible = !!b && !!box && this.skeletonShown && !this.drawFocus;
+    if (!b || !box || !this.rollGizmo.visible) return;
+    if (this.rollGizmo.parent !== b.pivot) b.pivot.add(this.rollGizmo);
     const sc = b.mesh!.scale;
-    // laid out round the straight part (in its stretched size), then bent onto it
+    // round the straight line from base to tip (in the part's stretched size), however the part's bent
     const pad = 0.025;
-    const x0 = box.min.x * sc.x - pad;
-    const x1 = box.max.x * sc.x + pad;
     const y0 = box.min.y * sc.y - pad;
     const y1 = box.max.y * sc.y + pad;
-    const corners = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
-    const pts: THREE.Vector3[] = [];
-    const bent = isBent((b.mesh!.userData.liveBend ?? b.mesh!.userData.bend) as Bend | undefined);
-    corners.forEach(([ax, ay], i) => {
-      const [bx, by] = corners[(i + 1) % 4];
-      // the long sides follow the curve
-      const n = bent && ax === bx ? 16 : 1;
-      for (let j = 0; j < n; j++) pts.push(this.sizerPoint(b, new THREE.Vector3(ax + ((bx - ax) * j) / n, ay + ((by - ay) * j) / n, 0)));
-    });
-    this.sizerBox.geometry.dispose();
-    this.sizerBox.geometry = new THREE.BufferGeometry().setFromPoints(pts);
-    this.sizerBox.computeLineDistances();
-    const cy = (y0 + y1) / 2;
-    // the roll ring and its axis: round the straight line from base to tip, however the part's bent
     const ringY = y0 + (y1 - y0) * 0.15;
-    const ringR = Math.max(-x0, x1, -box.min.z * sc.z + pad, box.max.z * sc.z + pad, 0.08);
+    const ringR = Math.max(-box.min.x * sc.x + pad, box.max.x * sc.x + pad, -box.min.z * sc.z + pad, box.max.z * sc.z + pad, 0.08);
     const tipY = b.tip.position.y;
     this.rollAxis.geometry.dispose();
     this.rollAxis.geometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, Math.min(0, y0), 0), new THREE.Vector3(0, Math.max(tipY, y1), 0)]);
     this.rollAxis.computeLineDistances();
-    for (const h of this.sizerHandles) {
-      h.userData.handle = b.def.id;
-      const sign = h.userData.sign as number;
-      if (h.userData.kind === 'roll') {
-        if (Math.abs(h.userData.ring - ringR) > 1e-4) {
-          h.geometry.dispose();
-          h.geometry = rollRingGeo(ringR);
-          h.userData.ring = ringR;
-        }
-        h.position.set(0, ringY, 0);
-        continue;
-      }
-      const at = new THREE.Vector3();
-      if (h.userData.kind === 'len') at.set((x0 + x1) / 2, y1 + 0.07, 0);
-      else if (h.userData.kind === 'wid') at.set(sign < 0 ? x0 - 0.06 : x1 + 0.06, cy, 0);
-      else at.set(sign < 0 ? x0 : x1, y1, 0);
-      h.userData.at = at;
-      // the point on the part itself it stands for (without the frame's padding), which resizing moves
-      h.userData.inner = new THREE.Vector3(
-        h.userData.kind === 'len' ? ((box.min.x + box.max.x) / 2) * sc.x : (sign < 0 ? box.min.x : box.max.x) * sc.x,
-        h.userData.kind === 'wid' ? (((box.min.y + box.max.y) / 2) * sc.y) : box.max.y * sc.y,
-        0,
-      );
-      h.position.copy(this.sizerPoint(b, at));
-      // turned with the curve where it sits
-      const turn = (h.userData.turn ??= h.quaternion.clone()) as THREE.Quaternion;
-      h.quaternion.copy(this.sizerTurn(b, at).multiply(turn));
+    const h = this.rollRing;
+    h.userData.handle = b.def.id;
+    if (Math.abs(h.userData.ring - ringR) > 1e-4) {
+      h.geometry.dispose();
+      h.geometry = rollRingGeo(ringR);
+      h.userData.ring = ringR;
     }
-  }
-
-  /** Where a point laid out round the straight part sits on it as it's bent (in the bone's frame). */
-  sizerPoint(b: BoneRT, at: THREE.Vector3): THREE.Vector3 {
-    // being resized: re-bent already, in the bone's own units
-    const live = b.mesh?.userData.liveBend as Bend | undefined;
-    if (live) {
-      const [x, y, z] = bendPoint(live, at.x, at.y, at.z);
-      return new THREE.Vector3(x, y, z);
-    }
-    const bd = b.mesh?.userData.bend as Bend | undefined;
-    if (!bd || !isBent(bd)) return at.clone();
-    const sc = b.mesh!.scale;
-    // bent as the mesh is (before its stretch), then stretched with it
-    const [x, y, z] = bendPoint(bd, at.x / sc.x, at.y / sc.y, at.z / sc.z);
-    return new THREE.Vector3(x * sc.x, y * sc.y, z * sc.z);
-  }
-
-  /** How far the bend turns things at a point laid out round the straight part. */
-  private sizerTurn(b: BoneRT, at: THREE.Vector3): THREE.Quaternion {
-    const live = b.mesh?.userData.liveBend as Bend | undefined;
-    const bd = live ?? (b.mesh?.userData.bend as Bend | undefined);
-    if (!bd || !isBent(bd)) return new THREE.Quaternion();
-    const sc = live ? new THREE.Vector3(1, 1, 1) : b.mesh!.scale;
-    return bendTurn(bd, at.x / sc.x, at.y / sc.y, at.z / sc.z);
+    h.position.set(0, ringY, 0);
   }
 
   /**
-   * The part's bend as it's shown now, in the bone's own units (what sizerAfter
-   * works from).
-   */
-  bendNow(b: BoneRT): Bend {
-    return bendOf(b.def, b.length * (b.mesh?.scale.y ?? 1));
-  }
-
-  /**
-   * Where a size grip (laid out at `at`, standing for the point `inner` on the
-   * part) would be after resizing by `kLen` along and `kWid` across, in the
-   * bone's frame from before, when it was bent `bd`. With `alongBend` a bent
-   * part's curve carries on (the bone turning to keep its start where it was);
-   * without, the whole part grows, curve and all.
-   */
-  sizerAfter(bd: Bend, at: THREE.Vector3, inner: THREE.Vector3, kLen: number, kWid: number, alongBend: boolean): THREE.Vector3 {
-    const len = bd.len;
-    // (a curve through bend points just grows, curve and all)
-    const st = alongBend && !bd.nodes ? stretchBend(len, bd.theta, kLen) : { len: len * kLen, theta: bd.theta, turn: 0 };
-    const c = st.len / len;
-    const p = new THREE.Vector3(inner.x * kWid + at.x - inner.x, inner.y * c + at.y - inner.y, at.z);
-    const [x, y, z] = bendPoint(bd.nodes ? bendAtLen(bd, st.len) : { len: st.len, theta: st.theta, dir: bd.dir }, p.x, p.y, p.z);
-    const q = new THREE.Vector3(x, y, z);
-    return st.turn ? q.applyAxisAngle(new THREE.Vector3(-Math.sin(bd.dir), 0, Math.cos(bd.dir)), st.turn) : q;
-  }
-
-  /**
-   * While a bent part is resized (its bend may change too), re-bend its mesh
-   * to the new shape rather than just stretching the old curve. It's rebuilt
-   * properly on letting go.
+   * While a bent part is stretched by its tip, re-bend its mesh to the new
+   * shape rather than just stretching the old curve. It's rebuilt properly on
+   * letting go.
    */
   previewBend(id: string) {
     for (const b of this.linked(id)) {
@@ -2386,7 +2267,6 @@ export class Creature {
       sized.dispose();
       (m.userData.liveGeo as THREE.BufferGeometry | undefined)?.dispose();
       m.userData.liveGeo = g;
-      m.userData.liveBend = bd;
       // (the toon ink follows it; fuzz shells and hairs are left out until it's rebuilt)
       for (const o of m.children) if (!(o instanceof THREE.Mesh) || o.userData.boneId === undefined) o.visible = false;
       this.setMeshGeometry(b, g, false);
@@ -2401,15 +2281,15 @@ export class Creature {
       b.startHandle.material = b.startHandle === obj ? tipHoverMat : startMat;
       for (const h of b.bendHandles) h.material = h === obj ? tipHoverMat : h.userData.used ? bendMat : bendGhostMat;
     }
-    for (const h of this.sizerHandles) h.material = h === obj ? tipHoverMat : sizerMat;
+    this.rollRing.material = this.rollRing === obj ? tipHoverMat : rollMat;
     // whatever's under the pointer swells a little, so it's clear what you'll grab (the ring just lights up)
-    for (const h of [this.rootHandle, ...this.sizerHandles, ...this.list.flatMap((b) => [b.tip, b.startHandle, ...b.bendHandles])]) h.scale.setScalar(h === obj && h.userData.ring === undefined ? 1.45 : 1);
+    for (const h of [this.rootHandle, this.rollRing, ...this.list.flatMap((b) => [b.tip, b.startHandle, ...b.bendHandles])]) h.scale.setScalar(h === obj && h.userData.ring === undefined ? 1.45 : 1);
     this.rollAxis.visible = this.rolling || obj?.userData.kind === 'roll';
   }
 
   handles(): THREE.Object3D[] {
-    // (the size grips only while their frame is shown)
-    return [...(this.sizer.visible ? this.sizerHandles : []), ...this.list.flatMap((b) => b.bendHandles), ...this.list.map((b) => b.startHandle), this.rootHandle, ...this.list.map((b) => b.tip)];
+    // (the roll ring only while it's shown)
+    return [...(this.rollGizmo.visible ? [this.rollRing] : []), ...this.list.flatMap((b) => b.bendHandles), ...this.list.map((b) => b.startHandle), this.rootHandle, ...this.list.map((b) => b.tip)];
   }
 
   meshes(): THREE.Object3D[] {
@@ -2487,18 +2367,18 @@ export class Creature {
   }
 
   /**
-   * Drag a bone tip toward `target`, optionally bending up to `reach` bones
-   * (it and its ancestors, stopping at an anchored part) with CCD IK. With
-   * `ownLimb` it also stops below a part other things grow from too (a head
-   * with ears): an ear moves by itself, not the head it's on.
+   * Drag a bone tip toward `target` with CCD IK, optionally bending its
+   * ancestors too: the whole limb, stopping at an anchored part or below one
+   * other things grow from too (a head with ears: an ear moves by itself, not
+   * the head it's on).
    */
-  dragTip(id: string, target: THREE.Vector3, ik: boolean, reach = 3, ownLimb = false): BoneRT[] {
+  dragTip(id: string, target: THREE.Vector3, ik: boolean): BoneRT[] {
     const b = this.bones.get(id)!;
     const chain: BoneRT[] = [b];
     const branches = (p: BoneRT) => this.list.filter((c) => c.parent === p).length > 1;
     if (ik) {
       let p = b.parent;
-      while (p && chain.length < reach && !p.def.anchor && !(ownLimb && branches(p))) {
+      while (p && !p.def.anchor && !branches(p)) {
         chain.push(p);
         p = p.parent;
       }

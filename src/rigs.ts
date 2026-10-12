@@ -424,21 +424,6 @@ export function sampleNodes(at: (y: number) => V3, len: number, n: number): V3[]
 export const MAX_BEND = 1.5;
 
 /**
- * Lengthening a bent bone by `k` so its curve carries on: the arc gets k times
- * longer at the same tightness (once it's bent as far as it goes, it opens out
- * instead). The arc always runs from the bone's start to its tip, leaning out
- * half its bend at the start, so the start-to-tip line turns by `turn` away
- * from the bulge to keep the start heading the same way. `len` is the
- * start-to-tip length, `theta` the bend in radians.
- */
-export function stretchBend(len: number, theta: number, k: number): { len: number; theta: number; turn: number } {
-  if (Math.abs(theta) < 1e-5) return { len: len * k, theta, turn: 0 };
-  const arc = (len * (theta / 2)) / Math.sin(theta / 2);
-  const t = Math.min(theta * k, MAX_BEND * Math.PI);
-  return { len: (arc * k * Math.sin(t / 2)) / (t / 2), theta: t, turn: (t - theta) / 2 };
-}
-
-/**
  * Move a joint in the rest pose. `kind` 'end' moves the bone's tip; 'start'
  * moves the whole bone. Everything hanging below follows. `delta` is in world
  * space for the scene bone that was grabbed; mirrored twins follow.
@@ -499,14 +484,10 @@ export function moveJoint(rig: RigState, sceneId: string, kind: 'start' | 'end',
 /**
  * Resize a bone in the rest pose: `kLen` stretches it along its length (from
  * its base), `kWidth` fattens its default shape. Limbs hanging off it keep
- * their place on it: one on the tip rides the tip, one halfway up stays halfway.
+ * their place on it: one on the tip rides the tip, one halfway up stays
+ * halfway. Returns how much its start-to-tip length changed.
  */
-/**
- * Resize a bone: `kLen` along it, `kWidth` across. With `alongBend`, a bent
- * bone's curve carries on as it lengthens (see stretchBend) rather than the
- * whole curve growing. Returns how much its start-to-tip length changed.
- */
-export function scaleBone(rig: RigState, sceneId: string, kLen: number, kWidth: number, alongBend = false): number {
+export function scaleBone(rig: RigState, sceneId: string, kLen: number, kWidth: number): number {
   const f = findDef(rig, sceneId);
   if (!f) return 1;
   const d = f.def;
@@ -514,9 +495,7 @@ export function scaleBone(rig: RigState, sceneId: string, kLen: number, kWidth: 
   const len = len3(axis);
   if (len < 1e-6) return 1;
   const u = scale3(axis, 1 / len);
-  const st = alongBend && d.bendy && d.bend ? stretchBend(len, d.bend * Math.PI, kLen) : { len: len * kLen, theta: 0, turn: 0 };
-  const kAxis = st.len / len;
-  d.end = round3(add3(d.start, scale3(axis, kAxis)));
+  d.end = round3(add3(d.start, scale3(axis, kLen)));
   const r3 = (v: number) => Math.round(v * 1000) / 1000;
   d.width = r3(Math.max(0.01, d.width * kWidth));
   if (d.widthEnd !== undefined) d.widthEnd = r3(Math.max(0.01, d.widthEnd * kWidth));
@@ -530,31 +509,10 @@ export function scaleBone(rig: RigState, sceneId: string, kLen: number, kWidth: 
     const rel = sub3(c.start, d.start);
     const t = rel[0] * u[0] + rel[1] * u[1] + rel[2] * u[2];
     const lateral = sub3(rel, scale3(u, t));
-    const next = add3(add3(d.start, scale3(u, t * kAxis)), scale3(lateral, kWidth));
+    const next = add3(add3(d.start, scale3(u, t * kLen)), scale3(lateral, kWidth));
     shiftTree(c, sub3(next, c.start));
   }
-  if (st.turn) {
-    d.bend = r3(st.theta / Math.PI);
-    // the bone's frame (as restFrame builds it), and which way it bulges in it
-    let side = sub3(d.side, scale3(u, d.side[0] * u[0] + d.side[1] * u[1] + d.side[2] * u[2]));
-    side = len3(side) > 1e-6 ? scale3(side, 1 / len3(side)) : [1, 0, 0];
-    if (d.roll) side = turn3(side, u, d.roll);
-    const normal = cross3(side, u);
-    const bd = d.bendDir ?? 0;
-    const bulge = add3(scale3(side, Math.cos(bd)), scale3(normal, Math.sin(bd)));
-    // turning about bulge x along swings the bone away from its bulge
-    const about = cross3(bulge, u);
-    const pivot = d.start;
-    const spin = (p: V3) => round3(add3(pivot, turn3(sub3(p, pivot), about, st.turn)));
-    const spinTree = (b: BoneDef) => {
-      b.start = spin(b.start);
-      b.end = spin(b.end);
-      b.side = round3(turn3(b.side, about, st.turn));
-      for (const k of kids(b.id)) spinTree(k);
-    };
-    spinTree(d);
-  }
-  return kAxis;
+  return kLen;
 }
 
 /**
