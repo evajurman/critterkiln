@@ -12,7 +12,6 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { FullScreenQuad, Pass } from 'three/examples/jsm/postprocessing/Pass.js';
 import {
-  bendFromMid,
   type Bend,
   Creature,
   defaultState,
@@ -1004,6 +1003,10 @@ let drag: {
    * stands for), the part's bend and on-screen frame before the drag, how far
    * from the grip the press was, the sizes found so far, and the drawing before the drag
    */
+  /** a bend grip on one of the bone's bend points: which one */
+  node?: number;
+  /** a waiting (dotted) bend grip: the gap it sits in, and where (in the bone's frame); it becomes a bend point once it moves */
+  gap?: { at: number; pos: THREE.Vector3 };
   sizer?: {
     at: THREE.Vector3;
     inner: THREE.Vector3;
@@ -1095,17 +1098,30 @@ function resetRoll(id: string) {
   hint(split ? 'Roll straightened: now separate from its other side (Mirror keeps them paired)' : 'Roll straightened', 1600);
 }
 
-/** Double-clicking the green bend diamond: straighten the part (and its twin). */
-function resetBend(id: string) {
+/**
+ * Double-clicking a green bend diamond: undo just that bend (and its twin's).
+ * A bend point goes, the part curving through the rest (the last one leaves
+ * it straight); an arc's middle straightens it. A waiting (dotted) one has nothing to undo.
+ */
+function resetBend(id: string, node: number | undefined, used: boolean) {
   const b = creature.bones.get(id);
   const def = b && state.rig.bones.find((d) => d.id === b.def.baseId);
   if (!b || !def) return;
-  if (!def.bendy || !def.bend) {
-    hint('Already straight', 1200);
+  if (!used) {
+    hint(def.bendNodes?.length || (def.bendy && def.bend) ? 'Not bent there yet: drag it to bend' : 'Already straight', 1400);
     return;
   }
-  def.bendy = false;
-  def.bend = 0;
+  const one = node !== undefined && !!def.bendNodes && def.bendNodes.length > 1;
+  if (one) {
+    def.bendNodes!.splice(node!, 1);
+    def.bendRound?.splice(node!, 1);
+  } else {
+    // the last bend: back to one waiting grip in the middle
+    delete def.bendNodes;
+    delete def.bendRound;
+    def.bendy = false;
+    def.bend = 0;
+  }
   creature.relayout(state.rig);
   if (!state.rig.base.startsWith('custom')) state.rig.base = 'custom';
   buildCreature();
@@ -1113,7 +1129,94 @@ function resetBend(id: string) {
   creature.boing(id);
   commit();
   selectPart(id);
-  hint('Bend straightened', 1400);
+  hint(one ? 'That bend undone' : 'Bend straightened', 1400);
+}
+
+/** A point in a bone's frame as a bend point: kept for the left twin (like bendDir), as fractions of the length. */
+function bendNodeAt(b: { length: number; def: { sideSign: number } }, v: THREE.Vector3): V3 {
+  const r = (x: number) => Math.round((x / b.length) * 1000) / 1000;
+  return [r(v.x), r(v.y), r(b.def.sideSign === -1 ? -v.z : v.z)];
+}
+
+/**
+ * Scrolling on a solid bend grip: how round the curve is there, in tenths
+ * from a corner (0) through round (1, an arc) to swollen (2). An arc's middle
+ * first becomes a bend point there (the same arc). Kept on a pause.
+ */
+let roundCommit = 0;
+function roundBend(id: string, node: number | undefined, step: number) {
+  const b = creature.bones.get(id);
+  const def = b && state.rig.bones.find((d) => d.id === b.def.baseId);
+  if (!b || !def) return;
+  if (node === undefined || !def.bendNodes?.length) {
+    const mid = b.bendHandles.find((h) => h.userData.used)?.position;
+    if (!mid) return;
+    def.bendNodes = [bendNodeAt(b, mid)];
+    delete def.bend;
+    delete def.bendDir;
+    delete def.bendRound;
+    def.bendy = true;
+    node = 0;
+  }
+  const round = def.bendRound ?? def.bendNodes.map(() => 1);
+  round[node] = Math.min(2, Math.max(0, Math.round(((round[node] ?? 1) + step * 0.1) * 10) / 10));
+  if (round.every((v) => v === 1)) delete def.bendRound;
+  else def.bendRound = round;
+  creature.relayout(state.rig);
+  creature.sync();
+  const v = round[node];
+  hint(v === 1 ? 'Round, like an arc' : v === 0 ? 'A sharp corner' : `${v < 1 ? 'Sharper' : 'Rounder'}: ${Math.round(v * 100)}%`, 1200);
+  clearTimeout(roundCommit);
+  roundCommit = window.setTimeout(() => {
+    if (!state.rig.base.startsWith('custom')) state.rig.base = 'custom';
+    settleOnFloor();
+    commit();
+  }, 400);
+}
+
+/**
+ * Scrolling on a joint: the purple square (a part's own base) widens or
+ * narrows its Base width; the orange circle its Tip width, and the Base width
+ * of every part growing from that tip with it, so the joint stays even.
+ * Parts with a drawing keep their own widths. Kept on a pause.
+ */
+let widenCommit = 0;
+function widenJoint(id: string, at: 'start' | 'end', step: number) {
+  const b = creature.bones.get(id);
+  if (!b) return;
+  const defOf = (x: { def: { baseId: string } }) => state.rig.bones.find((d) => d.id === x.def.baseId);
+  const drawn = (x: { src: string }) => !!state.parts[x.src]?.outline;
+  const k = step > 0 ? 1.08 : 1 / 1.08;
+  const grow = (w: number) => Math.min(1.2, Math.max(0.02, Math.round(w * k * 1000) / 1000));
+  const ends: { def: BoneDef; end: 'base' | 'tip' }[] = [];
+  const add = (x: (typeof creature.list)[number], end: 'base' | 'tip') => {
+    const d = defOf(x);
+    if (d && !drawn(x) && !ends.some((o) => o.def === d && o.end === end)) ends.push({ def: d, end });
+  };
+  if (at === 'start') add(b, 'base');
+  else {
+    add(b, 'tip');
+    for (const c of creature.list) if (c.parent === b && !c.attach) add(c, 'base');
+  }
+  if (!ends.length) {
+    hint('This part has a drawing, which sets its own widths. Reset shape to use these.', 2200);
+    return;
+  }
+  for (const { def, end } of ends) {
+    if (end === 'base') {
+      // the tip keeps the width it had (it followed the base while unset)
+      def.widthEnd ??= def.width;
+      def.width = grow(def.width);
+    } else def.widthEnd = grow(def.widthEnd ?? def.width);
+  }
+  creature.relayout(state.rig);
+  creature.sync();
+  hint(step > 0 ? 'Wider' : 'Thinner', 900);
+  clearTimeout(widenCommit);
+  widenCommit = window.setTimeout(() => {
+    settleOnFloor();
+    commitBoneEdit();
+  }, 400);
 }
 
 /** Double-clicking a joint's tip: unbend that joint (and its twin, with Mirror on). */
@@ -1296,7 +1399,7 @@ canvas.addEventListener('pointerdown', (e) => {
     creature.invalidateSkin();
   }
   if (kind === 'root') gapBefore = floorGap();
-  drag = { id, kind, plane, offset, startHit: pos, moved: false, rigBase: reshape ? JSON.stringify(state.rig) : undefined, toDef, sizer, roll };
+  drag = { id, kind, plane, offset, startHit: pos, moved: false, rigBase: reshape ? JSON.stringify(state.rig) : undefined, toDef, sizer, roll, node: h.userData.node as number | undefined, gap: h.userData.gap === undefined ? undefined : { at: h.userData.gap as number, pos: h.position.clone() } };
 });
 
 canvas.addEventListener('pointermove', (e) => {
@@ -1311,16 +1414,42 @@ canvas.addEventListener('pointermove', (e) => {
     if (!hit) return;
     drag.moved = drag.moved || pointer.moved;
     if (drag.rigBase && drag.kind === 'bend') {
-      // the green diamond: put the bone's middle where the pointer is
+      // a green diamond: its bend point goes where the pointer is
       if (!drag.moved) return;
       const b = creature.bones.get(drag.id);
       const def = b && state.rig.bones.find((x) => x.id === b.def.baseId);
       if (!b || !def) return;
-      const { bend, dir } = bendFromMid(b.length, b.pivot.worldToLocal(hit.clone()));
-      def.bendy = bend > 0.01;
-      def.bend = Math.round(bend * 1000) / 1000;
-      // defs describe the left twin; a right twin's direction is mirrored
-      def.bendDir = Math.round((b.def.sideSign === -1 ? -dir : dir) * 1000) / 1000;
+      const local = b.pivot.worldToLocal(hit.clone());
+      const asNode = (v: THREE.Vector3) => bendNodeAt(b, v);
+      if (drag.gap && drag.node === undefined) {
+        // a waiting grip, used: it becomes a bend point there (an arc first turns into one through its middle)
+        const g = drag.gap;
+        if (!def.bendNodes?.length) {
+          const mid = b.bendHandles.find((h) => h.userData.used)!.position;
+          def.bendNodes = g.at === 0 ? [asNode(g.pos), asNode(mid)] : [asNode(mid), asNode(g.pos)];
+          delete def.bend;
+          delete def.bendDir;
+          delete def.bendRound;
+        } else {
+          def.bendNodes.splice(g.at, 0, asNode(g.pos));
+          def.bendRound?.splice(g.at, 0, 1);
+        }
+        // gap n sits before point n (gap 1 of an arc: after its middle)
+        drag.node = g.at;
+      } else if (drag.node === undefined) {
+        // a straight part's middle, or an arc's: a bend point there (the same arc: one point curves round
+        // the circle through the base, it and the tip), free to go anywhere from then on
+        const mid = b.bendHandles.find((h) => h.userData.node === undefined && h.userData.gap === undefined)!.position;
+        def.bendNodes = [asNode(mid)];
+        delete def.bend;
+        delete def.bendDir;
+        delete def.bendRound;
+        drag.node = 0;
+      }
+      if (!creature.bendDragging) creature.setBendDragging(true);
+      // just that one point moves
+      def.bendNodes![drag.node] = asNode(local);
+      def.bendy = true;
       creature.relayout(state.rig);
       creature.sync();
     } else if (drag.roll) {
@@ -1389,6 +1518,23 @@ canvas.addEventListener('pointermove', (e) => {
   }
 });
 
+// scrolling on a solid bend grip rounds or sharpens the curve there (instead of zooming)
+$('#viewport').addEventListener(
+  'wheel',
+  (e) => {
+    if (!handlesVisible() || drag) return;
+    const h = pickHandle(e.clientX, e.clientY);
+    const kind = h?.userData.kind;
+    const step = e.deltaY < 0 ? 1 : -1;
+    if (kind === 'bend' && h!.userData.used) roundBend(h!.userData.handle as string, h!.userData.node as number | undefined, step);
+    else if ((kind === 'start' || kind === 'end') && h!.userData.handle !== 'root') widenJoint(h!.userData.handle as string, kind, step);
+    else return;
+    e.preventDefault();
+    e.stopPropagation();
+  },
+  { capture: true, passive: false },
+);
+
 /** Not every phone browser turns a double tap into a dblclick, so spot it on the way up (and act on it). */
 function doubleTapped(e: PointerEvent): boolean {
   if (e.pointerType === 'mouse') return false;
@@ -1419,6 +1565,8 @@ canvas.addEventListener('pointerup', (e) => {
     const d = drag;
     drag = null;
     controls.enabled = true;
+    // the waiting bend grips come back, in the gaps either side of a new bend point
+    if (creature.bendDragging) creature.setBendDragging(false);
     creature.rolling = false;
     $('#viewport').style.cursor = '';
     if (d.rigBase) {
@@ -1509,7 +1657,7 @@ function onDoubleClick(x: number, y: number) {
       return;
     }
     if (h?.userData.kind === 'bend') {
-      resetBend(h.userData.handle as string);
+      resetBend(h.userData.handle as string, h.userData.node as number | undefined, !!h.userData.used);
       return;
     }
     if (h?.userData.handle === 'root') {

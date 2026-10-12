@@ -24,7 +24,7 @@ import {
   type FuzzSpot,
   type StyleSettings,
 } from './materials';
-import { MAX_BEND, expandRig, stretchBend, type ExpandedBone, type ExpandedRig, type RigState, type V3 } from './rigs';
+import { MAX_BEND, bendCurve, expandRig, onCurve, stretchBend, type BendCurve, type ExpandedBone, type ExpandedRig, type RigState, type V3 } from './rigs';
 import { buildThing, disposeThing, type Thing, type WrapSurface } from './stuff';
 
 /** One drawn shape of a part, puffed up on its own: drawn from the front (the default) or from the side. */
@@ -241,7 +241,7 @@ export interface BoneRT {
   /** rig mode: handle at the bone's start, shown where a limb attaches */
   startHandle: THREE.Mesh;
   /** rig mode: drag to bend the bone (selected bone only) */
-  bendHandle: THREE.Mesh;
+  bendHandles: THREE.Mesh[];
   /** true when the bone starts somewhere other than its parent's tip */
   attach: boolean;
   line: THREE.Line;
@@ -316,13 +316,17 @@ const planeMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: tru
 const startMat = new THREE.MeshBasicMaterial({ color: 0x8b5cf6, depthTest: false, transparent: true });
 // handle/guide materials are shared by every creature: never dispose them with one
 const bendMat = new THREE.MeshBasicMaterial({ color: 0x22c55e, depthTest: false, transparent: true });
+// a bend grip not used yet: a faint diamond with a dotted outline
+const bendGhostMat = new THREE.MeshBasicMaterial({ color: 0x22c55e, depthTest: false, transparent: true, opacity: 0.12 });
+const bendDotMat = new THREE.LineDashedMaterial({ color: 0x16a34a, depthTest: false, transparent: true, dashSize: 0.009, gapSize: 0.007 });
 // the size gizmo around the selected part
 const sizerMat = new THREE.MeshBasicMaterial({ color: 0x14b8a6, depthTest: false, transparent: true });
 const sizerLineMat = new THREE.LineDashedMaterial({ color: 0x14b8a6, depthTest: false, transparent: true, opacity: 0.8, dashSize: 0.035, gapSize: 0.025 });
-for (const m of [tipMat, tipHoverMat, rootMat, lineMat, outlineLineMat, planeMat, startMat, bendMat, sizerMat, sizerLineMat]) m.userData.shared = true;
+for (const m of [tipMat, tipHoverMat, rootMat, lineMat, outlineLineMat, planeMat, startMat, bendMat, bendGhostMat, bendDotMat, sizerMat, sizerLineMat]) m.userData.shared = true;
 const tipGeo = new THREE.SphereGeometry(0.032, 16, 12);
 const startGeo = new THREE.BoxGeometry(0.055, 0.055, 0.055);
 const bendGeo = new THREE.OctahedronGeometry(0.042);
+const bendEdges = new THREE.EdgesGeometry(bendGeo);
 const arrowGeo = new THREE.ConeGeometry(0.034, 0.075, 16);
 const cornerGeo = new THREE.BoxGeometry(0.05, 0.05, 0.05);
 /** The roll ring: a thin hoop round the line from a part's base to its tip (radius 1, scaled to fit). */
@@ -334,7 +338,8 @@ function rollRingGeo(r: number): THREE.BufferGeometry {
 // bendy bones: the bone's local frame (X = side, Y = along the bone, Z = out
 // of the drawing) is curved into a circular arc that still runs from the
 // bone's start to its tip, bowing out toward a direction around the bone:
-// 0 = +X (sideways in the drawing plane), pi/2 = +Z.
+// 0 = +X (sideways in the drawing plane), pi/2 = +Z. Or, with two or more
+// bend points, curved smoothly through them (rigs.ts bendCurve).
 
 export interface Bend {
   len: number;
@@ -342,16 +347,46 @@ export interface Bend {
   theta: number;
   /** direction around the bone, radians */
   dir: number;
+  /** bend points (as fractions of the length, in this bone's own frame) and the curve through them, instead of the arc */
+  nodes?: V3[];
+  /** how round the curve is at each bend point (see bendCurve) */
+  round?: number[];
+  curve?: BendCurve;
 }
 
-/** A bone's bend. A right twin's frame is its left twin's mirrored through local Z, so its direction mirrors too. */
+/** Curved at all (an arc or through bend points)? */
+export function isBent(bd: Bend | undefined): boolean {
+  return !!bd && (!!bd.theta || !!bd.curve);
+}
+
+const curveCache = new Map<string, BendCurve>();
+/** The same bend at another length (bend points scale with the bone). */
+export function bendAtLen(bd: Bend, len: number): Bend {
+  if (!bd.nodes) return { ...bd, len };
+  const key = `${len.toFixed(5)}:${JSON.stringify(bd.nodes)}:${bd.round ?? ''}`;
+  let curve = curveCache.get(key);
+  if (!curve) {
+    if (curveCache.size > 400) curveCache.clear();
+    curve = bendCurve(bd.nodes, len, bd.round);
+    curveCache.set(key, curve);
+  }
+  return { len, theta: 0, dir: 0, nodes: bd.nodes, round: bd.round, curve };
+}
+
+/** A bone's bend. A right twin's frame is its left twin's mirrored through local Z, so its direction (and bend points) mirror too. */
 export function bendOf(def: ExpandedBone, len: number): Bend {
+  const flip = def.sideSign === -1 ? -1 : 1;
+  const nodes = def.bendy && def.bendNodes?.length ? def.bendNodes : undefined;
+  if (nodes) {
+    return bendAtLen({ len, theta: 0, dir: 0, nodes: nodes.map(([x, y, z]) => [x, y, z * flip] as V3), round: def.bendRound }, len);
+  }
   const theta = def.bendy ? (def.bend ?? 0) * Math.PI : 0;
-  const dir = (def.bendDir ?? 0) * (def.sideSign === -1 ? -1 : 1);
+  const dir = (def.bendDir ?? 0) * flip;
   return { len, theta, dir };
 }
 
 function bendKey(bd: Bend): string {
+  if (bd.curve) return `|curve:${bd.len.toFixed(4)}:${JSON.stringify(bd.nodes)}:${bd.round ?? ''}`;
   return bd.theta ? `|bend:${bd.len.toFixed(4)}:${bd.theta.toFixed(4)}:${bd.dir.toFixed(4)}` : '';
 }
 
@@ -377,8 +412,12 @@ function planarBend(len: number, theta: number, u: number, y: number): [number, 
   return [cu + c * u + sn * over, cy - sn * u + c * over, phi];
 }
 
-/** Where the straight-bone point (x, y, z) goes once bent, plus the turn angle there. */
+/** Where the straight-bone point (x, y, z) goes once bent, plus the turn angle there (an arc's). */
 function bendPoint(bd: Bend, x: number, y: number, z: number): [number, number, number, number] {
+  if (bd.curve) {
+    const { p } = onCurve(bd.curve, bd.len, x, y, z);
+    return [p[0], p[1], p[2], 0];
+  }
   if (!bd.theta) return [x, y, z, 0];
   const c = Math.cos(bd.dir), s = Math.sin(bd.dir);
   const u = c * x + s * z; // along the bend direction
@@ -398,12 +437,32 @@ function bendVector(bd: Bend, phi: number, x: number, y: number, z: number): [nu
   return [c * u2 - s * w, y2, s * u2 + c * w];
 }
 
+/** How the bend turns things at the straight-bone point (x, y, z). */
+function bendTurn(bd: Bend, x: number, y: number, z: number): THREE.Quaternion {
+  if (bd.curve) {
+    const f = onCurve(bd.curve, bd.len, x, y, z);
+    const m = new THREE.Matrix4().makeBasis(new THREE.Vector3(...f.x), new THREE.Vector3(...f.t), new THREE.Vector3(...f.z));
+    return new THREE.Quaternion().setFromRotationMatrix(m);
+  }
+  if (!bd.theta) return new THREE.Quaternion();
+  const phi = bendPoint(bd, x, y, z)[3];
+  // the bend turns its direction toward -Y by phi, about the axis square to both
+  return new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(-Math.sin(bd.dir), 0, Math.cos(bd.dir)), -phi);
+}
+
 /** Curve a part's geometry (and its merge spheres) to follow its bent bone. */
 function bendGeometry(src: THREE.BufferGeometry, bd: Bend): THREE.BufferGeometry {
   const g = src.clone();
   const pos = g.getAttribute('position') as THREE.BufferAttribute;
   const nor = g.getAttribute('normal') as THREE.BufferAttribute;
-  for (let i = 0; i < pos.count; i++) {
+  if (bd.curve) {
+    for (let i = 0; i < pos.count; i++) {
+      const f = onCurve(bd.curve, bd.len, pos.getX(i), pos.getY(i), pos.getZ(i));
+      pos.setXYZ(i, f.p[0], f.p[1], f.p[2]);
+      const nx = nor.getX(i), ny = nor.getY(i), nz = nor.getZ(i);
+      nor.setXYZ(i, f.x[0] * nx + f.t[0] * ny + f.z[0] * nz, f.x[1] * nx + f.t[1] * ny + f.z[1] * nz, f.x[2] * nx + f.t[2] * ny + f.z[2] * nz);
+    }
+  } else for (let i = 0; i < pos.count; i++) {
     const [x, y, z, phi] = bendPoint(bd, pos.getX(i), pos.getY(i), pos.getZ(i));
     pos.setXYZ(i, x, y, z);
     const [nx, ny, nz] = bendVector(bd, phi, nor.getX(i), nor.getY(i), nor.getZ(i));
@@ -479,7 +538,7 @@ function joinShapes(geos: THREE.BufferGeometry[]): THREE.BufferGeometry {
  * rest of the skeleton (the ends don't move, so limbs there stay put).
  */
 function bendChild(bd: Bend, local: THREE.Matrix4): THREE.Matrix4 {
-  if (!bd.theta) return local;
+  if (!isBent(bd)) return local;
   const p = new THREE.Vector3().setFromMatrixPosition(local);
   const s = Math.min(bd.len, Math.max(0, p.y));
   const [x, y, z] = bendPoint(bd, 0, s, 0);
@@ -488,7 +547,7 @@ function bendChild(bd: Bend, local: THREE.Matrix4): THREE.Matrix4 {
 
 /** Points along a (possibly bent) bone, for the skeleton line. */
 function bonePoints(bd: Bend): THREE.Vector3[] {
-  const n = bd.theta ? 16 : 1;
+  const n = bd.curve ? 48 : bd.theta ? 16 : 1;
   return Array.from({ length: n + 1 }, (_, i) => {
     const [x, y, z] = bendPoint(bd, 0, (bd.len * i) / n, 0);
     return new THREE.Vector3(x, y, z);
@@ -501,6 +560,52 @@ function bendMid(bd: Bend): THREE.Vector3 {
   return new THREE.Vector3(x, y, z);
 }
 
+/**
+ * A bend grip: a bend point in use (solid; `node` says which, none for an
+ * arc's middle), or one waiting in a gap between them (dotted; `gap` says
+ * which: 0 from the start to the first point, and so on to the tip).
+ */
+export interface BendGrip {
+  at: THREE.Vector3;
+  used: boolean;
+  node?: number;
+  gap?: number;
+}
+/** too short a gap (in the bone's units) gets no grip of its own: it'd be too fiddly to tell apart */
+const MIN_GAP = 0.06;
+
+/** Where the bend grips sit: a straight bone's middle (waiting), an arc's middle, or each bend point, with waiting ones in the gaps between. */
+function bendGrips(bd: Bend): BendGrip[] {
+  const pt = (y: number) => {
+    const [x, py, z] = bendPoint(bd, 0, y, 0);
+    return new THREE.Vector3(x, py, z);
+  };
+  if (!bd.nodes) {
+    if (!bd.theta) return [{ at: pt(bd.len / 2), used: false }];
+    const arcLen = bd.len * (Math.abs(bd.theta) / 2 / Math.sin(Math.abs(bd.theta) / 2));
+    const out: BendGrip[] = [{ at: pt(bd.len / 2), used: true }];
+    if (arcLen / 2 >= MIN_GAP) out.push({ at: pt(bd.len / 4), used: false, gap: 0 }, { at: pt((bd.len * 3) / 4), used: false, gap: 1 });
+    return out;
+  }
+  const c = bd.curve!;
+  // how far along the curve each point sits (it passes through them), as a fraction
+  const along = (v: THREE.Vector3) => {
+    let best = 0, d = Infinity;
+    for (let i = 0; i <= c.k; i++) {
+      const e = (c.pts[i * 3] - v.x) ** 2 + (c.pts[i * 3 + 1] - v.y) ** 2 + (c.pts[i * 3 + 2] - v.z) ** 2;
+      if (e < d) (d = e), (best = i);
+    }
+    return best / c.k;
+  };
+  const used = bd.nodes.map(([x, y, z]) => new THREE.Vector3(x, y, z).multiplyScalar(bd.len));
+  const out: BendGrip[] = used.map((at, i) => ({ at, used: true, node: i }));
+  const fs = [0, ...used.map(along), 1];
+  for (let g = 0; g + 1 < fs.length; g++) {
+    if ((fs[g + 1] - fs[g]) * c.length < 2 * MIN_GAP) continue;
+    out.push({ at: pt(((fs[g] + fs[g + 1]) / 2) * bd.len), used: false, gap: g });
+  }
+  return out;
+}
 
 /**
  * The bend that puts a bone's middle at local point `p`: direction from where
@@ -674,14 +779,8 @@ export class Creature {
 
       const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(bonePoints(bd)), lineMat);
 
-      // rig mode: drag this to bend the bone (shown on the selected bone)
-      const bendHandle = new THREE.Mesh(bendGeo, bendMat);
-      bendHandle.position.copy(bendMid(bd));
-      bendHandle.renderOrder = 1000;
-      bendHandle.userData.handle = def.id;
-      bendHandle.userData.kind = 'bend';
-      bendHandle.visible = false;
-      pivot.add(bendHandle);
+      // rig mode: drag these to bend the bone (shown on the selected bone; see placeBendHandles)
+      const bendHandles: THREE.Mesh[] = [];
       line.renderOrder = 999;
       pivot.add(line);
 
@@ -701,7 +800,7 @@ export class Creature {
         meshKey: '',
         tip,
         startHandle,
-        bendHandle,
+        bendHandles,
         attach,
         line,
         guide,
@@ -709,8 +808,53 @@ export class Creature {
       };
       this.bones.set(def.id, rt);
       this.list.push(rt);
+      this.placeBendHandles(rt, bd);
     }
     this.updateRestFrames();
+  }
+
+  /**
+   * The bend grips (see bendGrips): solid ones in use, dotted ones waiting.
+   * `userData` says which: `used`, and `node` or `gap`.
+   */
+  private placeBendHandles(b: BoneRT, bd: Bend) {
+    const grips = bendGrips(bd);
+    const shown = b.bendHandles.some((h) => h.visible);
+    while (b.bendHandles.length > grips.length) b.bendHandles.pop()!.removeFromParent();
+    while (b.bendHandles.length < grips.length) {
+      const h = new THREE.Mesh(bendGeo, bendMat);
+      h.renderOrder = 1000;
+      h.userData.handle = b.def.id;
+      h.userData.kind = 'bend';
+      const dots = new THREE.LineSegments(bendEdges, bendDotMat);
+      dots.computeLineDistances();
+      dots.renderOrder = 1000;
+      dots.raycast = () => {};
+      h.add(dots);
+      b.pivot.add(h);
+      b.bendHandles.push(h);
+    }
+    b.bendHandles.forEach((h, i) => {
+      const g = grips[i];
+      h.position.copy(g.at);
+      h.userData.used = g.used;
+      h.userData.node = g.node;
+      h.userData.gap = g.gap;
+      h.material = g.used ? bendMat : bendGhostMat;
+      h.children[0].visible = !g.used;
+    });
+    this.showBendGrips(b, shown);
+  }
+
+  /** While a bend grip is dragged, the waiting ones stay out of the way (they move to the new gaps on letting go). */
+  bendDragging = false;
+  private showBendGrips(b: BoneRT, on: boolean) {
+    for (const h of b.bendHandles) h.visible = on && (h.userData.used || !this.bendDragging);
+  }
+  /** Start or end a bend drag (see bendDragging). */
+  setBendDragging(on: boolean) {
+    this.bendDragging = on;
+    this.setSkeletonVisible(this.skeletonShown);
   }
 
   /** Recompute every bone's rest-pose frame (in place: materials hold on to them). */
@@ -741,7 +885,7 @@ export class Creature {
       const bd = bendOf(def, length);
       const tipAt = bendPoint(bd, 0, length, 0);
       b.tip.position.set(tipAt[0], tipAt[1], tipAt[2]);
-      b.bendHandle.position.copy(bendMid(bd));
+      this.placeBendHandles(b, bd);
       b.line.geometry.dispose();
       b.line.geometry = new THREE.BufferGeometry().setFromPoints(bonePoints(bd));
     }
@@ -858,7 +1002,7 @@ export class Creature {
       };
       const shapeGeo = (sh: PartShape, i: number, opts: typeof geoOpts) => {
         const { sk, geo: turned } = straightGeo(sh, i, opts);
-        return bd.theta ? cachedGeometry(sk + bendKey(bd), () => bendGeometry(turned, bd)) : turned;
+        return isBent(bd) ? cachedGeometry(sk + bendKey(bd), () => bendGeometry(turned, bd)) : turned;
       };
       const geo =
         shapes.length === 1
@@ -2049,7 +2193,7 @@ export class Creature {
       b.line.visible = show;
       // the slide and bend grips only on the selected bone (the twin follows by symmetry)
       b.startHandle.visible = v && b === sel && b.attach;
-      b.bendHandle.visible = v && b === sel;
+      this.showBendGrips(b, v && b === sel);
     }
     // the move-everything square belongs to the first part
     this.rootHandle.visible = v && (!only || !sel!.parent);
@@ -2100,7 +2244,7 @@ export class Creature {
     const y1 = box.max.y * sc.y + pad;
     const corners = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
     const pts: THREE.Vector3[] = [];
-    const bent = !!((b.mesh!.userData.liveBend ?? b.mesh!.userData.bend) as Bend | undefined)?.theta;
+    const bent = isBent((b.mesh!.userData.liveBend ?? b.mesh!.userData.bend) as Bend | undefined);
     corners.forEach(([ax, ay], i) => {
       const [bx, by] = corners[(i + 1) % 4];
       // the long sides follow the curve
@@ -2157,7 +2301,7 @@ export class Creature {
       return new THREE.Vector3(x, y, z);
     }
     const bd = b.mesh?.userData.bend as Bend | undefined;
-    if (!bd?.theta) return at.clone();
+    if (!bd || !isBent(bd)) return at.clone();
     const sc = b.mesh!.scale;
     // bent as the mesh is (before its stretch), then stretched with it
     const [x, y, z] = bendPoint(bd, at.x / sc.x, at.y / sc.y, at.z / sc.z);
@@ -2168,11 +2312,9 @@ export class Creature {
   private sizerTurn(b: BoneRT, at: THREE.Vector3): THREE.Quaternion {
     const live = b.mesh?.userData.liveBend as Bend | undefined;
     const bd = live ?? (b.mesh?.userData.bend as Bend | undefined);
-    if (!bd?.theta) return new THREE.Quaternion();
+    if (!bd || !isBent(bd)) return new THREE.Quaternion();
     const sc = live ? new THREE.Vector3(1, 1, 1) : b.mesh!.scale;
-    const phi = bendPoint(bd, at.x / sc.x, at.y / sc.y, at.z / sc.z)[3];
-    // the bend turns its direction toward -Y by phi, about the axis square to both
-    return new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(-Math.sin(bd.dir), 0, Math.cos(bd.dir)), -phi);
+    return bendTurn(bd, at.x / sc.x, at.y / sc.y, at.z / sc.z);
   }
 
   /**
@@ -2192,10 +2334,11 @@ export class Creature {
    */
   sizerAfter(bd: Bend, at: THREE.Vector3, inner: THREE.Vector3, kLen: number, kWid: number, alongBend: boolean): THREE.Vector3 {
     const len = bd.len;
-    const st = alongBend ? stretchBend(len, bd.theta, kLen) : { len: len * kLen, theta: bd.theta, turn: 0 };
+    // (a curve through bend points just grows, curve and all)
+    const st = alongBend && !bd.nodes ? stretchBend(len, bd.theta, kLen) : { len: len * kLen, theta: bd.theta, turn: 0 };
     const c = st.len / len;
     const p = new THREE.Vector3(inner.x * kWid + at.x - inner.x, inner.y * c + at.y - inner.y, at.z);
-    const [x, y, z] = bendPoint({ len: st.len, theta: st.theta, dir: bd.dir }, p.x, p.y, p.z);
+    const [x, y, z] = bendPoint(bd.nodes ? bendAtLen(bd, st.len) : { len: st.len, theta: st.theta, dir: bd.dir }, p.x, p.y, p.z);
     const q = new THREE.Vector3(x, y, z);
     return st.turn ? q.applyAxisAngle(new THREE.Vector3(-Math.sin(bd.dir), 0, Math.cos(bd.dir)), st.turn) : q;
   }
@@ -2212,7 +2355,7 @@ export class Creature {
       if (!m || !straight) continue;
       const s = m.scale;
       const bd = bendOf(b.def, b.length * s.y);
-      if (!bd.theta && !(m.userData.bend as Bend).theta) continue;
+      if (!isBent(bd) && !isBent(m.userData.bend as Bend)) continue;
       // bent at its new size, then shrunk back by the mesh's stretch (which the frame is laid out with)
       const sized = straight().clone().scale(s.x, s.y, s.z);
       sized.userData = {};
@@ -2233,16 +2376,16 @@ export class Creature {
     for (const b of this.list) {
       b.tip.material = b.tip === obj ? tipHoverMat : tipMat;
       b.startHandle.material = b.startHandle === obj ? tipHoverMat : startMat;
-      b.bendHandle.material = b.bendHandle === obj ? tipHoverMat : bendMat;
+      for (const h of b.bendHandles) h.material = h === obj ? tipHoverMat : h.userData.used ? bendMat : bendGhostMat;
     }
     for (const h of this.sizerHandles) h.material = h === obj ? tipHoverMat : sizerMat;
     // whatever's under the pointer swells a little, so it's clear what you'll grab (the ring just lights up)
-    for (const h of [this.rootHandle, ...this.sizerHandles, ...this.list.flatMap((b) => [b.tip, b.startHandle, b.bendHandle])]) h.scale.setScalar(h === obj && h.userData.ring === undefined ? 1.45 : 1);
+    for (const h of [this.rootHandle, ...this.sizerHandles, ...this.list.flatMap((b) => [b.tip, b.startHandle, ...b.bendHandles])]) h.scale.setScalar(h === obj && h.userData.ring === undefined ? 1.45 : 1);
     this.rollAxis.visible = this.rolling || obj?.userData.kind === 'roll';
   }
 
   handles(): THREE.Object3D[] {
-    return [...this.sizerHandles, ...this.list.map((b) => b.bendHandle), ...this.list.map((b) => b.startHandle), this.rootHandle, ...this.list.map((b) => b.tip)];
+    return [...this.sizerHandles, ...this.list.flatMap((b) => b.bendHandles), ...this.list.map((b) => b.startHandle), this.rootHandle, ...this.list.map((b) => b.tip)];
   }
 
   meshes(): THREE.Object3D[] {

@@ -26,6 +26,14 @@ export interface BoneDef {
    */
   bendDir?: number;
   /**
+   * bend points: the bone curves smoothly through them (instead of one
+   * arc, bend and bendDir), each one where it sits in the
+   * bone's frame as a fraction of its length (X side, Y along, Z out)
+   */
+  bendNodes?: V3[];
+  /** how round the curve is at each bend point (1 = round, 0 = a corner, 2 = swollen; unset = 1) */
+  bendRound?: number[];
+  /**
    * turn the bone about the line from its base to its tip, radians: the
    * drawing (and so a flat part like a wing) turns with it
    */
@@ -145,6 +153,10 @@ const bug: RigDef = {
 
 function mirrorV(v: V3): V3 {
   return [-v[0], v[1], v[2]];
+}
+/** Bend points for the other side: its frame is this one's mirrored through Z (like bendDir turning the other way) */
+export function mirrorNodes(n: V3[] | undefined): V3[] | undefined {
+  return n?.map(([x, y, z]) => [x, y, -z]);
 }
 
 export const RIGS: RigDef[] = [biped, quadruped, bird, serpent, bug];
@@ -285,6 +297,127 @@ function turn3(v: V3, k: V3, a: number): V3 {
   const c = Math.cos(a), s = Math.sin(a), kv = k[0] * v[0] + k[1] * v[1] + k[2] * v[2];
   const x = cross3(k, v);
   return [0, 1, 2].map((i) => v[i] * c + x[i] * s + k[i] * kv * (1 - c)) as V3;
+}
+
+/**
+ * A bone curved through bend points, sampled evenly along its length: where
+ * each sample sits in the bone's frame, and the frame there (X side, T along
+ * the curve, Z out), carried along without twisting.
+ */
+export interface BendCurve {
+  /** samples - 1 */
+  k: number;
+  /** its length, end to end along the curve */
+  length: number;
+  pts: Float64Array;
+  xs: Float64Array;
+  ts: Float64Array;
+  zs: Float64Array;
+}
+
+/**
+ * The curve from a bone's start through its bend points (`nodes`, as fractions
+ * of `len`) to its tip, sampled evenly by length. Each stretch between points
+ * follows the circles through its neighbours: points on one circle give that
+ * circle exactly (one point makes the same arc as a plain bend), others curve
+ * as evenly as they can. `round` (per point, 1 = that) sharpens the curve
+ * there toward a corner (0) or swells it (up to 2).
+ */
+export function bendCurve(nodes: V3[], len: number, round?: number[]): BendCurve {
+  const q: V3[] = [[0, 0, 0], ...nodes.map((n) => scale3(n, len)), [0, len, 0]];
+  const dot = (a: V3, b: V3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const unit = (v: V3): V3 => scale3(v, 1 / (len3(v) || 1));
+  /** the tangent at `at` of the circle through a, b, c (on to the next point), or along the line if they're in one */
+  const circleTangent = (a: V3, b: V3, c: V3, at: V3, toward: V3): V3 => {
+    const u = sub3(a, c), v = sub3(b, c);
+    const uxv = cross3(u, v);
+    const d = dot(uxv, uxv);
+    if (d < 1e-12 * Math.max(1e-9, dot(u, u) * dot(v, v))) return unit(toward);
+    const o = add3(c, scale3(cross3(sub3(scale3(v, dot(u, u)), scale3(u, dot(v, v))), uxv), 1 / (2 * d)));
+    const t = unit(cross3(unit(uxv), sub3(at, o)));
+    return dot(t, toward) < 0 ? scale3(t, -1) : t;
+  };
+  const m = q.length - 1;
+  const tq: V3[] = q.map((p, i) => {
+    if (i === 0) return circleTangent(q[0], q[1], q[Math.min(2, m)], p, sub3(q[1], q[0]));
+    if (i === m) return circleTangent(q[Math.max(0, m - 2)], q[m - 1], q[m], p, sub3(q[m], q[m - 1]));
+    return circleTangent(q[i - 1], q[i], q[i + 1], p, sub3(q[i + 1], q[i - 1]));
+  });
+  const roundAt = (i: number) => (i === 0 || i === m ? 1 : (round?.[i - 1] ?? 1));
+  const dense: V3[] = [];
+  const PER = 48;
+  for (let i = 0; i < m; i++) {
+    const p0 = q[i], p1 = q[i + 1];
+    const c = len3(sub3(p1, p0));
+    // a cubic as close to the arc between the two tangents as it gets
+    const th = Math.min(Math.acos(Math.max(-1, Math.min(1, dot(tq[i], tq[i + 1])))), Math.PI * 0.95);
+    const mag = c / Math.cos(th / 4) ** 2;
+    const m0 = scale3(tq[i], mag * roundAt(i)), m1 = scale3(tq[i + 1], mag * roundAt(i + 1));
+    for (let j = i === 0 ? 0 : 1; j <= PER; j++) {
+      const t = j / PER, t2 = t * t, t3 = t2 * t;
+      const h00 = 2 * t3 - 3 * t2 + 1, h10 = t3 - 2 * t2 + t, h01 = -2 * t3 + 3 * t2, h11 = t3 - t2;
+      dense.push(add3(add3(scale3(p0, h00), scale3(m0, h10)), add3(scale3(p1, h01), scale3(m1, h11))));
+    }
+  }
+  const acc = [0];
+  for (let i = 1; i < dense.length; i++) acc.push(acc[i - 1] + len3(sub3(dense[i], dense[i - 1])));
+  const total = acc[acc.length - 1] || 1;
+  const k = 128;
+  const out = new Float64Array((k + 1) * 3);
+  for (let i = 0, j = 0; i <= k; i++) {
+    const want = (total * i) / k;
+    while (j < dense.length - 2 && acc[j + 1] < want) j++;
+    const f = Math.min(1, Math.max(0, (want - acc[j]) / (acc[j + 1] - acc[j] || 1)));
+    for (let c = 0; c < 3; c++) out[i * 3 + c] = dense[j][c] + (dense[j + 1][c] - dense[j][c]) * f;
+  }
+  const at = (i: number): V3 => [out[i * 3], out[i * 3 + 1], out[i * 3 + 2]];
+  const norm = (v: V3): V3 => scale3(v, 1 / (len3(v) || 1));
+  const xs = new Float64Array(out.length), ts = new Float64Array(out.length), zs = new Float64Array(out.length);
+  const tan = (i: number) => norm(sub3(at(Math.min(k, i + 1)), at(Math.max(0, i - 1))));
+  // the start's frame: the straight bone's, turned the least way onto the curve
+  let t = tan(0);
+  const axis = cross3([0, 1, 0], t);
+  const ang = Math.atan2(len3(axis), t[1]);
+  let x: V3 = len3(axis) > 1e-9 ? turn3([1, 0, 0], norm(axis), ang) : t[1] < 0 ? [-1, 0, 0] : [1, 0, 0];
+  for (let i = 0; i <= k; i++) {
+    if (i) {
+      // double reflection: carries the frame along with as little twist as can be
+      const v1 = sub3(at(i), at(i - 1));
+      const c1 = dot(v1, v1) || 1;
+      const xl = sub3(x, scale3(v1, (2 * dot(v1, x)) / c1));
+      const tl = sub3(t, scale3(v1, (2 * dot(v1, t)) / c1));
+      const t2 = tan(i);
+      const v2 = sub3(t2, tl);
+      const c2 = dot(v2, v2) || 1;
+      x = norm(sub3(xl, scale3(v2, (2 * dot(v2, xl)) / c2)));
+      t = t2;
+    }
+    const z = cross3(x, t);
+    for (let c = 0; c < 3; c++) {
+      xs[i * 3 + c] = x[c];
+      ts[i * 3 + c] = t[c];
+      zs[i * 3 + c] = z[c];
+    }
+  }
+  return { k, length: total, pts: out, xs, ts, zs };
+}
+
+/** Where the straight-bone point (x, y, z) sits on the curve, `len` long, plus the frame there. */
+export function onCurve(c: BendCurve, len: number, x: number, y: number, z: number): { p: V3; x: V3; t: V3; z: V3 } {
+  const s = Math.min(len, Math.max(0, y));
+  const over = y - s; // past either end it carries on straight
+  const u = (s / len) * c.k;
+  const i = Math.min(c.k - 1, Math.floor(u));
+  const f = u - i;
+  const get = (a: Float64Array): V3 => [0, 1, 2].map((n) => a[i * 3 + n] + (a[(i + 1) * 3 + n] - a[i * 3 + n]) * f) as V3;
+  const P = get(c.pts), X = get(c.xs), T = get(c.ts), Z = get(c.zs);
+  return { p: add3(add3(add3(P, scale3(X, x)), scale3(T, over)), scale3(Z, z)), x: X, t: T, z: Z };
+}
+
+/** Bend points evenly along a curve (as fractions of `len`), the ends left out. */
+export function sampleNodes(at: (y: number) => V3, len: number, n: number): V3[] {
+  const r = (v: number) => Math.round(v * 1000) / 1000;
+  return Array.from({ length: n }, (_, i) => at((len * (i + 1)) / (n + 1)).map((v) => r(v / len)) as V3);
 }
 
 /** the most a bone bends, as a fraction of a half turn: three quarters of a full circle */
@@ -555,6 +688,26 @@ export function splitBone(rig: RigState, sceneId: string): SplitResult | null {
     upper.bend = d.bend / 2;
     d.bend = d.bend / 2;
   }
+  if (d.bendNodes?.length) {
+    // each half takes its half of the curve, leaning the same way off its own straight line
+    const c = bendCurve(d.bendNodes, len);
+    const midOff = onCurve(c, len, 0, len / 2, 0).p;
+    const half = (from: number): V3[] =>
+      sampleNodes((y) => {
+        const p = onCurve(c, len, 0, from + y, 0).p;
+        // off the line from this half's start to its end on the curve
+        const f = y / (len / 2);
+        const a: V3 = from ? midOff : [0, 0, 0];
+        const b: V3 = from ? [0, len, 0] : midOff;
+        const line = add3(scale3(a, 1 - f), scale3(b, f));
+        return [p[0] - line[0], y + (p[1] - line[1]), p[2] - line[2]];
+      }, len / 2, d.bendNodes!.length);
+    d.bendNodes = half(0);
+    upper.bendNodes = half(len / 2);
+    // the halves are new points, round again
+    delete d.bendRound;
+    delete upper.bendRound;
+  }
   d.end = mid;
   d.widthEnd = wMid;
 
@@ -692,6 +845,7 @@ export function unlinkPair(rig: RigState, sceneId: string): PartCopy[] {
       side: mirrorV(d.side),
       roll: d.roll ? -d.roll : undefined,
       bendDir: d.bendDir ? -d.bendDir : d.bendDir,
+      bendNodes: mirrorNodes(d.bendNodes),
     });
     parts.push({ from: d.id + 'L', to: d.id + 'R' });
   }
@@ -776,6 +930,7 @@ export function mirrorLimb(rig: RigState, sceneId: string): MirrorResult | null 
       out.side = mirrorV(d.side);
       out.roll = d.roll ? -d.roll : undefined;
       out.bendDir = d.bendDir ? -d.bendDir : d.bendDir;
+      out.bendNodes = mirrorNodes(d.bendNodes);
     }
     return out;
   });
