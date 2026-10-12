@@ -29,6 +29,8 @@
   --w-heavy: 700;
   --cursor: url(./cursor.svg) 2 3, default;
   --cursor-click: url(./cursor-click.svg) 2 3, pointer;
+  --cursor-grab: url(./cursor-grab.svg) 16 16, grab;
+  --cursor-grabbing: url(./cursor-grabbing.svg) 16 18, grabbing;
 }
 html.plain-text {
   --font: 'Nunito', system-ui, sans-serif;
@@ -454,7 +456,7 @@ button.primary.slim { width: auto; flex: 1; padding: 8px 10px; font-size: 14px; 
 /* three icons share a narrow card */
 .creation-actions.thing-card-actions .piece-icon { height: 24px; }
 .inherit-note { margin: 4px 0 8px; }
-.viewport.space-pan, .viewport.space-pan canvas { cursor: grab; }
+.viewport.space-pan, .viewport.space-pan canvas { cursor: var(--cursor-grab); }
 
 /* top middle: Attach stuff can sit in any corner (or the sidebar), so it opens clear of them all */
 .attach-pop { width: 300px; max-height: 70%; overflow-y: auto; left: 0; right: 0; margin-inline: auto; }
@@ -891,7 +893,7 @@ button.piece-icon { padding: 0; border: 0; background: transparent; }
 /* carrying eyes or stuff from a menu onto the creature */
 .carry { touch-action: pan-y; user-select: none; -webkit-user-drag: none; }
 .carry img { -webkit-user-drag: none; }
-#eyes-add.carry { touch-action: none; cursor: grab; }
+#eyes-add.carry { touch-action: none; cursor: var(--cursor-grab); }
 .carry-ghost {
   position: fixed; left: 0; top: 0; z-index: 1000; pointer-events: none;
   width: 44px; height: 44px; margin: -22px 0 0 -22px; display: grid; place-items: center;
@@ -901,7 +903,7 @@ button.piece-icon { padding: 0; border: 0; background: transparent; }
 .carry-ghost img { width: 100%; height: 100%; object-fit: cover; border-radius: 11px; }
 /* over the creature it's really there, so the stand-in fades away */
 .carry-ghost.landing { opacity: 0; }
-body.carrying, body.carrying * { cursor: grabbing !important; }
+body.carrying, body.carrying * { cursor: var(--cursor-grabbing) !important; }
 .eye-placed { margin: 4px 0; }
 #eye-spacing-row[hidden], #eye-height-row[hidden], .eye-placed[hidden] { display: none; }
 
@@ -1123,7 +1125,7 @@ body:not(.ck-editing) .ck-dock:not(:has(> .ck-sec:not(.ck-empty))) { padding: 0;
 body.ck-editing .ck-title, body.ck-editing .ck-fold-btn { display: none !important; }
 body.ck-editing .ck-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 2px; margin-bottom: 6px; }
 .ck-head .piece-icon { flex: none; width: 26px; opacity: 1; }
-.ck-grip { cursor: grab !important; touch-action: none; }
+.ck-grip { cursor: var(--cursor-grab) !important; touch-action: none; }
 .ck-head .ck-name { flex: 1 1 100px; min-width: 0; padding: 4px 8px; font-size: 13px; }
 .ck-place {
   flex: 1 0 auto; max-width: 110px; border: 1px solid var(--line); border-radius: 8px; padding: 3px 2px; background: var(--card);
@@ -1143,7 +1145,7 @@ body.ck-editing .ck-tool { display: block !important; margin: 0 !important; }
 body.ck-editing .ck-tool > :not(.ck-chip) { display: none !important; }
 body.ck-editing .ck-chip {
   display: flex; align-items: center; gap: 8px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 9px;
-  background: var(--card); font-size: 13px; font-weight: var(--w-bold); cursor: grab; touch-action: none;
+  background: var(--card); font-size: 13px; font-weight: var(--w-bold); cursor: var(--cursor-grab); touch-action: none;
 }
 .ck-chip .ck-grab { color: var(--muted); }
 body.ck-editing .ck-chip:hover { border-color: var(--blue); }
@@ -1174,7 +1176,7 @@ body.ck-editing .ck-side { min-height: 80px; }
   font-size: 13px; font-weight: var(--w-bold); box-shadow: 0 8px 24px rgba(0,0,0,.25); rotate: -2deg;
 }
 .ck-lifted { opacity: .35; }
-body.ck-dragging, body.ck-dragging * { cursor: grabbing !important; }
+body.ck-dragging, body.ck-dragging * { cursor: var(--cursor-grabbing) !important; }
 @media (max-width: 760px) {
   .ck-col { top: 2px; bottom: 2px; }
   .ck-col[data-side="left"] { left: 2px; }
