@@ -436,11 +436,48 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
       p.addScaledVector(g, -step / Math.sqrt(g2));
     }
   };
+  /**
+   * Settling can fold the skin where it creases (an armpit): neighbours slide
+   * down either side of the crease past each other, turning triangles over
+   * into dark flecks (that lumps then tear open). Ease the corners of any
+   * triangle that turned over back toward where they were (`was`, where none
+   * had), halving the move until it lies flat again. A triangle turned
+   * further than `turn` (as a cosine) counts as folded.
+   */
+  const unfold = (now: number[] | Float32Array, was: ArrayLike<number>, tris: number[], turn = 0.25) => {
+    const back = new Uint8Array(now.length / 3);
+    const turned = (p: ArrayLike<number>, a: number, b: number, c: number, out: THREE.Vector3) => {
+      const ux = p[b * 3] - p[a * 3], uy = p[b * 3 + 1] - p[a * 3 + 1], uz = p[b * 3 + 2] - p[a * 3 + 2];
+      const wx = p[c * 3] - p[a * 3], wy = p[c * 3 + 1] - p[a * 3 + 1], wz = p[c * 3 + 2] - p[a * 3 + 2];
+      return out.set(uy * wz - uz * wy, uz * wx - ux * wz, ux * wy - uy * wx);
+    };
+    for (let round = 0; round < 8; round++) {
+      back.fill(0);
+      let any = false;
+      for (let t = 0; t < tris.length; t += 3) {
+        const a = tris[t], b = tris[t + 1], c = tris[t + 2];
+        turned(now, a, b, c, g);
+        turned(was, a, b, c, gp);
+        if (g.dot(gp) > turn * g.length() * gp.length()) continue;
+        back[a] = back[b] = back[c] = 1;
+        any = true;
+      }
+      if (!any) return;
+      // the last round puts them right back, which can't be folded
+      const f = round === 7 ? 1 : 0.5;
+      for (let v = 0; v < back.length; v++) {
+        if (!back[v]) continue;
+        for (let i = v * 3; i < v * 3 + 3; i++) now[i] += (was[i] - now[i]) * f;
+      }
+    }
+  };
+  const unsettled = pos.slice();
   for (let v = 0; v < count; v++) {
     settle(pt.fromArray(pos, v * 3));
     pt.toArray(pos, v * 3);
     if ((v & 1023) === 0 && (await breathe())) return null;
   }
+  unfold(pos, unsettled, index);
 
   /** how thick the mesh is under each vertex: straight in along its normal to the far side */
   const thicknessOf = async (mesh: THREE.BufferGeometry): Promise<Float32Array | null> => {
@@ -501,10 +538,17 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
         }
       }
       let made = 0;
+      // where the new points were before settling: halfway along their edges, lying flat
+      const flat = grow.slice();
       for (const k of split.keys()) {
         const a = Math.floor(k / 4194304), b = k % 4194304;
         pt.set((grow[a * 3] + grow[b * 3]) / 2, (grow[a * 3 + 1] + grow[b * 3 + 1]) / 2, (grow[a * 3 + 2] + grow[b * 3 + 2]) / 2);
-        settle(pt);
+        flat.push(pt.x, pt.y, pt.z);
+        // on a thin point the edge cuts inside, and its midpoint settles out
+        // onto the surface. One that's outside is in a crease (an arm close by
+        // the body) too fine for the grid, where settling just crumples it: it
+        // stays flat.
+        if (fieldGrad(pt, g) < 0) settle(pt);
         split.set(k, grow.length / 3);
         grow.push(pt.x, pt.y, pt.z);
         if ((++made & 1023) === 0 && (await breathe())) return null;
@@ -519,6 +563,7 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
         else if (ca >= 0) next.push(c, ca, b, ca, a, b);
         else next.push(a, b, c);
       }
+      unfold(grow, flat, next);
       tris = next;
     }
     verts = grow;
@@ -543,7 +588,13 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
       if (m < cap[b]) cap[b] = m;
       if (m < cap[c]) cap[c] = m;
     }
+    // pushed every which way, a tight crease's sides can fold over too
+    // (lumps are gentle slopes: no face should turn more than ~45 degrees)
+    const P = geo.getAttribute('position') as THREE.BufferAttribute;
+    const smooth = (P.array as Float32Array).slice();
     applyLumps(geo, opts.lumps, cap);
+    unfold(P.array as Float32Array, smooth, tris, 0.7);
+    geo.computeVertexNormals();
   }
 
   if (opts.lowPoly) {
