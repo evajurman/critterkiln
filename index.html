@@ -121,7 +121,12 @@
             <p class="muted small">Or <span class="mouse-only">double-click</span><span class="touch-only">double-tap</span> a part. Draw a closed outline; it puffs up like a balloon.</p>
           </div>
           <div class="ck-tool" data-tool="thickness">
-            <label class="slider">
+            <div class="seg" id="part-kind" title="How the drawing becomes 3D">
+              <button data-kind="puffy" title="Puffed up like a balloon"><i class="fa-slab-duo fa-regular fa-cloud" aria-hidden="true"></i> Puffy</button>
+              <button data-kind="flat" title="A cut-out with rounded edges"><i class="fa-slab-duo fa-regular fa-rectangle-wide" aria-hidden="true"></i> Flat</button>
+              <button data-kind="turned" title="Spun round the bone, like a part off a lathe: robot limbs, pillars, bottles"><i class="fa-duotone fa-regular fa-jar" aria-hidden="true"></i> Turned</button>
+            </div>
+            <label class="slider" id="thickness-row">
               <span>Thickness</span>
               <input id="thickness" type="range" min="0.1" max="4.5" step="0.01" />
               <span class="ends"><em>flat</em><em>chubby</em></span>

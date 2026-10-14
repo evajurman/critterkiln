@@ -47,11 +47,13 @@ export interface SkinOptions {
    */
   linked?: (a: number, b: number) => boolean;
   /**
-   * A peeled skin: only the surface of the parts marked true, plus their
-   * blend into the parts marked false (which are there just for that blend,
-   * and are shown by another skin).
+   * A skin over just some of its parts, by what each one is: 1 = shown by
+   * this skin; 0 = shown by another skin, which this one blends into (the
+   * whole fillet is this skin's: a peeled part); 2 = shown as its own mesh,
+   * which fuses into this skin itself (the fillet is split down the middle).
+   * Leave out to show every part.
    */
-  keep?: boolean[];
+  keep?: number[];
 }
 
 interface Prepared {
@@ -660,7 +662,8 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
   }
 
   // a peeled skin stops where its blend into the other parts flattens out
-  // onto their own surface: there it meets the skin that shows them
+  // onto their own surface: there it meets the skin that shows them. Next
+  // to a part shown as its own mesh, it stops halfway across the join.
   if (opts.keep) {
     const keep = opts.keep;
     const kept: number[] = [];
@@ -669,18 +672,20 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
       c.set(0, 0, 0);
       for (let e = 0; e < 3; e++) c.x += verts[tris[t + e] * 3], c.y += verts[tris[t + e] * 3 + 1], c.z += verts[tris[t + e] * 3 + 2];
       c.divideScalar(3);
-      let dk = Infinity, ik = -1, db = Infinity, ib = -1;
+      let dk = Infinity, ik = -1, db = Infinity, ib = -1, de = Infinity;
       for (let i = 0; i < n; i++) {
         const pp = prepared[i];
         if (!pp.box.containsPoint(c)) continue;
         q.copy(c).applyMatrix4(pp.fromSkin);
         const d = exactDistance(pp.geo, pp.bvh, pp.normals, q, band, gp);
         if (!Number.isFinite(d)) continue;
-        if (keep[i]) {
+        if (keep[i] === 1) {
           if (d < dk) (dk = d, ik = i);
-        } else if (d < db) (db = d, ib = i);
+        } else if (keep[i] === 0) {
+          if (d < db) (db = d, ib = i);
+        } else de = Math.min(de, d);
       }
-      if (ik < 0) continue;
+      if (ik < 0 || de < dk) continue;
       if (ib < 0 || dk - db < Math.min(prepared[ik].k, prepared[ib].k)) kept.push(tris[t], tris[t + 1], tris[t + 2]);
       if ((t & 4095) === 0 && (await breathe())) return null;
     }

@@ -24,6 +24,7 @@ import {
   type CreatureState,
   type EyeFinish,
   type EyeStyle,
+  type PartKind,
   type PartShape,
   type PartState,
   type Placement,
@@ -5539,6 +5540,10 @@ function renderParts() {
 
 function renderPartCard() {
   const p = selPart();
+  const kind = p.kind ?? 'puffy';
+  document.querySelectorAll<HTMLButtonElement>('#part-kind button').forEach((b) => b.classList.toggle('active', b.dataset.kind === kind));
+  // a turned part is as round as its drawing: nothing to thicken
+  $('#thickness-row').hidden = kind === 'turned';
   $<HTMLInputElement>('#thickness').value = String(p.thickness);
   $<HTMLInputElement>('#opacity').value = String(p.opacity ?? 1);
   $<HTMLButtonElement>('#reset-shape').disabled = !p.outline;
@@ -6790,6 +6795,19 @@ $('#reset-shape').onclick = () => {
   commit();
   renderUI();
 };
+
+document.querySelectorAll<HTMLButtonElement>('#part-kind button').forEach((b) => {
+  b.onclick = () => {
+    const p = selPart();
+    const kind = b.dataset.kind as PartKind;
+    if ((p.kind ?? 'puffy') === kind) return;
+    if (kind === 'puffy') delete p.kind;
+    else p.kind = kind;
+    creature.sync();
+    commit();
+    renderUI();
+  };
+});
 
 let thicknessPending = false;
 $<HTMLInputElement>('#thickness').oninput = (e) => {

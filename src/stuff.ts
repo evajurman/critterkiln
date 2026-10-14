@@ -221,6 +221,17 @@ export function pieceGeometry(p: Piece, step = 0): THREE.BufferGeometry {
   return g;
 }
 
+/**
+ * A creature part built like a flat or turned piece: `depth` is a flat
+ * part's thickness; a turned part is solid. Points come about `step` apart
+ * all over, so it bends with its bone and blends into its neighbours. A
+ * copy: the part's own data (its merge spheres) goes on it.
+ */
+export function partPieceGeometry(kind: 'flat' | 'turned', outline: Vec2[], depth: number, lowPoly: boolean, step: number): THREE.BufferGeometry {
+  const p: Piece = { id: '', outline, holes: [], kind, thickness: depth, round: 0.7, color: '#ffffff', style: lowPoly ? 'lowpoly' : 'plastic', z: 0 };
+  return pieceGeometry(p, step).clone();
+}
+
 /** Who's wearing (or showing) a thing: their material, for items that inherit it. */
 export interface Wearer {
   /** the material of the body part it's on */
@@ -372,18 +383,26 @@ function remeshCaps(src: THREE.BufferGeometry, step: number): THREE.BufferGeomet
   const col = src.getAttribute('color');
   const out = { pos: [] as number[], nor: [] as number[], uv: [] as number[] };
 
+  // which face a triangle is on goes by its depth: a few at the rim have
+  // their normals turned the wrong way, and would carry the back face forward
+  let zMin = Infinity, zMax = -Infinity;
+  for (let i = capGroup.start; i < capGroup.start + capGroup.count; i++) {
+    zMin = Math.min(zMin, pos.getZ(i));
+    zMax = Math.max(zMax, pos.getZ(i));
+  }
   for (const front of [true, false]) {
     // the original triangles of this face, flat at one depth
     const tris: number[][] = [];
-    let z = 0;
+    const z = front ? zMax : zMin;
     for (let i = capGroup.start; i < capGroup.start + capGroup.count; i += 3) {
-      if (nor.getZ(i) > 0 !== front) continue;
-      z = pos.getZ(i);
+      const zt = (pos.getZ(i) + pos.getZ(i + 1) + pos.getZ(i + 2)) / 3;
+      if (zt > (zMin + zMax) / 2 !== front) continue;
       tris.push([0, 1, 2].flatMap((k) => [pos.getX(i + k), pos.getY(i + k)]));
     }
     if (!tris.length) continue;
     const ccw = (t: number[]) => (t[2] - t[0]) * (t[5] - t[1]) - (t[3] - t[1]) * (t[4] - t[0]) > 0;
-    const wantCcw = ccw(tris[0]);
+    // the way most of its triangles wind (not a stray one at the rim)
+    const wantCcw = tris.filter(ccw).length * 2 > tris.length;
     // inside the face: in one of its triangles (a hair of slack for points on the outline)
     const eps = step * 1e-4;
     const inTri = (t: number[], x: number, y: number) => {

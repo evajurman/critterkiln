@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { bvhFor, exactDistance, sharedNormals } from './distance';
 import { buildSkin, paintSkin, type SkinPart } from './skin';
-import { buildInflatedGeometry, defaultOutline, getMeshDetail, type Solid, type Vec2 } from './inflate';
+import { bounds, buildInflatedGeometry, defaultOutline, getMeshDetail, type Solid, type Vec2 } from './inflate';
 import {
   castsShadow,
   glowMaterial,
@@ -25,7 +25,7 @@ import {
   type StyleSettings,
 } from './materials';
 import { MAX_BEND, bendCurve, expandRig, onCurve, type BendCurve, type ExpandedBone, type ExpandedRig, type RigState, type V3 } from './rigs';
-import { buildThing, disposeThing, type Thing, type WrapSurface } from './stuff';
+import { buildThing, disposeThing, partPieceGeometry, type Thing, type WrapSurface } from './stuff';
 
 /** One drawn shape of a part, puffed up on its own: drawn from the front (the default) or from the side. */
 export interface PartShape {
@@ -49,7 +49,15 @@ export interface PartState {
   style?: StyleId;
   /** 1 = solid, lower = see-through */
   opacity?: number;
+  /**
+   * How its drawing becomes 3D: puffy = puffed up like a balloon (the
+   * default); flat = a cut-out with rounded edges; turned = spun round the
+   * bone, like a part off a lathe (robot limbs, pillars, bottles)
+   */
+  kind?: PartKind;
 }
+
+export type PartKind = 'puffy' | 'flat' | 'turned';
 
 /** Every shape a part was drawn as (none if it hasn't been drawn). */
 export function partShapes(p: PartState): PartShape[] {
@@ -504,6 +512,56 @@ function turnSideways(src: THREE.BufferGeometry): THREE.BufferGeometry {
   return g;
 }
 
+/**
+ * Drop zero-area triangles (a turned part's ends close up at the centre line
+ * in rings of them): they have no direction, which throws off inside/outside
+ * for the seamless skin. Non-indexed geometry only.
+ */
+function withoutSlivers(src: THREE.BufferGeometry): THREE.BufferGeometry {
+  if (src.index) return src;
+  const pos = src.getAttribute('position');
+  const keep: number[] = [];
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i += 3) {
+    a.fromBufferAttribute(pos, i);
+    b.fromBufferAttribute(pos, i + 1);
+    c.fromBufferAttribute(pos, i + 2);
+    if (b.sub(a).cross(c.sub(a)).lengthSq() > 1e-16) keep.push(i);
+  }
+  if (keep.length * 3 === pos.count) return src;
+  const g = new THREE.BufferGeometry();
+  for (const [name, attr] of Object.entries(src.attributes)) {
+    const size = attr.itemSize;
+    const arr = new Float32Array(keep.length * 3 * size);
+    keep.forEach((i, k) => {
+      for (let v = 0; v < 3; v++) for (let j = 0; j < size; j++) arr[(k * 3 + v) * size + j] = attr.getComponent(i + v, j);
+    });
+    g.setAttribute(name, new THREE.BufferAttribute(arr, size));
+  }
+  g.userData = { ...src.userData };
+  g.computeBoundingBox();
+  g.computeBoundingSphere();
+  src.dispose();
+  return g;
+}
+
+/**
+ * A flat or turned part's geometry. Its merge "spheres" only say how thick it
+ * is (joins are sized by that): half a flat part's depth, a turned part's
+ * widest radius.
+ */
+function pieceKindGeometry(kind: 'flat' | 'turned', outline: Vec2[], thickness: number, lowPoly: boolean): THREE.BufferGeometry {
+  const b = bounds(outline);
+  const size = Math.max(b.w, b.h, 1e-3);
+  // a flat part's depth goes with its width (thickness 1: about a third as deep as it is wide)
+  const depth = Math.max(0.004, 0.3 * thickness * b.w);
+  const step = Math.max(0.002, size / 48) / Math.sqrt(getMeshDetail());
+  const g = withoutSlivers(partPieceGeometry(kind, outline, depth, lowPoly, step));
+  const r = kind === 'flat' ? depth / 2 : Math.max(Math.abs(b.minX), Math.abs(b.maxX));
+  g.userData = { ...g.userData, solid: { spheres: new Float32Array([(b.minX + b.maxX) / 2, (b.minY + b.maxY) / 2, r]), thickness: 1 } satisfies Solid };
+  return g;
+}
+
 /** Several shapes of one part as one geometry (they just overlap), with all their merge spheres. */
 function joinShapes(geos: THREE.BufferGeometry[]): THREE.BufferGeometry {
   const g = mergeGeometries(geos) ?? geos[0].clone();
@@ -953,7 +1011,9 @@ export class Creature {
       const style = p.style ?? s.style;
       const shapes = this.shapesFor(b);
       const k = this.settingsFor(style);
+      const kind = p.kind ?? 'puffy';
       const geoOpts = {
+        kind,
         thickness: p.thickness,
         lowPoly: style === 'lowpoly',
         facetScale: style === 'lowpoly' ? k.facets : undefined,
@@ -981,7 +1041,9 @@ export class Creature {
       // each shape puffed up on its own (turned a quarter round if drawn from the side), then bent with the bone
       const straightGeo = (sh: PartShape, i: number, opts: typeof geoOpts) => {
         const sk = JSON.stringify([sh.outline, opts, getMeshDetail(), i]) + (sh.side ? 'side' : '');
-        const flat = cachedGeometry(sk, () => buildInflatedGeometry(sh.outline, { ...opts, seed: seed + i }));
+        const flat = cachedGeometry(sk, () =>
+          opts.kind === 'puffy' ? buildInflatedGeometry(sh.outline, { ...opts, seed: seed + i }) : pieceKindGeometry(opts.kind, sh.outline, opts.thickness, opts.lowPoly),
+        );
         return { sk, geo: sh.side ? cachedGeometry(sk + 'turned', () => turnSideways(flat)) : flat };
       };
       const shapeGeo = (sh: PartShape, i: number, opts: typeof geoOpts) => {
@@ -1433,10 +1495,14 @@ export class Creature {
       return Math.max(0.01, m * Math.min(1, sol?.thickness ?? 1));
     };
 
+    // flat and turned parts keep their crisp edges (the skin's grid would
+    // round them off): they stay their own meshes, fused at their joins
+    const crisp = (b: BoneRT) => (s.parts[b.src].kind ?? 'puffy') !== 'puffy';
+
     const built: SkinEntry[] = [];
     for (const [, members] of groups) {
       // only parts that actually touch another part in the group
-      const joined = members.filter((b) => members.some((o) => o !== b && blendable(s, b, o) && this.near(b, o, kMax)));
+      const joined = members.filter((b) => !crisp(b) && members.some((o) => o !== b && !crisp(o) && blendable(s, b, o) && this.near(b, o, kMax)));
       if (joined.length < 2) continue;
       const part = s.parts[joined[0].src];
       const style = part.style ?? s.style;
@@ -1465,9 +1531,11 @@ export class Creature {
         ...peels.map((sub) => ({ members: sub, base: sub[0].parent && joined.includes(sub[0].parent) ? sub[0].parent : undefined })),
       ];
 
-      for (const { members, base } of sets) {
-        const all = base ? [base, ...members] : members;
-        if (all.length < 2) continue;
+      for (const { members: shown, base } of sets) {
+        // crisp parts joined to these blend into the skin from their side; the skin meets them halfway
+        const beside = members.filter((o) => crisp(o) && [...shown, ...(base ? [base] : [])].some((b) => blendable(s, b, o) && this.near(b, o, kMax)));
+        const all = [...(base ? [base] : []), ...shown, ...beside];
+        if (shown.length + (base ? 1 : 0) < 2) continue;
         // a part drawn as several shapes joins in as each of them
         const owners: BoneRT[] = [];
         const parts: SkinPart[] = all.flatMap((b) => {
@@ -1485,7 +1553,7 @@ export class Creature {
           }));
         });
         const linked = onlyConnected ? (a: number, b: number) => blendable(s, owners[a], owners[b]) : undefined;
-        const keep = base ? owners.map((o) => o !== base) : undefined;
+        const keep = base || beside.length ? owners.map((o) => (o === base ? 0 : beside.includes(o) ? 2 : 1)) : undefined;
         const geo = await buildSkin(parts, { h, colorBlend: kc, lowPoly, lumps, linked, keep, shouldStop: () => version !== this.skinVersion });
         if (version !== this.skinVersion) {
           // something changed meanwhile: it'll be retried once things settle again
@@ -1502,7 +1570,7 @@ export class Creature {
         mesh.userData.skin = true;
         built.push({
           mesh,
-          members,
+          members: shown,
           owners,
           parts,
           lowPoly,
@@ -1547,7 +1615,7 @@ export class Creature {
         const style = p.style ?? s.style;
         const k = this.settingsFor(style);
         // clay lumps and low-poly facet size change the shape; with blending off, color changes the groups
-        return [id, partShapes(p), p.thickness, style, style === 'clay' ? k.lumps : style === 'stone' ? k.rugged : 0, style === 'lowpoly' ? k.facets : 0, blend ? '' : p.color.toLowerCase()];
+        return [id, partShapes(p), p.thickness, p.kind, style, style === 'clay' ? k.lumps : style === 'stone' ? k.rugged : 0, style === 'lowpoly' ? k.facets : 0, blend ? '' : p.color.toLowerCase()];
       }),
     ]);
   }
