@@ -37,6 +37,7 @@ import {
   disposeThing,
   downloadText,
   envelope,
+  mirrorShape,
   newPiece,
   newThing,
   parseEnvelope,
@@ -70,7 +71,8 @@ import {
 import { installScrollbars } from './scrollbars';
 import { customTabs, gizmos, initLayout, setLayoutIdle, setLayoutTab, setSceneColors, type Tab } from './layout';
 import { installCursorPress } from './cursorPress';
-import { deleteCreation, getCreation, keepStorage, listCreations, putCreation, type Creation } from './library';
+import { captureShortcut, hasCustomShortcuts, is, keyLabel, labelShortcuts, renderShortcutSheet, resetShortcuts, stopListening } from './shortcuts';
+import { deleteCreation, getCreation, keepStorage, listCreations, markSaved, putCreation, type Creation, type SavedHow } from './library';
 import {
   RIGS,
   addLimb,
@@ -1299,7 +1301,8 @@ canvas.addEventListener('pointerdown', (e) => {
   pointer.downY = e.clientY;
   pointer.moved = false;
   pointer.touch = e.pointerType !== 'mouse';
-  if (e.button !== 0 || pickingFocus) return;
+  // holding Space, the left button only pans
+  if (e.button !== 0 || pickingFocus || spacePan) return;
   // pressing on an eye: dragging slides the pair over the surface (a click still opens its settings)
   const onHandle = (handlesVisible() && pickHandle(e.clientX, e.clientY)) || gizmo.dragging || gizmo.axis !== null;
   const eye = !onHandle && mode !== 'stuff' && !drawState && !idle ? pickEyeHit(e.clientX, e.clientY) : null;
@@ -2117,7 +2120,8 @@ function drawHint() {
     return;
   }
   // how to look around while the drawing layer is in the way
-  const nav = touchScreen() ? ' · Two fingers move the view' : ' · Right-drag or Space+drag to pan, F to face it again';
+  const face = keyLabel('frame');
+  const nav = touchScreen() ? ' · Two fingers move the view' : ` · Right-drag or Space+drag to pan${face ? `, ${face} to face it again` : ''}`;
   if (target.kind === 'piece') {
     hint((symOn() ? 'Draw a piece: across the dashed line = one symmetric shape, to one side = a mirrored pair' : 'Draw a piece as one closed loop. Erase inside it to make holes') + nav, 0);
     return;
@@ -2265,8 +2269,9 @@ function syncDrawBar() {
     b.classList.toggle('on', turned === !!drawState?.side);
     // named by what it shows of the creature: a quadruped's own plane is its side
     const v = VIEW_NAMES[drawState?.views?.[turned ? 1 : 0].kind ?? (turned ? 'side' : 'front')];
-    b.innerHTML = `<i class="${v.icon}" aria-hidden="true"></i> ${v.name}${turned ? ' <kbd>V</kbd>' : ''}`;
-    b.title = `Draw the part as seen from the ${v.name.toLowerCase()}${turned ? ' (V)' : ''}`;
+    const key = turned ? keyLabel('side') : '';
+    b.innerHTML = `<i class="${v.icon}" aria-hidden="true"></i> ${v.name}${key ? ` <kbd>${key}</kbd>` : ''}`;
+    b.title = `Draw the part as seen from the ${v.name.toLowerCase()}${key ? ` (${key})` : ''}`;
   });
   const has = !!drawState?.pending;
   // a body part can be kept (or cleared) with shapes in the other view only
@@ -2743,13 +2748,15 @@ for (const type of ['pointerup', 'pointercancel'] as const) {
   });
 }
 
-// Hold Space to pan with the left button too (the drawing layer steps aside meanwhile).
+// Hold Space to pan with the left button (while drawing, the drawing layer steps aside meanwhile).
+// Outside drawing, Shift+drag pans as well: OrbitControls does that itself.
 let spacePan = false;
 function setSpacePan(on: boolean) {
   if (spacePan === on) return;
   spacePan = on;
   overlay.style.pointerEvents = on ? 'none' : '';
   controls.mouseButtons.LEFT = on ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE;
+  gizmo.enabled = !on;
   viewport.classList.toggle('space-pan', on);
 }
 window.addEventListener('keyup', (e) => {
@@ -3054,6 +3061,14 @@ function refreshPieceGizmo() {
   mesh.position.set(-c.x, -c.y, 0);
   mesh.quaternion.identity();
   piecePivot = pivot;
+  // Both sides: the other side follows the gizmo, mirrored, while it's dragged
+  const tw = twinOf(p);
+  const twinMesh = tw && bench!.children.find((m) => m.userData.pieceId === tw.id);
+  if (twinMesh) {
+    twinMesh.updateMatrix();
+    pivot.userData.twinMesh = twinMesh;
+    pivot.userData.twinBase = twinMesh.matrix.clone();
+  }
   gizmo.attach(pivot);
   setPieceMode(pieceMode);
   $('#piece-name').textContent = `Piece ${workbench().pieces.indexOf(p) + 1}`;
@@ -3097,6 +3112,9 @@ function setPieceMode(m: PieceMode) {
   });
   document.querySelectorAll<HTMLButtonElement>('#piece-bar [data-dim]').forEach((b) => b.classList.toggle('on', b.dataset.dim === pieceDim));
   $('#piece-flat').hidden = !p?.place;
+  const both = !!p && !!twinOf(p);
+  $<HTMLInputElement>('#piece-mirror').checked = both;
+  $('#piece-mirror-label').classList.toggle('on', both);
   invalidate();
 }
 
@@ -3139,6 +3157,7 @@ function bakePiece() {
     p.outline = fix(p.outline);
     p.holes = p.holes.map(fix);
   }
+  syncTwin(p);
   // rebuilt from the new shape; the gizmo wraps the new mesh
   piecePivot = null;
   syncWorkbench();
@@ -3151,11 +3170,85 @@ function layPieceFlat() {
   const p = piece();
   if (!p?.place) return;
   delete p.place;
+  syncTwin(p);
   piecePivot = null;
   syncWorkbench();
   commit();
   autosaveThing();
   hint('Back flat on the board', 1500);
+}
+
+// ---- Both sides: a piece and its mirror image, kept in step ----
+
+/** A piece's other side, if it has one. */
+function twinOf(p: Piece): Piece | undefined {
+  return p.twin ? workbench().pieces.find((q) => q.id === p.twin) : undefined;
+}
+
+/** After `p` changed: its other side becomes its mirror image again (shape, place, color, everything). */
+function syncTwin(p: Piece | undefined) {
+  if (!p?.twin) return;
+  const wb = workbench();
+  const i = wb.pieces.findIndex((q) => q.id === p.twin);
+  if (i < 0) {
+    delete p.twin;
+    return;
+  }
+  const t: Piece = { ...structuredClone(p), id: p.twin, twin: p.id, ...mirrorShape(p) };
+  if (!t.place) delete t.place;
+  wb.pieces[i] = t;
+}
+
+/** Where a piece's middle sits across the board (0 = on the centre line). */
+function pieceMiddleX(p: Piece): number {
+  const b = bounds(p.outline);
+  // a turned piece is spun round its own centre line
+  const v = new THREE.Vector3(p.kind === 'turned' ? 0 : (b.minX + b.maxX) / 2, (b.minY + b.maxY) / 2, 0);
+  if (p.place) v.applyQuaternion(new THREE.Quaternion(...p.place.quaternion)).add(new THREE.Vector3(...p.place.position));
+  return v.x;
+}
+
+/** Both sides on: a mirror image of the picked piece on the other side. Off: the two go their own ways. */
+function setPieceBothSides(on: boolean) {
+  const p = piece();
+  if (!p || drawState || on === !!twinOf(p)) return;
+  const wb = workbench();
+  if (on) {
+    if (Math.abs(pieceMiddleX(p)) < Math.max(0.005, bounds(p.outline).w * 0.1)) {
+      hint('This piece sits on the centre line: move it to one side first', 2400, true);
+      setPieceMode(pieceMode);
+      return;
+    }
+    const t: Piece = { ...structuredClone(p), id: uid() };
+    p.twin = t.id;
+    wb.pieces.splice(wb.pieces.indexOf(p) + 1, 0, t);
+    syncTwin(p);
+  } else {
+    delete twinOf(p)!.twin;
+    delete p.twin;
+    hint('Now two separate pieces', 1500);
+  }
+  syncWorkbench();
+  commit();
+  renderStuffPanel();
+  autosaveThing();
+}
+$<HTMLInputElement>('#piece-mirror').onchange = (e) => setPieceBothSides((e.target as HTMLInputElement).checked);
+
+const MIRROR_X = new THREE.Matrix4().makeScale(-1, 1, 1);
+/** While a piece is dragged: put its other side where the same change, mirrored, takes it. */
+function mirrorTwinLive() {
+  const pivot = piecePivot;
+  const mesh = pivot?.userData.twinMesh as THREE.Object3D | undefined;
+  const holder = pivot?.parent;
+  if (!pivot || !mesh || !holder) return;
+  holder.updateMatrix();
+  pivot.updateMatrix();
+  const c = pivot.userData.center as THREE.Vector2;
+  // the change since the piece was picked, on the bench: holder * pivot * (pivot at rest)^-1 * holder^-1
+  const change = holder.matrix.clone().multiply(pivot.matrix).multiply(new THREE.Matrix4().makeTranslation(-c.x, -c.y, 0)).multiply(holder.matrix.clone().invert());
+  const m = MIRROR_X.clone().multiply(change).multiply(MIRROR_X).multiply(pivot.userData.twinBase as THREE.Matrix4);
+  m.decompose(mesh.position, mesh.quaternion, mesh.scale);
 }
 
 /** A tilted piece's own plane in the scene, for cutting holes into it. */
@@ -3259,6 +3352,16 @@ function focusOnBoard() {
 function addPieces(shapes: { outline: Vec2[]; holes: Vec2[][] }[]) {
   const wb = workbench();
   const made = shapes.map((sh) => ({ ...newPiece(sh.outline, piece()), holes: sh.holes }));
+  // drawn with symmetry on, a mirrored pair stays one: Both sides
+  if (symOn()) {
+    for (const a of made) {
+      const b = made.find((q) => q !== a && !q.twin && !a.twin && mirrorPair(a, q));
+      if (b) {
+        a.twin = b.id;
+        b.twin = a.id;
+      }
+    }
+  }
   wb.pieces.push(...made);
   selectedPiece = made[0].id;
   unlock('piece');
@@ -3267,6 +3370,13 @@ function addPieces(shapes: { outline: Vec2[]; holes: Vec2[][] }[]) {
   commit();
   renderStuffPanel();
   flashPart();
+}
+
+/** Whether two pieces are mirror images across the centre line (going by their outlines' extents). */
+function mirrorPair(a: Piece, b: Piece): boolean {
+  const p = bounds(a.outline), q = bounds(b.outline);
+  const eps = 1e-3;
+  return Math.abs(p.minX + q.maxX) < eps && Math.abs(p.maxX + q.minX) < eps && Math.abs(p.minY - q.minY) < eps && Math.abs(p.maxY - q.maxY) < eps;
 }
 
 /** Done redrawing a piece: it keeps its color, material, kind and place, with the new outline. */
@@ -3278,8 +3388,15 @@ function replacePiece(id: string, shapes: { outline: Vec2[]; holes: Vec2[][] }[]
     return;
   }
   const old = wb.pieces[i];
-  const next = shapes.map((sh, k) => ({ ...structuredClone(old), outline: sh.outline, holes: sh.holes, id: k ? uid() : old.id }));
+  const next: Piece[] = shapes.map((sh, k) => ({ ...structuredClone(old), outline: sh.outline, holes: sh.holes, id: k ? uid() : old.id }));
+  // Both sides: the other side follows a redraw, unless it came out as several pieces
+  if (next.length > 1 && old.twin) {
+    const t = twinOf(old);
+    if (t) delete t.twin;
+    for (const q of next) delete q.twin;
+  }
   wb.pieces.splice(i, 1, ...next);
+  syncTwin(next[0]);
   selectedPiece = old.id;
   exitDraw(true);
   syncWorkbench();
@@ -3370,6 +3487,8 @@ function renderStuffPanel() {
     pick.innerHTML = `<i style="background:${p.color}"></i>`;
     pick.insertAdjacentHTML('beforeend', p.kind === 'flat' ? fa('rectangle-wide') : p.kind === 'turned' ? faClassic('jar') : fa('cloud'));
     pick.append(` Piece ${i + 1}${p.holes.length ? ` (${p.holes.length} hole${p.holes.length > 1 ? 's' : ''})` : ''}`);
+    const t = twinOf(p);
+    if (t) pick.insertAdjacentHTML('beforeend', ` <span class="piece-twin" title="Both sides: mirror image of Piece ${wb.pieces.indexOf(t) + 1}">${fa('arrow-right-arrow-left')}</span>`);
     pick.onclick = () => {
       selectedPiece = p.id;
       flashPart();
@@ -3463,6 +3582,7 @@ function updatePiece(fn: (p: Piece) => void, doCommit = true) {
   const p = piece();
   if (!p) return;
   fn(p);
+  syncTwin(p);
   syncWorkbench();
   if (doCommit) {
     commit();
@@ -3529,6 +3649,7 @@ function copyPiece(id: string) {
   const i = wb.pieces.findIndex((p) => p.id === id);
   if (i < 0) return;
   const twin: Piece = { ...structuredClone(wb.pieces[i]), id: uid() };
+  delete twin.twin;
   const nudge = ([x, y]: Vec2): Vec2 => [x + 0.08, y - 0.08];
   twin.outline = twin.outline.map(nudge);
   twin.holes = twin.holes.map((l) => l.map(nudge));
@@ -3543,8 +3664,11 @@ function copyPiece(id: string) {
 function deletePiece(id: string) {
   if (drawState) exitDraw();
   const wb = workbench();
-  wb.pieces = wb.pieces.filter((p) => p.id !== id);
-  if (selectedPiece === id) selectedPiece = '';
+  // Both sides go together
+  const other = wb.pieces.find((p) => p.id === id)?.twin;
+  wb.pieces = wb.pieces.filter((p) => p.id !== id && p.id !== other);
+  if (selectedPiece === id || selectedPiece === other) selectedPiece = '';
+  if (other) hint('Deleted both sides (turn off Both sides to delete just one)', 2400);
   syncWorkbench();
   commit();
   renderStuffPanel();
@@ -3748,6 +3872,10 @@ gizmo.addEventListener('dragging-changed', (e) => {
 });
 gizmo.addEventListener('objectChange', () => {
   invalidate();
+  if (piecePivot && gizmo.object === piecePivot) {
+    mirrorTwinLive();
+    return;
+  }
   if (placing) {
     creature.capturePlacement();
     fitShadows();
@@ -4403,7 +4531,10 @@ function togglePopover(pop: string): boolean {
     $(b).classList.toggle('on', open && p === pop);
   }
   // one menu at a time: the Attach popups would sit under Creations or Trophies
-  if (open) closeAttachPops();
+  if (open) {
+    closeAttachPops();
+    closeShortcutSheet();
+  }
   return open;
 }
 function closeTopPopovers() {
@@ -4468,10 +4599,13 @@ function saveBundle(b: Bundle, name: string) {
 }
 
 $('#file-save').onclick = () => {
+  // its card in My creations shows it's saved
+  flushCreationSave();
   saveBundle(
     { active: world.active, creatures: world.creatures.map(forFile), stuff: collection(), rigs: savedRigs(), look: currentLook() },
     sceneFileName(),
   );
+  if (opened.id) noteSaved([opened.id], 'file');
 };
 $('#file-open').onclick = () => $<HTMLInputElement>('#file-input').click();
 $<HTMLInputElement>('#file-input').onchange = async (e) => {
@@ -4817,12 +4951,15 @@ function saveCreationNow() {
 let libraryWarned = false;
 async function writeCreation(record: SavedCreation) {
   try {
+    const before = await getCreation<CreationData>(record.id);
     // reopened after a reload: keep its original date and picture
-    if (!record.created || !record.thumb) {
-      const before = await getCreation<CreationData>(record.id);
-      record.created ||= before?.created ?? record.updated;
-      record.thumb ??= before?.thumb;
-      if (opened.id === record.id) opened.created = record.created;
+    record.created ||= before?.created ?? record.updated;
+    record.thumb ??= before?.thumb;
+    if (opened.id === record.id) opened.created = record.created;
+    if (before) {
+      record.saved = before.saved;
+      // the same scene again (a new picture, or after a reload): not a change, so a backup still covers it
+      if (JSON.stringify(before.data) === JSON.stringify(record.data)) record.updated = before.updated;
     }
     await putCreation(record);
   } catch {
@@ -4974,12 +5111,40 @@ async function renderLibrary() {
   };
   grid.append(fresh);
   for (const c of list) grid.append(creationCard(c));
+  const unsaved = list.filter((c) => !saveStatus(c).ok).length;
+  const note = $('#library-unsaved');
+  note.hidden = !unsaved;
+  note.textContent = unsaved === 1 ? '1 creation isn’t in a backup or file yet' : `${unsaved} creations aren’t in a backup or file yet`;
   if (!list.length) {
     const p = document.createElement('p');
     p.className = 'muted small library-empty';
     p.textContent = 'Nothing here yet. Whatever you make is kept here as you go.';
     grid.append(p);
   }
+}
+
+/** Whether a creation is safe in a file (a backup or its own save) as it is now. */
+function saveStatus(c: SavedCreation): { ok: boolean; text: string; title: string } {
+  const s = c.saved;
+  const how = s?.how === 'file' ? 'saved to a file' : 'backed up';
+  if (!s) return { ok: false, text: 'Only in this browser', title: 'Not in a backup or a saved file yet: Back up all, or download it' };
+  const when = new Date(s.at);
+  // "Oct 12" (with the year once it's not this one); the hover has the time too
+  const day = when.toLocaleDateString(undefined, { month: 'short', day: 'numeric', ...(when.getFullYear() !== new Date().getFullYear() && { year: 'numeric' }) });
+  const full = `${when.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })} (${timeAgo(s.at)})`;
+  if (s.at >= c.updated) return { ok: true, text: `${s.how === 'file' ? 'Saved' : 'Backed up'} ${day}`, title: `Unchanged since it was ${how} ${full}` };
+  return { ok: false, text: `Changed since ${day} ${s.how === 'file' ? 'save' : 'backup'}`, title: `Changed since it was ${how} ${full}: Back up all, or download it` };
+}
+
+/** These creations just went into a file: their cards stop asking for a backup. */
+function noteSaved(ids: string[], how: SavedHow) {
+  const at = Date.now();
+  opened.writing = opened.writing
+    .then(() => markSaved(ids, how, at))
+    .catch(() => {})
+    .then(() => {
+      if (!$('#library-pop').hidden) void renderLibrary();
+    });
 }
 
 function creationCard(c: SavedCreation): HTMLElement {
@@ -5013,7 +5178,13 @@ function creationCard(c: SavedCreation): HTMLElement {
   const when = document.createElement('span');
   when.className = 'creation-when muted';
   when.textContent = timeAgo(c.updated);
-  meta.append(label, when);
+  const st = saveStatus(c);
+  const saved = document.createElement('span');
+  saved.className = `creation-saved ${st.ok ? 'ok' : 'warn'}`;
+  saved.innerHTML = fa(st.ok ? 'check' : 'triangle-exclamation');
+  saved.append(` ${st.text}`);
+  saved.title = st.title;
+  meta.append(label, when, saved);
 
   const actions = document.createElement('div');
   actions.className = 'creation-actions';
@@ -5056,7 +5227,9 @@ function renameCreation(c: SavedCreation, label: HTMLElement) {
         save();
       }
       await opened.writing;
-      await putCreation(c).catch(() => hint("Couldn't rename it", 2000, true));
+      // the latest record (a backup since the cards were drawn shouldn't be undone)
+      const latest = (await getCreation<CreationData>(c.id).catch(() => undefined)) ?? c;
+      await putCreation({ ...latest, name: next }).catch(() => hint("Couldn't rename it", 2000, true));
     }
     void renderLibrary();
   };
@@ -5087,7 +5260,10 @@ async function copyCreation(c: SavedCreation) {
   const data = c.id === opened.id ? creationData() : c.data;
   try {
     await opened.writing;
-    await putCreation<CreationData>({ ...structuredClone(c), data: structuredClone(data), id: uid(), name: `${creationName(c)} copy`, created: now, updated: now });
+    const copy: SavedCreation = { ...structuredClone(c), data: structuredClone(data), id: uid(), name: `${creationName(c)} copy`, created: now, updated: now };
+    // a new creation: in no file yet
+    delete copy.saved;
+    await putCreation(copy);
   } catch {
     hint("Couldn't copy it", 2000, true);
   }
@@ -5096,8 +5272,10 @@ async function copyCreation(c: SavedCreation) {
 
 function downloadCreation(c: SavedCreation) {
   const name = creationName(c);
+  if (c.id === opened.id) flushCreationSave();
   const d = c.id === opened.id ? creationData() : c.data;
   saveBundle({ name, active: d.active, creatures: d.creatures, stuff: [], rigs: [], look: d.look }, name);
+  noteSaved([c.id], 'file');
 }
 
 async function removeCreation(c: SavedCreation) {
@@ -5130,6 +5308,7 @@ async function backupCreations() {
     const day = new Date().toISOString().slice(0, 10);
     downloadText(`CritterKiln creations ${day}.creature`, JSON.stringify(envelope('library', { creations } satisfies LibraryFile)));
     unlock('backup');
+    noteSaved(creations.map((c) => c.id), 'backup');
   } catch {
     hint("Couldn't read My creations", 2000, true);
   }
@@ -5148,8 +5327,10 @@ async function importCreations(f: LibraryFile) {
     for (const c of incoming) {
       const mine = have.get(c.id);
       if (mine && mine.updated >= c.updated) continue;
+      // it's in the backup it came from
+      const kept: SavedCreation = { ...c, saved: { at: c.updated, how: 'backup' } };
       // the open scene would save straight over it: keep the backup's version beside it
-      await putCreation(c.id === opened.id ? { ...c, id: uid() } : c);
+      await putCreation(c.id === opened.id ? { ...kept, id: uid() } : kept);
       added++;
     }
   } catch {
@@ -6387,6 +6568,39 @@ function syncSliderNumbers() {
 $('#settings-btn').onclick = () => {
   if (togglePopover('#settings-pop')) renderSettings();
 };
+
+// ---- keyboard shortcut sheet ----
+
+function openShortcutSheet() {
+  closeTopPopovers();
+  closeAttachPops();
+  $('#keys-pop').hidden = false;
+  renderShortcutSheet($('#keys-list'));
+  $('#keys-reset').hidden = !hasCustomShortcuts();
+}
+function closeShortcutSheet() {
+  stopListening();
+  $('#keys-pop').hidden = true;
+}
+function toggleShortcutSheet() {
+  if ($('#keys-pop').hidden) openShortcutSheet();
+  else closeShortcutSheet();
+}
+$('#set-keys').onclick = () => openShortcutSheet();
+$('#keys-close').onclick = () => closeShortcutSheet();
+$('#keys-reset').onclick = () => {
+  resetShortcuts();
+  shortcutsChanged();
+  renderShortcutSheet($('#keys-list'), 'Every key is back to how it started.');
+};
+/** A key changed: tooltips, key labels and the hints that name keys. */
+function shortcutsChanged() {
+  labelShortcuts();
+  $('#keys-reset').hidden = !hasCustomShortcuts();
+  syncDrawBar();
+  drawHint();
+}
+labelShortcuts();
 $<HTMLInputElement>('#set-seamless-lp').onchange = (e) => {
   settings.seamlessLowPoly = (e.target as HTMLInputElement).checked;
   setSeamlessLowPoly(settings.seamlessLowPoly);
@@ -7164,69 +7378,78 @@ function download(url: string, name: string) {
   a.click();
 }
 
+// the shortcut sheet waiting for a new key takes the press before anything else sees it
+window.addEventListener('keydown', (e) => captureShortcut(e, $('#keys-list'), shortcutsChanged), true);
 window.addEventListener('keydown', (e) => {
+  if (e.defaultPrevented && !$('#keys-pop').hidden) return;
   const tag = (e.target as HTMLElement).tagName;
   // typing in a text or number box
   if (tag === 'INPUT' && ['text', 'number', 'search'].includes((e.target as HTMLInputElement).type)) return;
   const k = e.key.toLowerCase();
-  if ((e.ctrlKey || e.metaKey) && k === 'z') {
+  if (is(e, 'undo')) {
     e.preventDefault();
-    if (e.shiftKey) redo();
-    else undo();
-  } else if ((e.ctrlKey || e.metaKey) && k === 'y') {
+    undo();
+  } else if (is(e, 'redo')) {
     e.preventDefault();
     redo();
+  } else if (k === 'escape' && !$('#keys-pop').hidden) {
+    closeShortcutSheet();
+  } else if (is(e, 'help')) {
+    toggleShortcutSheet();
   } else if (k === 'escape' && drawState) {
     exitDraw();
   } else if (k === 'enter' && drawState) {
     e.preventDefault();
     finishDraw();
-  } else if ((k === 'e' || k === 'm' || k === 't' || k === 'r') && drawState && !e.ctrlKey && !e.metaKey) {
-    setDrawTool(({ e: 'erase', m: 'move', t: 'scale', r: 'rotate' } as const)[k]);
-  } else if (k === 's' && drawState && !e.ctrlKey && !e.metaKey) {
+  } else if (drawState && (is(e, 'draw') || is(e, 'erase') || is(e, 'move') || is(e, 'scale') || is(e, 'rotate'))) {
+    setDrawTool(is(e, 'draw') ? 'draw' : is(e, 'erase') ? 'erase' : is(e, 'move') ? 'move' : is(e, 'scale') ? 'scale' : 'rotate');
+  } else if (is(e, 'mirror') && drawState) {
     toggleSymmetry();
-  } else if (k === 'v' && drawState && !e.ctrlKey && !e.metaKey) {
+  } else if (is(e, 'side') && drawState) {
     setDrawSide(!drawState.side);
-  } else if (e.code === 'Space' && drawState) {
+  } else if (e.code === 'Space' && (drawState || !(e.target as HTMLElement).closest('button, select, textarea, input, label'))) {
+    // (a focused button still clicks with Space)
     e.preventDefault();
     setSpacePan(true);
-  } else if (k === 'f' && drawState) {
+  } else if (is(e, 'frame') && drawState) {
     // back to a straight-on view of the drawing
     if (drawState.target.kind === 'bone') {
       const b = creature.bones.get(drawState.target.boneId);
       if (b) focusOnBone(b, drawState.side);
     } else if (drawState.frame !== board) focusOnPlane(drawState.frame);
     else focusOnBoard();
-  } else if (!e.ctrlKey && !e.metaKey && !e.altKey) {
-    if (k === 'd' && mode !== 'stuff' && !idle) enterDraw();
-    else if (k === 'd' && mode === 'stuff') enterDraw({ kind: 'piece' });
-    else if (k === '3') setMode('stuff');
-    else if (k === 'm' && mode !== 'stuff' && !drawState) setMirror(!rigLock);
+  } else if (is(e, 'draw') && mode === 'stuff') enterDraw({ kind: 'piece' });
+  else if (is(e, 'draw') && !idle) enterDraw();
+  else if (is(e, 'stuff')) setMode('stuff');
+  else if (is(e, 'mirror') && mode === 'stuff') {
+    if (piece()) setPieceBothSides(!piece()!.twin);
+  } else if (is(e, 'mirror')) setMirror(!rigLock);
+  else if (is(e, 'delete') && !drawState) {
     // picked stuff goes first: its part is picked too, and mustn't go with it
-    else if ((k === 'backspace' || k === 'delete') && selectedAttachment && !drawState) {
+    if (selectedAttachment) {
       e.preventDefault();
       removeAttachment();
-    }
-    else if ((k === 'backspace' || k === 'delete') && mode !== 'stuff' && !idle && !drawState && !placing) {
+    } else if (mode === 'stuff' && piece()) {
+      e.preventDefault();
+      deletePiece(piece()!.id);
+    } else if (mode !== 'stuff' && !idle && !placing) {
       e.preventDefault();
       removePart();
     }
-    else if (mode === 'stuff' && piecePivot && !drawState && (k === 'w' || k === 'e' || k === 'r')) setPieceMode(k === 'w' ? 'translate' : k === 'e' ? 'rotate' : 'scale');
-    else if (selectedAttachment && (k === 'w' || k === 'e' || k === 'r')) {
-      gizmo.setMode(k === 'w' ? 'translate' : k === 'e' ? 'rotate' : 'scale');
+  } else if (is(e, 'move') || is(e, 'rotate') || is(e, 'scale')) {
+    const m = is(e, 'move') ? 'translate' : is(e, 'rotate') ? 'rotate' : 'scale';
+    if (mode === 'stuff' && piecePivot) setPieceMode(m);
+    else if (selectedAttachment) {
+      gizmo.setMode(m);
       syncAttachBar();
-    }
-    else if (placing && (k === 'w' || k === 'e' || k === 'r')) setPlaceMode(k === 'w' ? 'translate' : k === 'e' ? 'rotate' : 'scale');
-    else if (k === '1') setMode('shape');
-    else if (k === '2') setMode('look');
-    else if (k >= '4' && k <= '9' && customTabs()[+k - 4]) setMode(customTabs()[+k - 4].id);
-    else if (k === 'f') {
-      if (mode === 'stuff') focusOnBoard();
-      else frameCreature();
-    }
-
-    else if (k === 'a' && e.shiftKey) frameAll();
-  }
+    } else if (placing) setPlaceMode(m);
+  } else if (is(e, 'shape')) setMode('shape');
+  else if (is(e, 'look')) setMode('look');
+  else if (!e.ctrlKey && !e.metaKey && !e.altKey && k >= '4' && k <= '9' && customTabs()[+k - 4]) setMode(customTabs()[+k - 4].id);
+  else if (is(e, 'frame')) {
+    if (mode === 'stuff') focusOnBoard();
+    else frameCreature();
+  } else if (is(e, 'frameAll')) frameAll();
 });
 
 // ---------------------------------------------------------------------------

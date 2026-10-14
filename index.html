@@ -43,17 +43,17 @@
       <header class="topbar">
         <div class="brand"><img class="logo" src="/icon-192.png" alt="" /> CritterKiln</div>
         <div class="modes" role="tablist">
-          <button data-mode="shape" class="active" title="Shape: draw, stretch, grow and pose your creature (1)"><i class="fa-slab-duo fa-regular fa-hand" aria-hidden="true"></i><span class="lbl"> Shape</span></button>
-          <button data-mode="look" title="Look: colors, materials and stuff to wear (2)"><i class="fa-slab-duo fa-regular fa-palette" aria-hidden="true"></i><span class="lbl"> Look</span></button>
-          <button data-mode="stuff" title="Stuff: make things to wear and carry (3)"><i class="fa-slab-duo fa-regular fa-briefcase" aria-hidden="true"></i><span class="lbl"> Stuff</span></button>
+          <button data-mode="shape" class="active" data-shortcut="shape" title="Shape: draw, stretch, grow and pose your creature (1)"><i class="fa-slab-duo fa-regular fa-hand" aria-hidden="true"></i><span class="lbl"> Shape</span></button>
+          <button data-mode="look" data-shortcut="look" title="Look: colors, materials and stuff to wear (2)"><i class="fa-slab-duo fa-regular fa-palette" aria-hidden="true"></i><span class="lbl"> Look</span></button>
+          <button data-mode="stuff" data-shortcut="stuff" title="Stuff: make things to wear and carry (3)"><i class="fa-slab-duo fa-regular fa-briefcase" aria-hidden="true"></i><span class="lbl"> Stuff</span></button>
         </div>
         <div class="spacer"></div>
         <div class="tools">
           <button id="trophy-btn" title="Trophies: little goals for exploring CritterKiln" aria-label="Trophies"><i class="fa-slab-duo fa-regular fa-trophy" aria-hidden="true"></i></button>
           <button id="library-btn" title="My creations: everything you've made"><i class="fa-slab-duo fa-regular fa-images" aria-hidden="true"></i><span class="lbl"> Creations</span></button>
           <button id="file-btn" title="Save and open files"><i class="fa-slab-duo fa-regular fa-folder" aria-hidden="true"></i><span class="lbl"> File</span></button>
-          <button id="undo" title="Undo (Ctrl+Z)"><i class="fa-slab-duo fa-regular fa-arrow-rotate-left" aria-hidden="true"></i></button>
-          <button id="redo" title="Redo (Ctrl+Shift+Z)"><i class="fa-slab-duo fa-regular fa-arrow-rotate-right" aria-hidden="true"></i></button>
+          <button id="undo" data-shortcut="undo" title="Undo (Ctrl+Z)"><i class="fa-slab-duo fa-regular fa-arrow-rotate-left" aria-hidden="true"></i></button>
+          <button id="redo" data-shortcut="redo" title="Redo (Ctrl+Shift+Z)"><i class="fa-slab-duo fa-regular fa-arrow-rotate-right" aria-hidden="true"></i></button>
           <button id="spin" title="Turntable"><i class="fa-slab-duo fa-regular fa-arrows-rotate" aria-hidden="true"></i><span class="lbl"> Spin</span></button>
           <button id="new" title="New creation (the one you're on stays in My creations)"><i class="fa-slab-duo fa-regular fa-wand-magic-sparkles" aria-hidden="true"></i><span class="lbl"> New</span></button>
           <button id="settings-btn" title="Settings"><i class="fa-slab-duo fa-regular fa-gear" aria-hidden="true"></i></button>
@@ -114,7 +114,7 @@
             <p class="muted small" id="rig-pair-note"></p>
           </div>
           <div class="ck-tool" data-tool="draw">
-            <button id="draw" class="primary"><i class="fa-slab-duo fa-regular fa-pencil" aria-hidden="true"></i> Draw shape <kbd>D</kbd></button>
+            <button id="draw" class="primary" data-shortcut="draw"><i class="fa-slab-duo fa-regular fa-pencil" aria-hidden="true"></i> Draw shape <kbd>D</kbd></button>
             <p class="muted small">Or <span class="mouse-only">double-click</span><span class="touch-only">double-tap</span> a part. Draw a closed outline; it puffs up like a balloon.</p>
           </div>
           <div class="ck-tool" data-tool="thickness">
@@ -132,7 +132,7 @@
           <div class="ck-tool" data-tool="split"><button id="rig-split" class="ghost" title="Split this part in the middle into two jointed halves"><i class="fa-slab-duo fa-regular fa-scissors" aria-hidden="true"></i> Split</button></div>
           <div class="ck-tool" data-tool="detach"><button id="rig-detach" class="ghost"></button></div>
           <div class="ck-tool" data-tool="dup"><button id="rig-dup" class="ghost" title="Copy this limb and everything attached to it"><i class="fa-slab-duo fa-regular fa-copy" aria-hidden="true"></i> Copy</button></div>
-          <div class="ck-tool" data-tool="del"><button id="rig-del" class="ghost" title="Remove this part and everything attached to it (Backspace)"><i class="fa-slab-duo fa-regular fa-trash" aria-hidden="true"></i> Delete</button></div>
+          <div class="ck-tool" data-tool="del"><button id="rig-del" class="ghost" data-shortcut="delete" title="Remove this part and everything attached to it (Backspace)"><i class="fa-slab-duo fa-regular fa-trash" aria-hidden="true"></i> Delete</button></div>
           <div class="ck-tool" data-tool="stand"><button id="reset-pose" class="ghost" title="Straighten every joint back out"><i class="fa-duotone fa-regular fa-person" aria-hidden="true"></i> Stand up straight</button></div>
           <div class="ck-tool" data-tool="floor"><button id="drop-floor" class="ghost" title="Move the whole creature so its lowest point touches the floor"><i class="fa-slab-duo fa-regular fa-arrow-down-to-line" aria-hidden="true"></i> Floor</button></div>
           <div class="ck-tool" data-tool="keep-floor"><label class="check" title="After you bend or resize something, the creature settles back onto the floor (if it was standing on it)"><input id="keep-floor" type="checkbox" checked /> Keep feet on the floor</label></div>
@@ -174,7 +174,7 @@
             </label>
           </div>
           <div class="ck-tool" data-tool="mirror">
-            <label id="mirror-pill" class="pill-toggle" title="Both sides change together: shaping and posing (M)">
+            <label id="mirror-pill" class="pill-toggle" data-shortcut="mirror" title="Both sides change together: shaping and posing (M)">
               <input id="rig-sym" type="checkbox" checked /> <i class="fa-slab-duo fa-regular fa-arrow-right-arrow-left" aria-hidden="true"></i> Mirror <kbd>M</kbd>
             </label>
             <button id="rig-mirror" class="pill-toggle" hidden></button>
@@ -309,8 +309,8 @@
           <button data-view="right" title="View from the right">Right</button>
           <button data-view="top" title="View from above">Top</button>
           <button data-view="quarter" title="Three-quarter view">¾</button>
-          <button data-view="selection" title="Frame the creature you're editing (F)" hidden>Selection</button>
-          <button data-view="all" title="Frame everyone (Shift+A)">All</button>
+          <button data-view="selection" data-shortcut="frame" title="Frame the creature you're editing (F)" hidden>Selection</button>
+          <button data-view="all" data-shortcut="frameAll" title="Frame everyone (Shift+A)">All</button>
           <span id="view-proj" class="view-proj">
             <button data-proj="persp" title="Perspective: things further away look smaller" aria-label="Perspective"><i class="fa-regular fa-cube" aria-hidden="true"></i></button>
             <button data-proj="ortho" title="Ortho: flat, no perspective, sizes stay true" aria-label="Ortho"><i class="fa-regular fa-square" aria-hidden="true"></i></button>
@@ -326,7 +326,7 @@
 
           <h3 class="editing-head">Editing <span id="thing-saved" class="saved-badge"></span></h3>
           <input id="thing-name" class="text wide" type="text" placeholder="Name this thing" maxlength="40" />
-          <button id="piece-draw" class="primary"><i class="fa-slab-duo fa-regular fa-pencil" aria-hidden="true"></i> Draw a piece <kbd>D</kbd></button>
+          <button id="piece-draw" class="primary" data-shortcut="draw"><i class="fa-slab-duo fa-regular fa-pencil" aria-hidden="true"></i> Draw a piece <kbd>D</kbd></button>
           <p class="muted small">Draw on the board; the blue crosshair is where it attaches to a body part. <span class="mouse-only">Right-drag or hold <kbd>Space</kbd> to pan.</span><span class="touch-only">Two fingers move the view.</span></p>
           <div id="pieces" class="parts"></div>
           <div class="card thing-bend" id="thing-bend-card">
@@ -417,9 +417,9 @@
         <div id="settle-badge" class="settle-badge" hidden>Smoothing joins…</div>
         <div id="place-bar" class="draw-bar attach-bar" hidden>
           <span id="place-name" class="attach-name"></span>
-          <button data-place="translate" class="seg-btn" title="Move anywhere: along the floor or up into the air (W)"><i class="fa-duotone fa-regular fa-arrows-up-down-left-right" aria-hidden="true"></i> Move</button>
-          <button data-place="rotate" class="seg-btn" title="Turn any way, even tip over (E)"><i class="fa-duotone fa-regular fa-rotate" aria-hidden="true"></i> Rotate</button>
-          <button data-place="scale" class="seg-btn" title="Make the whole creature bigger or smaller (R)"><i class="fa-slab-duo fa-regular fa-expand" aria-hidden="true"></i> Scale</button>
+          <button data-place="translate" class="seg-btn" data-shortcut="move" title="Move anywhere: along the floor or up into the air (W)"><i class="fa-duotone fa-regular fa-arrows-up-down-left-right" aria-hidden="true"></i> Move</button>
+          <button data-place="rotate" class="seg-btn" data-shortcut="rotate" title="Turn any way, even tip over (E)"><i class="fa-duotone fa-regular fa-rotate" aria-hidden="true"></i> Rotate</button>
+          <button data-place="scale" class="seg-btn" data-shortcut="scale" title="Make the whole creature bigger or smaller (R)"><i class="fa-slab-duo fa-regular fa-expand" aria-hidden="true"></i> Scale</button>
           <button id="place-floor" class="seg-btn" title="Lower (or raise) it so it rests on the floor"><i class="fa-slab-duo fa-regular fa-arrow-down-to-line" aria-hidden="true"></i> Floor</button>
           <button id="place-reset" class="seg-btn" title="Stand it upright on the floor at its normal size"><i class="fa-duotone fa-regular fa-rotate-left" aria-hidden="true"></i> Reset</button>
           <button id="place-done">Done</button>
@@ -427,20 +427,23 @@
 
         <div id="piece-bar" class="draw-bar attach-bar" hidden>
           <span id="piece-name" class="attach-name"></span>
-          <button data-piece="translate" class="seg-btn" title="Slide this piece anywhere on the board (W)"><i class="fa-duotone fa-regular fa-arrows-up-down-left-right" aria-hidden="true"></i> Move</button>
-          <button data-piece="rotate" class="seg-btn" title="Turn this piece (E)"><i class="fa-duotone fa-regular fa-rotate" aria-hidden="true"></i> Rotate</button>
-          <button data-piece="scale" class="seg-btn" title="Make this piece bigger, smaller, wider or taller (R)"><i class="fa-slab-duo fa-regular fa-expand" aria-hidden="true"></i> Scale</button>
+          <button data-piece="translate" class="seg-btn" data-shortcut="move" title="Slide this piece anywhere on the board (W)"><i class="fa-duotone fa-regular fa-arrows-up-down-left-right" aria-hidden="true"></i> Move</button>
+          <button data-piece="rotate" class="seg-btn" data-shortcut="rotate" title="Turn this piece (E)"><i class="fa-duotone fa-regular fa-rotate" aria-hidden="true"></i> Rotate</button>
+          <button data-piece="scale" class="seg-btn" data-shortcut="scale" title="Make this piece bigger, smaller, wider or taller (R)"><i class="fa-slab-duo fa-regular fa-expand" aria-hidden="true"></i> Scale</button>
           <span class="dim-toggle">
             <button data-dim="2d" class="seg-btn" title="Keep the piece flat on the board">2D</button>
             <button data-dim="3d" class="seg-btn" title="Lift the piece off the board and tilt it any way">3D</button>
           </span>
+          <label id="piece-mirror-label" class="pill-toggle" data-shortcut="mirror" title="Both sides: a mirror image of this piece on the other side, that moves, turns and changes with it">
+            <input id="piece-mirror" type="checkbox" /> <i class="fa-slab-duo fa-regular fa-arrow-right-arrow-left" aria-hidden="true"></i> Both sides
+          </label>
           <button id="piece-flat" class="seg-btn" title="Put this piece back down flat on the board" hidden><i class="fa-slab-duo fa-regular fa-arrow-down-to-line" aria-hidden="true"></i> Lay flat</button>
         </div>
         <div id="attach-bar" class="draw-bar attach-bar" hidden>
           <span id="attach-name" class="attach-name"></span>
-          <button data-gizmo="translate" class="seg-btn" title="Move (W)"><i class="fa-duotone fa-regular fa-arrows-up-down-left-right" aria-hidden="true"></i> Move</button>
-          <button data-gizmo="rotate" class="seg-btn" title="Rotate (E)"><i class="fa-duotone fa-regular fa-rotate" aria-hidden="true"></i> Rotate</button>
-          <button data-gizmo="scale" class="seg-btn" title="Scale (R)"><i class="fa-slab-duo fa-regular fa-expand" aria-hidden="true"></i> Scale</button>
+          <button data-gizmo="translate" class="seg-btn" data-shortcut="move" title="Move (W)"><i class="fa-duotone fa-regular fa-arrows-up-down-left-right" aria-hidden="true"></i> Move</button>
+          <button data-gizmo="rotate" class="seg-btn" data-shortcut="rotate" title="Rotate (E)"><i class="fa-duotone fa-regular fa-rotate" aria-hidden="true"></i> Rotate</button>
+          <button data-gizmo="scale" class="seg-btn" data-shortcut="scale" title="Scale (R)"><i class="fa-slab-duo fa-regular fa-expand" aria-hidden="true"></i> Scale</button>
           <label id="attach-mirror-label" class="pill-toggle" title="Show a mirrored copy on the other side">
             <input id="attach-mirror" type="checkbox" /> <i class="fa-slab-duo fa-regular fa-arrow-right-arrow-left" aria-hidden="true"></i> Both sides
           </label>
@@ -483,6 +486,7 @@
           <div class="pop-title">My creations <button id="library-close" class="pop-close" title="Close" aria-label="Close"><i class="fa-duotone fa-regular fa-xmark" aria-hidden="true"></i></button></div>
           <div id="creation-grid" class="creation-grid"></div>
           <div class="library-foot">
+            <p id="library-unsaved" class="library-unsaved small" hidden></p>
             <p class="muted small">Everything you make is kept in this browser as you go. Back it up now and then: clearing your browser's site data would erase it.</p>
             <div class="library-actions">
               <button id="library-backup" class="ghost" title="All your creations in one file"><i class="fa-duotone fa-regular fa-download" aria-hidden="true"></i> Back up all</button>
@@ -539,25 +543,32 @@
             <button data-quality="fast">Fast</button>
           </div>
           <p class="muted small">If dragging and posing feel slow or jumpy, try Fast.</p>
+          <button id="set-keys" class="ghost wide" title="See every keyboard shortcut, and change them" data-shortcut="help"><i class="fa-slab-duo fa-regular fa-sliders" aria-hidden="true"></i> Keyboard shortcuts</button>
+        </div>
+        <div id="keys-pop" class="popover keys-pop" hidden>
+          <div class="pop-title"><span>Keyboard shortcuts</span> <button id="keys-close" class="pop-close" title="Close" aria-label="Close"><i class="fa-duotone fa-regular fa-xmark" aria-hidden="true"></i></button></div>
+          <p class="muted small">Click a key to change it, then press the one you want.</p>
+          <div id="keys-list" class="keys-list"></div>
+          <div class="keys-actions"><button id="keys-reset" class="ghost" title="Every shortcut back to its first key"><i class="fa-duotone fa-regular fa-rotate-left" aria-hidden="true"></i> Reset keys</button></div>
         </div>
 
         <div id="draw-bar" class="draw-bar" hidden>
-          <span class="bar-group" id="draw-view" title="Which way you draw the part: its front, or its side profile (V)">
+          <span class="bar-group" id="draw-view" data-shortcut="side" title="Which way you draw the part: its front, or its side profile (V)">
             <button data-view="front" class="seg-btn" title="Draw the part as seen from the front"><i class="fa-duotone fa-regular fa-user" aria-hidden="true"></i> Front</button>
             <button data-view="side" class="seg-btn" title="Draw the part's side profile; it puffs out to both sides (V)"><i class="fa-duotone fa-regular fa-person-walking" aria-hidden="true"></i> Side <kbd>V</kbd></button>
           </span>
-          <label id="sym-label" class="pill-toggle" title="Mirror across the part's centre line (S)">
-            <input id="sym" type="checkbox" /> <i class="fa-slab-duo fa-regular fa-arrow-right-arrow-left" aria-hidden="true"></i> Symmetry <kbd>S</kbd>
+          <label id="sym-label" class="pill-toggle" data-shortcut="mirror" title="Mirror across the part's centre line (M)">
+            <input id="sym" type="checkbox" /> <i class="fa-slab-duo fa-regular fa-arrow-right-arrow-left" aria-hidden="true"></i> Symmetry <kbd>M</kbd>
           </label>
           <label class="bar-slider" title="Steadies the pen while drawing and smooths the finished outline">
             Smoothing <input id="smooth" type="range" min="0" max="1" step="0.05" />
           </label>
           <span class="bar-group" id="draw-tools">
-            <button data-tool="draw" class="seg-btn" title="Draw: each stroke adds to the shape"><i class="fa-slab-duo fa-regular fa-pencil" aria-hidden="true"></i> Draw</button>
-            <button data-tool="erase" class="seg-btn" title="Erase: each stroke cuts away from the shape (E)"><i class="fa-duotone fa-regular fa-eraser" aria-hidden="true"></i> Erase <kbd>E</kbd></button>
-            <button data-tool="move" class="seg-btn" title="Move: drag the shape to put it somewhere else (M)"><i class="fa-duotone fa-regular fa-arrows-up-down-left-right" aria-hidden="true"></i> Move <kbd>M</kbd></button>
-            <button data-tool="scale" class="seg-btn" title="Scale: drag away from the middle to grow it, towards it to shrink it; Shift keeps its proportions (T)"><i class="fa-slab-duo fa-regular fa-expand" aria-hidden="true"></i> Scale <kbd>T</kbd></button>
-            <button data-tool="rotate" class="seg-btn" title="Rotate: drag around the middle to turn the shape (R)"><i class="fa-duotone fa-regular fa-rotate" aria-hidden="true"></i> Rotate <kbd>R</kbd></button>
+            <button data-tool="draw" class="seg-btn" data-shortcut="draw" title="Draw: each stroke adds to the shape (D)"><i class="fa-slab-duo fa-regular fa-pencil" aria-hidden="true"></i> Draw <kbd>D</kbd></button>
+            <button data-tool="erase" class="seg-btn" data-shortcut="erase" title="Erase: each stroke cuts away from the shape (E)"><i class="fa-duotone fa-regular fa-eraser" aria-hidden="true"></i> Erase <kbd>E</kbd></button>
+            <button data-tool="move" class="seg-btn" data-shortcut="move" title="Move: drag the shape to put it somewhere else (M)"><i class="fa-duotone fa-regular fa-arrows-up-down-left-right" aria-hidden="true"></i> Move <kbd>M</kbd></button>
+            <button data-tool="scale" class="seg-btn" data-shortcut="scale" title="Scale: drag away from the middle to grow it, towards it to shrink it; Shift keeps its proportions (T)"><i class="fa-slab-duo fa-regular fa-expand" aria-hidden="true"></i> Scale <kbd>T</kbd></button>
+            <button data-tool="rotate" class="seg-btn" data-shortcut="rotate" title="Rotate: drag around the middle to turn the shape (R)"><i class="fa-duotone fa-regular fa-rotate" aria-hidden="true"></i> Rotate <kbd>R</kbd></button>
           </span>
           <span class="bar-group" title="Pick a basic shape, then click in the drawing to put it down (drag to size it)">
             <button data-shape="square" class="seg-btn" title="Square"><i class="fa-slab-duo fa-regular fa-square" aria-hidden="true"></i></button>

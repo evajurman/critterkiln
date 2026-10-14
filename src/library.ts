@@ -12,8 +12,13 @@ export interface Creation<T = unknown> {
   updated: number;
   /** small preview image (data URL) */
   thumb?: string;
+  /** when it last went into a file, and which kind; it's safe outside the browser if that's no older than `updated` */
+  saved?: { at: number; how: SavedHow };
   data: T;
 }
+
+/** backup = Back up all; file = saved on its own (File › Save, or its card's download) */
+export type SavedHow = 'backup' | 'file';
 
 const DB_NAME = 'critterkiln';
 const STORE = 'creations';
@@ -54,6 +59,14 @@ export function getCreation<T>(id: string): Promise<Creation<T> | undefined> {
 
 export async function putCreation<T>(c: Creation<T>): Promise<void> {
   await run('readwrite', (s) => s.put(c));
+}
+
+/** These creations just went into a file. Nothing else about them changes. */
+export async function markSaved(ids: string[], how: SavedHow, at = Date.now()): Promise<void> {
+  for (const id of ids) {
+    const c = await getCreation(id);
+    if (c) await putCreation({ ...c, saved: { at, how } });
+  }
 }
 
 export async function deleteCreation(id: string): Promise<void> {

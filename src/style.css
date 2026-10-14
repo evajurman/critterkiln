@@ -673,6 +673,11 @@ details.fine[open] > summary { margin-bottom: 6px; }
 .creation-meta { display: flex; flex-direction: column; min-width: 0; padding: 0 2px; }
 .creation-name { font-weight: var(--w-heavy); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .creation-when { font-size: 11px; }
+.creation-saved { font-size: 11px; font-weight: var(--w-bold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.creation-saved.ok { color: var(--ok-ink); }
+.creation-saved.warn { color: var(--warn-ink); }
+.library-unsaved { margin: 8px 0 0; font-weight: var(--w-bold); color: var(--warn-ink); }
+.library-unsaved[hidden] { display: none; }
 .creation-rename { width: 100%; font-size: 13px; padding: 2px 6px; }
 .creation-actions { display: flex; justify-content: space-between; }
 /* five of them share the card, however narrow */
@@ -723,6 +728,33 @@ details.fine[open] > summary { margin-bottom: 6px; }
 .trophy-text .small { margin: 1px 0 0; }
 .trophy-bar { display: block; height: 5px; border-radius: 999px; background: var(--bg); margin-top: 6px; overflow: hidden; }
 .trophy-bar span { display: block; height: 100%; background: var(--accent); border-radius: inherit; }
+
+/* ---- keyboard shortcuts ---- */
+.popover.keys-pop {
+  left: 50%; right: auto; top: 50%; transform: translate(-50%, -50%); width: min(520px, calc(100% - 32px));
+  max-height: calc(100% - 40px); display: flex; flex-direction: column; z-index: 20; overflow: hidden;
+}
+.popover.keys-pop[hidden] { display: none; }
+.keys-pop > p { margin: 0 0 6px; }
+.keys-list { overflow-y: auto; min-height: 0; padding-bottom: 2px; }
+.keys-group .pop-sub { margin-top: 10px; }
+.keys-group:first-child .pop-sub, .keys-note + .keys-group .pop-sub { margin-top: 2px; }
+.keys-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 0; border-bottom: 1px solid var(--line); }
+.keys-row:last-child { border-bottom: 0; }
+.keys-text { display: flex; flex-direction: column; min-width: 0; font-size: 14px; }
+.keys-btn {
+  flex: none; display: flex; gap: 4px; align-items: center; min-width: 64px; justify-content: center;
+  padding: 3px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); font: inherit;
+}
+button.keys-btn { cursor: var(--cursor-click); }
+button.keys-btn:hover { border-color: var(--accent); }
+button.keys-btn.on { border-color: var(--accent); background: var(--accent-soft); }
+.keys-row.fixed .keys-btn { border-color: transparent; background: none; }
+.keys-btn kbd { font: inherit; font-size: 12px; font-weight: var(--w-bold); background: var(--bg); border-radius: 5px; padding: 1px 6px; }
+.keys-note { margin: 0 0 6px; padding: 6px 8px; border-radius: 8px; background: var(--accent-soft); }
+.keys-actions { display: flex; justify-content: flex-end; margin-top: 10px; }
+.keys-actions button[hidden] { display: none; }
+.piece-twin { color: var(--muted); font-size: 11px; margin-left: 2px; }
 
 /* the "trophy unlocked" toast: above everything, flying in from the left */
 .toasts {
@@ -853,6 +885,7 @@ button.piece-icon { padding: 0; border: 0; background: transparent; }
 
   /* keyboard shortcut labels are noise on a phone */
   button kbd, .pill-toggle kbd { display: none !important; }
+  .keys-pop .keys-btn kbd { display: inline-block !important; }
 
   /* floating bars: one scrollable row across the top of the viewport */
   .draw-bar {
@@ -926,13 +959,13 @@ body.carrying, body.carrying * { cursor: var(--cursor-grabbing) !important; }
 .eyes-card { transform-origin: top left; }
 .attach-pop { transform-origin: top center; }
 /* (their translate(-50%, -50%) centring runs before scale, which puts their middle at the box's corner) */
-.popover:is(.library-pop, .trophy-pop, .load-pop) { transform-origin: 0 0; }
+.popover:is(.library-pop, .trophy-pop, .load-pop, .keys-pop) { transform-origin: 0 0; }
 /* the floating bars (drawing, Arrange, attaching) drop in from their top middle; same translate(-50%) story */
 .draw-bar { transform-origin: 0 0; }
-@media (max-width: 760px) { .popover:is(.library-pop, .trophy-pop, .load-pop), .draw-bar { transform-origin: top center; } }
-.popover:is(.library-pop, .trophy-pop, .load-pop)[hidden] { translate: none; }
+@media (max-width: 760px) { .popover:is(.library-pop, .trophy-pop, .load-pop, .keys-pop), .draw-bar { transform-origin: top center; } }
+.popover:is(.library-pop, .trophy-pop, .load-pop, .keys-pop)[hidden] { translate: none; }
 @starting-style {
-  .popover:is(.library-pop, .trophy-pop, .load-pop):not([hidden]) { translate: none; }
+  .popover:is(.library-pop, .trophy-pop, .load-pop, .keys-pop):not([hidden]) { translate: none; }
 }
 /* the eye settings slide open and shut under their title */
 .eyes-body {

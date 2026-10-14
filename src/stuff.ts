@@ -61,6 +61,11 @@ export interface Piece {
    * off the board. Absent = flat on the board like it was drawn.
    */
   place?: PiecePlace;
+  /**
+   * Both sides: the id of this piece's mirror image across the centre line.
+   * The two are kept mirror images of each other (and both have it set).
+   */
+  twin?: string;
 }
 
 export interface PiecePlace {
@@ -116,6 +121,19 @@ export function newPiece(outline: Vec2[], like?: Piece): Piece {
     style: like?.style ?? 'plastic',
     z: like?.z ?? 0,
   };
+}
+
+/** A piece's outline, holes and 3D place mirrored across the thing's centre line (x = 0). */
+export function mirrorShape(p: Piece): Pick<Piece, 'outline' | 'holes' | 'place'> {
+  const flip = (l: Vec2[]) => l.map(([x, y]) => [-x, y] as Vec2).reverse();
+  const out: Pick<Piece, 'outline' | 'holes' | 'place'> = { outline: flip(p.outline), holes: p.holes.map(flip) };
+  if (p.place) {
+    // mirroring a turn across the YZ plane flips its y and z parts
+    const [x, y, z] = p.place.position;
+    const [qx, qy, qz, qw] = p.place.quaternion;
+    out.place = { position: [-x, y, z], quaternion: [qx, -qy, -qz, qw] };
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
