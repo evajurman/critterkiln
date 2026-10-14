@@ -186,6 +186,12 @@ export interface CreatureState {
   colorBlend?: number;
   /** rebuild merged groups as one seamless skin when left idle (default on; see setSeamlessMode) */
   seamless?: boolean;
+  /**
+   * Blend only parts joined to each other (a part and the one it grows from),
+   * so a tail curled up to the head, or arms reaching across the body, stay
+   * separate. Default on.
+   */
+  blendConnected?: boolean;
   /** per-material slider values (missing keys use the defaults) */
   materialSettings?: Partial<Record<StyleId, StyleSettings>>;
   attachments?: Attachment[];
@@ -220,6 +226,8 @@ interface SkinEntry {
   lowPoly: boolean;
   /** colors were baked into the geometry */
   painted: boolean;
+  /** an open skin over part of a group, meeting another skin where it blends in (see peelsFor) */
+  peeled?: boolean;
   /** colors the paint was made with */
   colorKey: string;
   /** the look it was last dressed in (see dressSkin) */
@@ -282,6 +290,10 @@ export function setSeamlessMode(m: SeamlessMode) {
 let seamlessLowPoly = false;
 export function setSeamlessLowPoly(on: boolean) {
   seamlessLowPoly = on;
+}
+/** Whether two parts may blend into each other: always, or (by default) only where one grows from the other. */
+function blendable(s: CreatureState, a: BoneRT, b: BoneRT): boolean {
+  return !(s.blendConnected ?? true) || a === b || a.parent === b || b.parent === a;
 }
 function seamlessOn(s: CreatureState): boolean {
   return seamlessMode === 'creature' ? (s.seamless ?? true) : seamlessMode === 'on';
@@ -1299,7 +1311,7 @@ export class Creature {
         continue;
       }
       const base = b.mesh!.userData.baseGeo as THREE.BufferGeometry;
-      const nbrs = on && members.length > 1 ? members.filter((o) => o !== b && !o.mesh!.userData.liveGeo && this.near(b, o, Math.max(k, kc))) : [];
+      const nbrs = on && members.length > 1 ? members.filter((o) => o !== b && !o.mesh!.userData.liveGeo && blendable(s, b, o) && this.near(b, o, Math.max(k, kc))) : [];
       if (nbrs.length === 0) {
         this.setMeshGeometry(b, base, false);
         continue;
@@ -1424,7 +1436,7 @@ export class Creature {
     const built: SkinEntry[] = [];
     for (const [, members] of groups) {
       // only parts that actually touch another part in the group
-      const joined = members.filter((b) => members.some((o) => o !== b && this.near(b, o, kMax)));
+      const joined = members.filter((b) => members.some((o) => o !== b && blendable(s, b, o) && this.near(b, o, kMax)));
       if (joined.length < 2) continue;
       const part = s.parts[joined[0].src];
       const style = part.style ?? s.style;
@@ -1438,47 +1450,67 @@ export class Creature {
       // a coarser grid with less mesh detail (Settings > Performance)
       const h = Math.min(0.02, Math.max(0.006, minR / 2.5)) / Math.sqrt(getMeshDetail());
 
-      // a part drawn as several shapes joins in as each of them
-      const owners: BoneRT[] = [];
-      const parts: SkinPart[] = joined.flatMap((b) => {
-        const geos = (b.mesh!.userData.skinGeos as (() => THREE.BufferGeometry[]) | undefined)?.() ?? [b.mesh!.userData.baseGeo as THREE.BufferGeometry];
-        owners.push(...geos.map(() => b));
-        return geos.map((geo) => ({
-          geo,
-          toSkin: toGroup.clone().multiply(b.mesh!.matrixWorld),
-          // textured materials lay their textures out in the rest pose
-          toRest: textured ? b.restGroup.clone().multiply(b.mesh!.matrix) : undefined,
-          color: this.shownColor(b),
-          glow: s.parts[b.src].glow ?? 0,
-          k: Math.max(0.005, Math.min(kMax, 0.6 * radius(b))),
-          facet: geo.userData.facet as number | undefined,
-        }));
-      });
       // clay lumps go back on after the skin is built
       const lumps = style === 'clay' || style === 'stone' ? ((style === 'clay' ? k.lumps : k.rugged) ?? 0) * Math.min(0.012, Math.max(0.004, minR * 0.08)) : 0;
-      const geo = await buildSkin(parts, { h, colorBlend: kc, lowPoly, lumps, shouldStop: () => version !== this.skinVersion });
-      if (version !== this.skinVersion) {
-        // something changed meanwhile: it'll be retried once things settle again
-        geo?.dispose();
-        for (const bm of built) bm.mesh.geometry.dispose();
-        return false;
+      const onlyConnected = s.blendConnected ?? true;
+
+      // Parts that don't blend but press together closer than the grid can
+      // keep apart would fuse anyway: the one reaching in is peeled off into a
+      // skin of its own (built with the part it grows from, for that blend).
+      const peels = onlyConnected ? this.peelsFor(joined, h) : [];
+      const peeled = new Set(peels.flat());
+      const rest = joined.filter((b) => !peeled.has(b));
+      const sets: { members: BoneRT[]; base?: BoneRT }[] = [
+        { members: rest.filter((b) => rest.some((o) => o !== b && blendable(s, b, o) && this.near(b, o, kMax))) },
+        ...peels.map((sub) => ({ members: sub, base: sub[0].parent && joined.includes(sub[0].parent) ? sub[0].parent : undefined })),
+      ];
+
+      for (const { members, base } of sets) {
+        const all = base ? [base, ...members] : members;
+        if (all.length < 2) continue;
+        // a part drawn as several shapes joins in as each of them
+        const owners: BoneRT[] = [];
+        const parts: SkinPart[] = all.flatMap((b) => {
+          const geos = (b.mesh!.userData.skinGeos as (() => THREE.BufferGeometry[]) | undefined)?.() ?? [b.mesh!.userData.baseGeo as THREE.BufferGeometry];
+          owners.push(...geos.map(() => b));
+          return geos.map((geo) => ({
+            geo,
+            toSkin: toGroup.clone().multiply(b.mesh!.matrixWorld),
+            // textured materials lay their textures out in the rest pose
+            toRest: textured ? b.restGroup.clone().multiply(b.mesh!.matrix) : undefined,
+            color: this.shownColor(b),
+            glow: s.parts[b.src].glow ?? 0,
+            k: Math.max(0.005, Math.min(kMax, 0.6 * radius(b))),
+            facet: geo.userData.facet as number | undefined,
+          }));
+        });
+        const linked = onlyConnected ? (a: number, b: number) => blendable(s, owners[a], owners[b]) : undefined;
+        const keep = base ? owners.map((o) => o !== base) : undefined;
+        const geo = await buildSkin(parts, { h, colorBlend: kc, lowPoly, lumps, linked, keep, shouldStop: () => version !== this.skinVersion });
+        if (version !== this.skinVersion) {
+          // something changed meanwhile: it'll be retried once things settle again
+          geo?.dispose();
+          for (const bm of built) bm.mesh.geometry.dispose();
+          return false;
+        }
+        // this group couldn't be skinned: its parts just stay fast-merged (never retry
+        // in a loop; the skin is only attempted again after the next change)
+        if (!geo) continue;
+        const mesh = new THREE.Mesh(geo);
+        mesh.receiveShadow = true;
+        mesh.raycast = () => {}; // picking still goes to the (hidden) parts
+        mesh.userData.skin = true;
+        built.push({
+          mesh,
+          members,
+          owners,
+          parts,
+          lowPoly,
+          peeled: !!base,
+          painted: !!geo.userData.painted,
+          colorKey: JSON.stringify([parts.map((p) => [p.color.getHex(), p.glow]), kc]),
+        });
       }
-      // this group couldn't be skinned: its parts just stay fast-merged (never retry
-      // in a loop; the skin is only attempted again after the next change)
-      if (!geo) continue;
-      const mesh = new THREE.Mesh(geo);
-      mesh.receiveShadow = true;
-      mesh.raycast = () => {}; // picking still goes to the (hidden) parts
-      mesh.userData.skin = true;
-      built.push({
-        mesh,
-        members: joined,
-        owners,
-        parts,
-        lowPoly,
-        painted: !!geo.userData.painted,
-        colorKey: JSON.stringify([parts.map((p) => [p.color.getHex(), p.glow]), kc]),
-      });
     }
     if (version !== this.skinVersion) return false;
 
@@ -1507,6 +1539,7 @@ export class Creature {
       seamlessLowPoly,
       s.mergeRadius,
       blend,
+      s.blendConnected ?? true,
       s.rig,
       this.group.position.toArray().map(r4),
       this.list.map((b) => b.pivot.quaternion.toArray().map(r4)),
@@ -1563,6 +1596,12 @@ export class Creature {
     if (geo.getAttribute('color')) {
       mat.vertexColors = true;
       if (sk.painted) mat.color.setRGB(1, 1, 1);
+    }
+    if (sk.peeled) {
+      // where it flattens onto the skin underneath, it wins rather than flickering
+      mat.polygonOffset = true;
+      mat.polygonOffsetFactor = -1;
+      mat.polygonOffsetUnits = -1;
     }
     mesh.material = mat;
     mesh.castShadow = mesh.receiveShadow = castsShadow(style);
@@ -1647,9 +1686,86 @@ export class Creature {
     const queue = [start];
     while (queue.length) {
       const a = queue.pop()!;
-      for (const b of same) if (!seen.has(b) && this.near(a, b, k)) (seen.add(b), queue.push(b));
+      for (const b of same) if (!seen.has(b) && blendable(s, a, b) && this.near(a, b, k)) (seen.add(b), queue.push(b));
     }
     return [...new Set([...seen].map((b) => b.src))];
+  }
+
+  /**
+   * Grade every pair of parts in a skin group that don't blend by how close
+   * they come. Apart, or a near miss the grid can still show as a gap: one
+   * skin keeps them separate. A tight contact (closer than a couple of grid
+   * cells, or pressed into each other) would fuse on the grid, so the part
+   * reaching in, the one whose base or tip is nearer the contact, is peeled
+   * off. Returns each peeled part followed by the parts growing from it.
+   */
+  private peelsFor(joined: BoneRT[], h: number): BoneRT[][] {
+    const s = this.state;
+    const gap = 2 * h;
+    const picked = new Set<BoneRT>();
+    for (let i = 0; i < joined.length; i++) {
+      for (let j = i + 1; j < joined.length; j++) {
+        const a = joined[i], b = joined[j];
+        if (blendable(s, a, b) || !this.near(a, b, gap)) continue;
+        const at = this.contact(a, b, gap);
+        if (!at) continue;
+        const pick = this.reachingIn(a, b, at);
+        if (pick) picked.add(pick);
+      }
+    }
+    const grows = (b: BoneRT, from: BoneRT) => {
+      for (let p = b.parent; p; p = p.parent) if (p === from) return true;
+      return false;
+    };
+    // a part growing from one already peeled goes with it
+    const tops = [...picked].filter((r) => ![...picked].some((o) => o !== r && grows(r, o)));
+    return tops.map((r) => [r, ...joined.filter((b) => grows(b, r))]);
+  }
+
+  /** Where two parts come within `gap` of each other (the middle of it, in world space), or null. */
+  private contact(a: BoneRT, b: BoneRT, gap: number): THREE.Vector3 | null {
+    const sum = new THREE.Vector3();
+    let count = 0;
+    const toGroup = this.group.matrixWorld.clone().invert();
+    const v = new THREE.Vector3(), g = new THREE.Vector3(), sc = new THREE.Vector3();
+    const from = (x: BoneRT, y: BoneRT) => {
+      const gx = x.mesh!.userData.baseGeo as THREE.BufferGeometry;
+      const gy = y.mesh!.userData.baseGeo as THREE.BufferGeometry;
+      const toY = y.mesh!.matrixWorld.clone().invert().multiply(x.mesh!.matrixWorld);
+      // the gap in y's own units
+      sc.setFromMatrixScale(toGroup.clone().multiply(y.mesh!.matrixWorld));
+      const reach = gap / ((sc.x + sc.y + sc.z) / 3);
+      const bvh = bvhFor(gy), normals = sharedNormals(gy);
+      const P = gx.getAttribute('position');
+      const step = Math.max(1, Math.floor(P.count / 4000));
+      for (let i = 0; i < P.count; i += step) {
+        v.fromBufferAttribute(P, i).applyMatrix4(toY);
+        if (exactDistance(gy, bvh, normals, v, reach, g) < reach) {
+          sum.add(v.applyMatrix4(y.mesh!.matrixWorld));
+          count++;
+        }
+      }
+    };
+    from(a, b);
+    from(b, a);
+    return count ? sum.divideScalar(count) : null;
+  }
+
+  /**
+   * Of two parts in contact at `at`, the one reaching into the other: whose
+   * base or tip is nearer the contact, for its length (a hand gripping a
+   * leg, not the leg it grips). The first part of a creature never is.
+   */
+  private reachingIn(a: BoneRT, b: BoneRT, at: THREE.Vector3): BoneRT | null {
+    const grade = (x: BoneRT) => {
+      if (!x.parent) return Infinity;
+      const base = x.pivot.getWorldPosition(new THREE.Vector3());
+      const tip = x.tip.getWorldPosition(new THREE.Vector3());
+      return Math.min(at.distanceTo(base), at.distanceTo(tip)) / Math.max(1e-3, base.distanceTo(tip));
+    };
+    const ga = grade(a), gb = grade(b);
+    if (!Number.isFinite(ga) && !Number.isFinite(gb)) return null;
+    return ga <= gb ? a : b;
   }
 
   private near(a: BoneRT, b: BoneRT, k: number): boolean {

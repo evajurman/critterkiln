@@ -7078,7 +7078,21 @@ function renderMerge() {
   $<HTMLInputElement>('#seamless').checked = state.seamless ?? true;
   $<HTMLInputElement>('#seamless').disabled = !on;
   $('#seamless-row').style.opacity = on ? '1' : '.45';
+  // listed under Seamless joins, but it shapes the quick joins too: greyed out only when nothing blends
+  const sub = on;
+  $('#blend-connected-row').hidden = settings.seamless !== 'creature';
+  $<HTMLInputElement>('#blend-connected').checked = state.blendConnected ?? true;
+  $<HTMLInputElement>('#blend-connected').disabled = !sub;
+  $('#blend-connected-row').style.opacity = sub ? '1' : '.45';
 }
+
+$<HTMLInputElement>('#blend-connected').onchange = (e) => {
+  state.blendConnected = (e.target as HTMLInputElement).checked;
+  creature.markMergeDirty();
+  creature.invalidateSkin();
+  commit();
+  renderMerge();
+};
 
 $<HTMLInputElement>('#seamless').onchange = (e) => {
   state.seamless = (e.target as HTMLInputElement).checked;

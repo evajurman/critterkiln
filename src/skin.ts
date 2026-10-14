@@ -40,6 +40,18 @@ export interface SkinOptions {
   lumps?: number;
   /** polled between chunks: return true to abandon the build */
   shouldStop: () => boolean;
+  /**
+   * Which parts (by index) flow into each other. Others in the group only
+   * meet with a plain crease, however close they come (a tail curled up to
+   * the head). Leave out to blend every pair.
+   */
+  linked?: (a: number, b: number) => boolean;
+  /**
+   * A peeled skin: only the surface of the parts marked true, plus their
+   * blend into the parts marked false (which are there just for that blend,
+   * and are shown by another skin).
+   */
+  keep?: boolean[];
 }
 
 interface Prepared {
@@ -51,6 +63,7 @@ interface Prepared {
   box: THREE.Box3; // skin space, padded
   color: THREE.Color;
   k: number;
+  index: number;
 }
 
 // Yield to the page between chunks via a message, not a timer: timers are
@@ -71,7 +84,7 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
   // distances further than this don't matter for the surface
   const band = h * 4 * Math.sqrt(3) + kMax;
 
-  const prepared: Prepared[] = parts.map((p) => {
+  const prepared: Prepared[] = parts.map((p, index) => {
     p.geo.computeBoundingBox();
     const box = p.geo.boundingBox!.clone().applyMatrix4(p.toSkin).expandByScalar(band);
     return {
@@ -83,8 +96,42 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
       color: p.color,
       k: p.k,
       facet: p.facet,
+      index,
     };
   });
+
+  // Only linked pairs blend: the union of each linked pair's smooth-min, and
+  // a plain min with everything else. (Without links, every part smooth-mins
+  // into the running total, as it always has.)
+  const n = prepared.length;
+  const link = opts.linked ? new Uint8Array(n * n) : null;
+  if (link) for (let a = 0; a < n; a++) for (let b = 0; b < n; b++) link[a * n + b] = a !== b && opts.linked!(a, b) ? 1 : 0;
+  const ids = new Int32Array(n);
+  const ds = new Float64Array(n);
+  const gs = new Float64Array(3 * n);
+  /** combine ds[0..m) (parts ids[0..m)); with `out`, also its gradient from gs */
+  const combine = (m: number, out?: THREE.Vector3): number => {
+    let f = Infinity;
+    for (let a = 0; a < m; a++) {
+      if (ds[a] >= f) continue;
+      f = ds[a];
+      out?.set(gs[3 * a], gs[3 * a + 1], gs[3 * a + 2]);
+    }
+    for (let a = 0; a < m; a++) {
+      for (let b = a + 1; b < m; b++) {
+        if (!link![ids[a] * n + ids[b]]) continue;
+        const da = ds[a], db = ds[b];
+        const k = Math.min(prepared[ids[a]].k, prepared[ids[b]].k);
+        if (Math.abs(da - db) >= k) continue; // no fillet here: just the min, counted above
+        const t = 0.5 + (0.5 * (db - da)) / k;
+        const v = db * (1 - t) + da * t - k * t * (1 - t);
+        if (v >= f) continue;
+        f = v;
+        if (out) for (let c = 0; c < 3; c++) out.setComponent(c, t * gs[3 * a + c] + (1 - t) * gs[3 * b + c]);
+      }
+    }
+    return f;
+  };
 
   const q = new THREE.Vector3();
   const grad = new THREE.Vector3();
@@ -102,6 +149,16 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
 
   /** The blended field: polynomial smooth-min of every part's distance. NaN = far from everything. */
   const field = (p: THREE.Vector3, exact: boolean): number => {
+    if (link) {
+      let m = 0;
+      for (const pp of prepared) {
+        const d = partDistance(pp, p, exact);
+        if (!Number.isFinite(d)) continue;
+        ids[m] = pp.index;
+        ds[m++] = d;
+      }
+      return m ? combine(m) : NaN;
+    }
     let f = Infinity;
     let any = false;
     for (const pp of prepared) {
@@ -245,6 +302,11 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
                 let d = relFar[r] ? Infinity : exactDistance(pp.geo, pp.bvh, pp.normals, q, reachP, grad);
                 // beyond reach from this node: same side as the block centre
                 if (!Number.isFinite(d)) d = relSide[r] * reachP;
+                if (link) {
+                  ids[r] = pp.index;
+                  ds[r] = d;
+                  continue;
+                }
                 if (!Number.isFinite(f)) {
                   f = d;
                   continue;
@@ -252,6 +314,7 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
                 const t = Math.min(1, Math.max(0, 0.5 + (0.5 * (d - f)) / pp.k));
                 f = d * (1 - t) + f * t - pp.k * t * (1 - t);
               }
+              if (link) f = combine(rel.length);
               setNode(i, j, k, f - grown);
             }
           }
@@ -407,6 +470,7 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
   /** the blended field at `p`, its gradient into `out` (as `field`, with the smooth-min's gradient) */
   const fieldGrad = (p: THREE.Vector3, out: THREE.Vector3): number => {
     let f = Infinity;
+    let m = 0;
     for (let i = 0; i < prepared.length; i++) {
       const pp = prepared[i];
       if (!pp.box.containsPoint(p)) continue;
@@ -415,6 +479,15 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
       if (!Number.isFinite(d)) continue;
       // a local-space gradient back into skin space
       gp.applyMatrix3(lin[i]);
+      if (link) {
+        ids[m] = i;
+        ds[m] = d;
+        gs[3 * m] = gp.x;
+        gs[3 * m + 1] = gp.y;
+        gs[3 * m + 2] = gp.z;
+        m++;
+        continue;
+      }
       if (!Number.isFinite(f)) {
         f = d;
         out.copy(gp);
@@ -424,6 +497,7 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
       f = d * (1 - t) + f * t - pp.k * t * (1 - t);
       out.multiplyScalar(t).addScaledVector(gp, 1 - t);
     }
+    if (link) return m ? combine(m, out) : Infinity;
     return f;
   };
   /** move `p` onto the surface (f = 0) by a few Newton steps, never more than a couple of cells each */
@@ -470,6 +544,21 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
         for (let i = v * 3; i < v * 3 + 3; i++) now[i] += (was[i] - now[i]) * f;
       }
     }
+  };
+  /** whether `p` is in a crease between two parts that don't blend (only with links) */
+  const unblended = (p: THREE.Vector3): boolean => {
+    if (!link) return false;
+    let a = -1, b = -1, da = Infinity, db = Infinity;
+    for (let i = 0; i < n; i++) {
+      const pp = prepared[i];
+      if (!pp.box.containsPoint(p)) continue;
+      q.copy(p).applyMatrix4(pp.fromSkin);
+      const d = exactDistance(pp.geo, pp.bvh, pp.normals, q, 3 * h, gp);
+      if (!Number.isFinite(d)) continue;
+      if (d < da) (b = a, db = da, a = i, da = d);
+      else if (d < db) (b = i, db = d);
+    }
+    return b >= 0 && db < 2 * h && !link[a * n + b];
   };
   const unsettled = pos.slice();
   for (let v = 0; v < count; v++) {
@@ -547,8 +636,9 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
         // on a thin point the edge cuts inside, and its midpoint settles out
         // onto the surface. One that's outside is in a crease (an arm close by
         // the body) too fine for the grid, where settling just crumples it: it
-        // stays flat.
-        if (fieldGrad(pt, g) < 0) settle(pt);
+        // stays flat. Unless the crease is where two parts that don't blend
+        // meet: flat, it would fill the crease in like a fillet.
+        if (fieldGrad(pt, g) < 0 || unblended(pt)) settle(pt);
         split.set(k, grow.length / 3);
         grow.push(pt.x, pt.y, pt.z);
         if ((++made & 1023) === 0 && (await breathe())) return null;
@@ -567,6 +657,35 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
       tris = next;
     }
     verts = grow;
+  }
+
+  // a peeled skin stops where its blend into the other parts flattens out
+  // onto their own surface: there it meets the skin that shows them
+  if (opts.keep) {
+    const keep = opts.keep;
+    const kept: number[] = [];
+    const c = new THREE.Vector3();
+    for (let t = 0; t < tris.length; t += 3) {
+      c.set(0, 0, 0);
+      for (let e = 0; e < 3; e++) c.x += verts[tris[t + e] * 3], c.y += verts[tris[t + e] * 3 + 1], c.z += verts[tris[t + e] * 3 + 2];
+      c.divideScalar(3);
+      let dk = Infinity, ik = -1, db = Infinity, ib = -1;
+      for (let i = 0; i < n; i++) {
+        const pp = prepared[i];
+        if (!pp.box.containsPoint(c)) continue;
+        q.copy(c).applyMatrix4(pp.fromSkin);
+        const d = exactDistance(pp.geo, pp.bvh, pp.normals, q, band, gp);
+        if (!Number.isFinite(d)) continue;
+        if (keep[i]) {
+          if (d < dk) (dk = d, ik = i);
+        } else if (d < db) (db = d, ib = i);
+      }
+      if (ik < 0) continue;
+      if (ib < 0 || dk - db < Math.min(prepared[ik].k, prepared[ib].k)) kept.push(tris[t], tris[t + 1], tris[t + 2]);
+      if ((t & 4095) === 0 && (await breathe())) return null;
+    }
+    if (!kept.length) return null;
+    tris = kept;
   }
 
   let geo = new THREE.BufferGeometry();

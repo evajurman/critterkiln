@@ -102,6 +102,9 @@
             <label class="check seamless-row" id="seamless-row" title="For this creature: after you stop changing its shape, blended parts are rebuilt as one continuous skin with no seams">
               <input id="seamless" type="checkbox" checked /> <span><i class="fa-slab-duo fa-regular fa-wand-magic-sparkles" aria-hidden="true"></i> Seamless joins <span class="muted">(smooths blended parts when idle)</span></span>
             </label>
+            <label class="check seamless-row seamless-sub" id="blend-connected-row" title="Only blend a part into the part it grows from, so a tail that curls up to the head, or arms that reach across the body, stay separate. Off: every touching part blends.">
+              <input id="blend-connected" type="checkbox" checked /> <span>Only connected parts <span class="muted">(tail won't blend into head)</span></span>
+            </label>
           </div>
           <div class="ck-tool" data-tool="worn">
             <div id="creature-stuff-sec" class="attach-sec" hidden>
