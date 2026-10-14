@@ -72,11 +72,12 @@ import {
 import { installScrollbars } from './scrollbars';
 import { customTabs, gizmos, initLayout, setLayoutIdle, setLayoutTab, setSceneColors, type Tab } from './layout';
 import { installCursorPress } from './cursorPress';
-import { captureShortcut, hasCustomShortcuts, is, keyLabel, labelShortcuts, renderShortcutSheet, resetShortcuts, stopListening } from './shortcuts';
+import { captureShortcut, hasCustomShortcuts, is, keyLabel, labelShortcuts, renderShortcutSheet, resetShortcuts, ridesSurface, stopListening } from './shortcuts';
 import { deleteCreation, getCreation, keepStorage, listCreations, markSaved, putCreation, type Creation, type SavedHow } from './library';
 import {
   RIGS,
   addLimb,
+  canParent,
   deleteLimb,
   deleteSavedRig,
   detachBone,
@@ -89,15 +90,20 @@ import {
   moveJoint,
   partIds,
   reattachBone,
+  moveLimb,
+  movedBases,
+  reparentAll,
   rigFromTemplate,
   rollLimb,
   saveRig,
   scaleBone,
   savedRigs,
+  setParent,
   splitBone,
   unlinkPair,
   type BoneDef,
   type PartCopy,
+  type PartSizes,
   type RigState,
   type V3,
 } from './rigs';
@@ -870,6 +876,8 @@ function restore(snap: string) {
   for (let i = 0; i < next.creatures.length; i++) {
     const s = next.creatures[i];
     const c = creatures[i];
+    // undo puts parents back as they were: nothing to re-check
+    parentsChecked.set(s, structuredClone(s.rig));
     if (c && JSON.stringify(c.state.rig) === JSON.stringify(s.rig)) {
       c.state = s;
       c.sync();
@@ -911,7 +919,33 @@ function updateUndo() {
   $<HTMLButtonElement>('#redo').disabled = hIndex >= history.length - 1;
 }
 
+/** past loading: re-hung parts get a hint */
+let booted = false;
+/**
+ * Each creature's skeleton as Auto parent last checked it: an edit only
+ * re-checks the parts whose base it moved. A creature without one (just
+ * opened) has every part checked.
+ */
+const parentsChecked = new WeakMap<CreatureState, RigState>();
 function makeCreature(s: CreatureState): Creature {
+  // Auto parent: each part hangs off whatever its base sits on, as you see it (posed)
+  if (rigPrefs.autoParent) {
+    const before = parentsChecked.get(s);
+    const only = before && movedBases(before, s.rig);
+    if (!only || only.size) {
+      // measured on just the skeleton: the creature itself is only built once
+      const probe = new Creature(s, true);
+      const changed = reparentAll(s.rig, sizesIn(probe), only).map((x) => x.id);
+      rehang(probe, s.rig, changed);
+      probe.dispose();
+      if (booted && changed.length) {
+        const b = changed.length === 1 && expandRig(s.rig).bones.find((x) => x.id === changed[0]);
+        if (b && b.parent) hint(`${b.name.replace(/ \((L|R)\)$/, '')} now hangs off ${sceneName(s.rig, b.parent)}`, 2200);
+        else if (!b) hint(`${changed.length} parts now hang off the parts their bases sit on`, 2200);
+      }
+    }
+  }
+  parentsChecked.set(s, structuredClone(s.rig));
   const c = new Creature(s);
   scene.add(c.root);
   c.root.visible = mode !== 'stuff';
@@ -1303,7 +1337,7 @@ canvas.addEventListener('pointerdown', (e) => {
   pointer.moved = false;
   pointer.touch = e.pointerType !== 'mouse';
   // holding Space, the left button only pans
-  if (e.button !== 0 || pickingFocus || spacePan) return;
+  if (e.button !== 0 || pickingFocus || pickingParent || spacePan) return;
   // pressing on an eye: dragging slides the pair over the surface (a click still opens its settings)
   const onHandle = (handlesVisible() && pickHandle(e.clientX, e.clientY)) || gizmo.dragging || gizmo.axis !== null;
   const eye = !onHandle && mode !== 'stuff' && !drawState && !idle ? pickEyeHit(e.clientX, e.clientY) : null;
@@ -1422,7 +1456,8 @@ canvas.addEventListener('pointermove', (e) => {
     } else if (drag.rigBase && drag.kind === 'start') {
       if (!drag.moved) return;
       // slide the whole limb: the move in skeleton coordinates (the creature may be turned or posed, the bone may ride a curve)
-      const d = hit.clone().sub(drag.startHit);
+      // (or over the surface of the part under the pointer: with Alt, or always if the shortcut sheet swaps them)
+      const d = ((ridesSurface(e.altKey) && surfaceUnder(drag.id)) || hit.clone()).sub(drag.startHit);
       if (drag.toDef) d.applyMatrix3(drag.toDef);
       state.rig = JSON.parse(drag.rigBase) as RigState;
       moveJoint(state.rig, drag.id, 'start', d.toArray() as V3, rigLocked());
@@ -1442,6 +1477,26 @@ canvas.addEventListener('pointermove', (e) => {
     $('#viewport').style.cursor = h ? 'var(--cursor-click)' : '';
   }
 });
+
+/**
+ * Sliding a base over the surface (see ridesSurface): the spot on the surface
+ * of the part under the pointer (a little inside it), so a base dropped on a
+ * head is on the head, not in front of or behind it. Null over empty space. The limb being slid
+ * (and its other side) is looked through. Uses the ray from setRay.
+ */
+function surfaceUnder(id: string): THREE.Vector3 | null {
+  const b = creature.bones.get(id);
+  if (!b) return null;
+  const roots = [b, ...(b.def.sideSign ? [creature.bones.get(b.def.baseId + (b.def.sideSign === 1 ? 'R' : 'L'))] : [])];
+  const moving = (x: BoneRT) => {
+    for (let p: BoneRT | null = x; p; p = p.parent) if (roots.includes(p)) return true;
+    return false;
+  };
+  const hit = raycaster.intersectObjects(creature.meshes().filter((m) => !moving(creature.bones.get(m.userData.boneId as string)!)), false)[0];
+  if (!hit?.face) return null;
+  const inward = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).negate();
+  return hit.point.clone().addScaledVector(inward, 0.03);
+}
 
 /**
  * Pose by an orange tip, stretching the part to follow. With Pull limbs the
@@ -1591,6 +1646,10 @@ canvas.addEventListener('pointerup', (e) => {
   if (doubleTapped(e)) return;
   if (pickingFocus) {
     focusAt(e.clientX, e.clientY);
+    return;
+  }
+  if (pickingParent) {
+    parentAt(e.clientX, e.clientY);
     return;
   }
   if (mode === 'stuff') {
@@ -6167,6 +6226,13 @@ function renderRigPanel() {
       ? 'Snap the base of this part back onto the tip of the part it hangs off'
       : 'Unhook this part from the tip it grew from, so its base can slide anywhere';
   detach.disabled = !b || isRoot;
+  // the part it hangs off, and (with Auto parent off) a way to pick another
+  $<HTMLInputElement>('#auto-parent').checked = rigPrefs.autoParent;
+  $('#parent-name').textContent = b?.parent ? `Hangs off ${b.parent.def.name}` : b ? 'The first part: everything hangs off it' : '';
+  const setP = $<HTMLButtonElement>('#set-parent');
+  setP.hidden = rigPrefs.autoParent;
+  setP.disabled = !b || isRoot;
+  if (pickingParent && (!b || isRoot)) setPickingParent(false);
   $('#rig-pair-note').textContent = paired ? 'Mirrored pair: both sides move together.' : '';
   $<HTMLInputElement>('#rig-sym').checked = rigLocked();
   $<HTMLInputElement>('#keep-floor').checked = state.keepFloor !== false;
@@ -6244,23 +6310,27 @@ $('#rig-split').onclick = () => {
 
 // ---- lock symmetry (remembered) ----
 const RIG_PREFS_KEY = 'creature-creator/rig-prefs';
-let rigLock = (() => {
+const rigPrefs: { lock: boolean; autoParent: boolean } = (() => {
   try {
-    return JSON.parse(localStorage.getItem(RIG_PREFS_KEY) ?? '{}').lock ?? true;
+    return { lock: true, autoParent: true, ...JSON.parse(localStorage.getItem(RIG_PREFS_KEY) ?? '{}') };
   } catch {
-    return true;
+    return { lock: true, autoParent: true };
   }
-})() as boolean;
+})();
+let rigLock = rigPrefs.lock;
 function rigLocked() {
   return rigLock;
 }
-function setMirror(on: boolean) {
-  rigLock = on;
+function saveRigPrefs() {
   try {
-    localStorage.setItem(RIG_PREFS_KEY, JSON.stringify({ lock: rigLock }));
+    localStorage.setItem(RIG_PREFS_KEY, JSON.stringify({ ...rigPrefs, lock: rigLock }));
   } catch {
     /* ignore */
   }
+}
+function setMirror(on: boolean) {
+  rigLock = on;
+  saveRigPrefs();
   renderRigPanel();
   hint(rigLock ? 'Mirror on: both sides bend, stretch and grow together' : 'Mirror off: each side on its own', 2000);
 }
@@ -6270,6 +6340,117 @@ $<HTMLInputElement>('#ik').onchange = (e) => {
   hint(on ? 'Pull limbs on: dragging a hand bends the elbow and shoulder too' : 'Pull limbs off: dragging bends just that joint', 2000);
 };
 $<HTMLInputElement>('#rig-sym').onchange = (e) => setMirror((e.target as HTMLInputElement).checked);
+
+// ---- which part each part hangs off (its parent) ----
+/** Each part's real size, from its drawing (or default shape): see PartSizes. */
+function sizesIn(c: Creature): PartSizes {
+  // each drawing is read once: how wide it is at evenly spaced heights along it
+  const STEPS = 24;
+  const profiles = new Map<string, { lo: number; hi: number; len: number; w: number[] } | null>();
+  const profile = (id: string) => {
+    const b = c.bones.get(id);
+    if (!b) return null;
+    if (profiles.has(b.src)) return profiles.get(b.src)!;
+    const shapes = c.shapesFor(b);
+    let lo = Infinity, hi = -Infinity;
+    for (const sh of shapes) for (const [, y] of sh.outline) (lo = Math.min(lo, y)), (hi = Math.max(hi, y));
+    let p: { lo: number; hi: number; len: number; w: number[] } | null = null;
+    if (lo < hi) {
+      const w = new Array(STEPS + 1).fill(0);
+      for (const sh of shapes) {
+        const o = sh.outline;
+        for (let i = 0; i < o.length; i++) {
+          const [x0, y0] = o[i], [x1, y1] = o[(i + 1) % o.length];
+          // every height this edge crosses
+          const a = Math.ceil(((Math.min(y0, y1) - lo) / (hi - lo)) * STEPS), z = Math.floor(((Math.max(y0, y1) - lo) / (hi - lo)) * STEPS);
+          for (let k = Math.max(0, a); k <= Math.min(STEPS, z); k++) {
+            const y = lo + ((hi - lo) * k) / STEPS;
+            const x = y1 === y0 ? Math.max(Math.abs(x0), Math.abs(x1)) : Math.abs(x0 + ((y - y0) / (y1 - y0)) * (x1 - x0));
+            w[k] = Math.max(w[k], x);
+          }
+        }
+      }
+      p = { lo, hi, len: b.length, w };
+    }
+    profiles.set(b.src, p);
+    return p;
+  };
+  return {
+    reach(id, t) {
+      const p = profile(id);
+      if (!p) return undefined;
+      // across the drawing at that height (held inside it past its ends)
+      const f = Math.min(1, Math.max(0, (t * p.len - p.lo) / (p.hi - p.lo))) * STEPS;
+      const k = Math.min(STEPS - 1, Math.floor(f));
+      return p.w[k] + (p.w[k + 1] - p.w[k]) * (f - k) || undefined;
+    },
+    span(id) {
+      const p = profile(id);
+      return p ? [p.lo / p.len, p.hi / p.len] : undefined;
+    },
+    at: (id) => c.posedEnds(id),
+  };
+}
+/**
+ * Parts in `rig` just given new parents, still built in `c` on their old ones:
+ * move each (and everything on it) so it stays exactly where it is, posed.
+ */
+function rehang(c: Creature, rig: RigState, ids: string[]) {
+  const bones = expandRig(rig).bones;
+  const moves = ids.map((id) => {
+    const to = bones.find((b) => b.id === id)?.parent;
+    return [id, to ? c.rehangMove(id, to) : null] as const;
+  });
+  for (const [id, m] of moves) if (m) moveLimb(rig, id, m);
+}
+const sceneName = (rig: RigState, id: string) => expandRig(rig).bones.find((b) => b.id === id)?.name ?? id;
+let pickingParent = false;
+function setPickingParent(on: boolean) {
+  pickingParent = on;
+  $('#set-parent').classList.toggle('on', on);
+  $('#viewport').style.cursor = on ? 'crosshair' : '';
+  if (on) hint('Click the part this one should hang off', 0);
+  else hint('');
+}
+/** Set parent: the picked part hangs off the part clicked. */
+function parentAt(x: number, y: number) {
+  const target = pickPart(x, y);
+  const id = selected;
+  if (!target || !creature.bones.get(id)?.parent) return setPickingParent(false);
+  pickingParent = false;
+  $('#set-parent').classList.remove('on');
+  $('#viewport').style.cursor = '';
+  if (!canParent(state.rig, id, target)) {
+    hint(target === id ? "A part can't hang off itself" : "That part hangs off this one, so it can't be its parent", 2200, true);
+    return;
+  }
+  const name = (state.rig.bones.find((d) => d.id === creature.bones.get(id)!.def.baseId)?.name ?? '').replace(/ \((L|R)\)$/, '');
+  if (!setParent(state.rig, id, target)) {
+    hint(`${name} already hangs off ${sceneName(state.rig, target)}`, 1800);
+    return;
+  }
+  // it stays just where it is: a pair is moved by its left twin
+  const own = creature.bones.get(id)!.def;
+  rehang(creature, state.rig, [own.sideSign === -1 ? own.baseId + 'L' : id]);
+  rigEdit(() => [], false);
+  const b = creature.bones.get(id);
+  hint(`${name} now hangs off ${b?.parent ? sceneName(state.rig, b.parent.def.id) : sceneName(state.rig, target)}`, 2200);
+}
+$<HTMLInputElement>('#auto-parent').onchange = (e) => {
+  rigPrefs.autoParent = (e.target as HTMLInputElement).checked;
+  saveRigPrefs();
+  if (rigPrefs.autoParent && pickingParent) setPickingParent(false);
+  if (rigPrefs.autoParent) {
+    // straight away, every part, for any left on the wrong part while it was off
+    const rig = JSON.stringify(state.rig);
+    parentsChecked.delete(state);
+    buildCreature();
+    if (JSON.stringify(state.rig) !== rig) commit();
+  }
+  renderRigPanel();
+  hint(rigPrefs.autoParent ? 'Auto parent on: a part hangs off whatever its base sits on' : 'Auto parent off: use Set parent to choose', 2200);
+};
+$('#set-parent').onclick = () => setPickingParent(!pickingParent);
 
 // ---- per-bone default-shape widths and bend, applied live ----
 let boneEditPending = false;
@@ -7428,6 +7609,8 @@ window.addEventListener('keydown', (e) => {
     closeShortcutSheet();
   } else if (is(e, 'help')) {
     toggleShortcutSheet();
+  } else if (k === 'escape' && pickingParent) {
+    setPickingParent(false);
   } else if (k === 'escape' && drawState) {
     exitDraw();
   } else if (k === 'enter' && drawState) {
@@ -7625,6 +7808,7 @@ function loop(now: number) {
 
 $<HTMLInputElement>('#ao').checked = gtao.enabled;
 world.creatures.forEach((s, i) => (creatures[i] = makeCreature(s)));
+booted = true;
 
 activate(world.active);
 // My creations: the open scene's details are read back; a scene from before

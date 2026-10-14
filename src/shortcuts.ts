@@ -56,6 +56,30 @@ try {
   /* ignore */
 }
 
+// sliding a part's base (the purple grip): through parts on a flat plane, or
+// over the surface of whatever part is under the pointer. Alt gives the other
+// one; which is plain is a choice on the sheet.
+const SURFACE_KEY = 'critterkiln/slide-over-surface';
+let surfaceFirst = false;
+try {
+  surfaceFirst = localStorage.getItem(SURFACE_KEY) === '1';
+} catch {
+  /* ignore */
+}
+/** Whether a base slid with Alt held (or not) rides the surface under the pointer. */
+export function ridesSurface(alt: boolean): boolean {
+  return surfaceFirst !== alt;
+}
+function setSurfaceFirst(on: boolean) {
+  surfaceFirst = on;
+  try {
+    if (on) localStorage.setItem(SURFACE_KEY, '1');
+    else localStorage.removeItem(SURFACE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 function keysOf(id: ShortcutId): string[] {
   return custom[id] ?? SHORTCUTS.find((s) => s.id === id)!.keys;
 }
@@ -192,6 +216,21 @@ export function renderShortcutSheet(list: HTMLElement, note = '') {
       row.innerHTML = `<div class="keys-text"><span>${f.label}</span></div><span class="keys-btn"><kbd>${f.keys}</kbd></span>`;
       sec.append(row);
     }
+    if (g === 'Editing') {
+      // sliding a base: which way is plain, which needs Alt
+      const row = document.createElement('div');
+      row.className = 'keys-row fixed';
+      const alt = comboLabel('alt');
+      row.innerHTML = `<div class="keys-text"><span>Slide a part's base ${surfaceFirst ? 'through parts' : 'over the surface of a part'}</span><span class="muted small">Drag the purple grip with this held. Plain dragging slides it ${surfaceFirst ? 'over the surface of the part under the pointer' : 'through parts'}.</span></div><span class="keys-btn"><kbd>${alt}</kbd></span>`;
+      const swap = document.createElement('label');
+      swap.className = 'check keys-swap';
+      swap.innerHTML = `<input type="checkbox" ${surfaceFirst ? 'checked' : ''} /> <span>Slide bases over surfaces <span class="muted">(${alt} slides through)</span></span>`;
+      swap.querySelector('input')!.onchange = (e) => {
+        setSurfaceFirst((e.target as HTMLInputElement).checked);
+        renderShortcutSheet(list);
+      };
+      sec.append(row, swap);
+    }
     list.append(sec);
   }
 }
@@ -233,8 +272,9 @@ export function resetShortcuts() {
   custom = {};
   listening = null;
   store();
+  setSurfaceFirst(false);
 }
 
 export function hasCustomShortcuts(): boolean {
-  return Object.keys(custom).length > 0;
+  return Object.keys(custom).length > 0 || surfaceFirst;
 }

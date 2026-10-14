@@ -485,6 +485,9 @@ button.primary.slim { width: auto; flex: 1; padding: 8px 10px; font-size: 14px; 
 .dof-slider { grid-template-columns: 44px 1fr; font-size: 12px; }
 #dof-controls .row { margin-top: 4px; }
 #dof-pick.on { background: var(--sel-bg); border-color: var(--blue); color: var(--sel-ink); }
+.parent-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin: -4px 0 6px; }
+.parent-row button[hidden] { display: none; }
+#set-parent.on { background: var(--sel-bg); border-color: var(--blue); color: var(--sel-ink); }
 
 .view-bar {
   /* (wraps rather than spilling out of a narrow corner) */
@@ -750,6 +753,7 @@ details.fine[open] > summary { margin-bottom: 6px; }
 button.keys-btn { cursor: var(--cursor-click); }
 button.keys-btn:hover { border-color: var(--accent); }
 button.keys-btn.on { border-color: var(--accent); background: var(--accent-soft); }
+.keys-swap { margin: 2px 0 8px; font-weight: normal; }
 .keys-row.fixed .keys-btn { border-color: transparent; background: none; }
 .keys-btn kbd { font: inherit; font-size: 12px; font-weight: var(--w-bold); background: var(--bg); border-radius: 5px; padding: 1px 6px; }
 .keys-note { margin: 0 0 6px; padding: 6px 8px; border-radius: 8px; background: var(--accent-soft); }

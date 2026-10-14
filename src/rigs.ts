@@ -732,6 +732,197 @@ export function reattachBone(rig: RigState, sceneId: string): PartCopy[] {
   return [];
 }
 
+/**
+ * A part's real size, from its drawing, by scene id: how far it reaches out
+ * from its bone at `t` along it (0 base, 1 tip), and how far along the bone
+ * the drawing runs (it can run past either end). Undefined falls back to the
+ * bone's default widths, base to tip.
+ */
+export interface PartSizes {
+  reach(sceneId: string, t: number): number | undefined;
+  span(sceneId: string): [number, number] | undefined;
+  /** Where the bone is now, posed (its base, and the end of its straight line): what's measured, as that's what you see. */
+  at?(sceneId: string): { start: V3; end: V3 } | undefined;
+}
+
+/** Hang a bone off another: the part its base sits on. */
+const TIP_SNAP = 0.02;
+/** a new parent has to hold the base this much more deeply (as a share of its thickness) before the current one is given up */
+const PARENT_STICK = 0.1;
+
+/** a base only in a part's starting end (behind where it begins) counts this much less: that end is the joint with what it grows from */
+const BEHIND_START = 0.5;
+
+/**
+ * How well a point sits on a bone, as a base: how far out from the bone's
+ * middle line it is, as a share of the part's thickness there (under 1 inside
+ * it), so a base near the middle of a thin tail counts as deeper in it than
+ * one just under the skin of a big body. A point on the bone's tip beats
+ * anything; one behind where the bone starts counts for less (BEHIND_START),
+ * unless it's the first part (nothing else holds that end).
+ */
+function seat(p: V3, c: ExpandedBone, sizes?: PartSizes): number {
+  const { start, end } = sizes?.at?.(c.id) ?? c;
+  if (len3(sub3(p, end)) < TIP_SNAP) return -1e3;
+  const axis = sub3(end, start);
+  const l2 = axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2];
+  const rel = sub3(p, start);
+  const along = l2 < 1e-9 ? 0 : (rel[0] * axis[0] + rel[1] * axis[1] + rel[2] * axis[2]) / l2;
+  // the nearest point along the part, as far as its drawing runs (past the bone's ends, if drawn so)
+  const [from, to] = sizes?.span(c.id) ?? [0, 1];
+  const t = Math.max(from, Math.min(to, along));
+  const r = sizes?.reach(c.id, t) ?? (c.width + ((c.widthEnd ?? c.width) - c.width) * Math.max(0, Math.min(1, t))) / 2;
+  const depth = len3(sub3(rel, scale3(axis, t))) / Math.max(r, 1e-3);
+  return along < from && c.parent ? depth + BEHIND_START : depth;
+}
+
+/**
+ * Whether a scene bone could hang off another: not itself, nor anything
+ * hanging off it (for a pair, off either twin).
+ */
+export function canParent(rig: RigState, sceneId: string, targetId: string): boolean {
+  const t = expandRig(rig).bones.find((b) => b.id === targetId);
+  return !!t && !subtreeDefs(rig, sceneId).has(t.baseId);
+}
+
+/**
+ * The parent to store on a bone's definition for it to hang off `targetId`.
+ * A pair hangs off a pair twin for twin (left off left, right off right), or
+ * both off one middle part; a single bone off exactly the part picked.
+ */
+function parentValue(def: BoneDef, target: ExpandedBone): string {
+  return def.mirror && target.sideSign !== 0 ? target.baseId : target.id;
+}
+
+/** Make a scene bone hang off another part. False if it can't, or already does. */
+export function setParent(rig: RigState, sceneId: string, targetId: string): boolean {
+  const f = findDef(rig, sceneId);
+  const t = expandRig(rig).bones.find((b) => b.id === targetId);
+  if (!f || !f.def.parent || !t || !canParent(rig, sceneId, targetId)) return false;
+  const to = parentValue(f.def, t);
+  // a single bone stored as hanging off a pair hangs off its left twin
+  if (f.def.parent === to || (!f.def.mirror && f.ex.parent === t.id)) return false;
+  f.def.parent = to;
+  return true;
+}
+
+/**
+ * The part a bone's base sits on (scene id), or null for the first part. A pair
+ * is measured for both twins, so a middle part only wins if both sides sit on
+ * it. The part it's deepest inside (for its thickness) wins; the one it
+ * hangs off now keeps it unless another is clearly deeper.
+ */
+export function nearestParent(rig: RigState, sceneId: string, sizes?: PartSizes): string | null {
+  const bones = expandRig(rig).bones;
+  const byId = new Map(bones.map((b) => [b.id, b]));
+  const me = byId.get(sceneId);
+  if (!me?.parent) return null;
+  const own = subtreeDefs(rig, sceneId);
+  // a pair is weighed from its left twin (the right one is its mirror image)
+  const left = me.sideSign === -1 ? byId.get(me.baseId + 'L') ?? me : me;
+  const pair = me.sideSign !== 0;
+  const base = sizes?.at?.(left.id)?.start ?? left.start;
+  const other = (pair && sizes?.at?.(me.baseId + 'R')?.start) || mirrorV(base);
+  const skip = (c: ExpandedBone) => own.has(c.baseId) || (pair && c.sideSign === -1);
+  // a middle part only holds a pair if both sides sit on it
+  const score = (c: ExpandedBone) => (pair && c.sideSign === 0 ? Math.max(seat(base, c, sizes), seat(other, c, sizes)) : seat(base, c, sizes));
+  let best: ExpandedBone | null = null, bestScore = Infinity, current = Infinity;
+  for (const c of bones) {
+    if (skip(c)) continue;
+    const s = score(c);
+    if (c.id === left.parent) current = s;
+    if (s < bestScore) (best = c), (bestScore = s);
+  }
+  if (!best || current <= bestScore + PARENT_STICK) return me.parent;
+  // the twin on this side of a pair
+  return me.sideSign === -1 && best.sideSign === 1 ? best.baseId + 'R' : best.id;
+}
+
+/**
+ * Re-hang parts onto the part their base sits on (see nearestParent): every
+ * part, or just the definitions in `only`. Returns the moves made: scene id
+ * (a pair's left twin), and the part it hung off before.
+ */
+export function reparentAll(rig: RigState, sizes?: PartSizes, only?: Set<string>): { id: string; from: string }[] {
+  const changed: { id: string; from: string }[] = [];
+  const done = new Set<string>();
+  for (const b of expandRig(rig).bones) {
+    if (!b.parent || b.sideSign === -1 || done.has(b.baseId) || (only && !only.has(b.baseId))) continue;
+    done.add(b.baseId);
+    const to = nearestParent(rig, b.id, sizes);
+    const from = b.parent;
+    if (to && setParent(rig, b.id, to)) changed.push({ id: b.id, from });
+  }
+  return changed;
+}
+
+/**
+ * The definitions whose base moved on the part they hang off from `before`
+ * to now (or whose part changed length or direction, or which are new and
+ * don't hang off something new): the parts an edit could have moved onto
+ * another part. Everything below a moved part rode along, so isn't included.
+ */
+export function movedBases(before: RigState, rig: RigState): Set<string> {
+  const was = new Map(expandRig(before).bones.map((b) => [b.id, b]));
+  const bones = expandRig(rig).bones;
+  const byId = new Map(bones.map((b) => [b.id, b]));
+  const same = (a: V3, b: V3) => len3(sub3(a, b)) < 1e-4;
+  const moved = new Set<string>();
+  for (const b of bones) {
+    const p = b.parent ? byId.get(b.parent) : undefined;
+    if (!p) continue;
+    const o = was.get(b.id), op = o?.parent ? was.get(o.parent) : undefined;
+    const stayed = o
+      ? !!op && op.id === p.id && same(sub3(o.start, op.start), sub3(b.start, p.start)) && same(sub3(op.end, op.start), sub3(p.end, p.start))
+      : was.has(p.id) === false;
+    if (!stayed) moved.add(b.baseId);
+  }
+  return moved;
+}
+
+/** A 4x4 matrix, column-major (as three.js keeps them). */
+export type M4 = number[];
+const mul4 = (a: M4, b: M4): M4 => {
+  const o = new Array(16).fill(0);
+  for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) for (let k = 0; k < 4; k++) o[c * 4 + r] += a[k * 4 + r] * b[c * 4 + k];
+  return o;
+};
+const FLIP: M4 = [-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+const point4 = (m: M4, p: V3): V3 => [0, 1, 2].map((r) => m[r] * p[0] + m[4 + r] * p[1] + m[8 + r] * p[2] + m[12 + r]) as V3;
+const dir4 = (m: M4, p: V3): V3 => [0, 1, 2].map((r) => m[r] * p[0] + m[4 + r] * p[1] + m[8 + r] * p[2]) as V3;
+
+/**
+ * Move a bone and everything on it rigidly in the rest pose: `m` is the move
+ * for the scene bone `sceneId`. A pair's definition (its left twin) takes the
+ * left side's move; a single part on a right twin takes its mirror image.
+ */
+export function moveLimb(rig: RigState, sceneId: string, m: M4) {
+  const bones = expandRig(rig).bones;
+  const byId = new Map(bones.map((b) => [b.id, b]));
+  const me = byId.get(sceneId);
+  if (!me) return;
+  const mine = me.sideSign === -1 ? mul4(FLIP, mul4(m, FLIP)) : m;
+  const flipped = mul4(FLIP, mul4(mine, FLIP));
+  const defs = subtreeDefs(rig, sceneId);
+  for (const d of rig.bones) {
+    if (!defs.has(d.id)) continue;
+    let k = mine;
+    if (!d.mirror) {
+      // on the right side of a pair: that side moves as the left's mirror image
+      for (let b = byId.get(d.id); b; b = b.parent ? byId.get(b.parent) : undefined) {
+        if (b.sideSign !== 0) {
+          if (b.sideSign === -1) k = flipped;
+          break;
+        }
+        if (b.id === me.id) break;
+      }
+    }
+    d.start = round3(point4(k, d.start));
+    d.end = round3(point4(k, d.end));
+    d.side = round3(dir4(k, d.side));
+  }
+}
+
 /** Copy a bone and everything hanging off it, nudged down so it's visible. */
 export function duplicateLimb(rig: RigState, sceneId: string): PartCopy[] {
   const f = findDef(rig, sceneId);

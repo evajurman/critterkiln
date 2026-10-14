@@ -139,6 +139,15 @@
           <div class="ck-tool" data-tool="extend"><button id="rig-extend" class="ghost" title="Add a segment on the end of this part"><i class="fa-duotone fa-regular fa-arrow-up-right" aria-hidden="true"></i> Extend</button></div>
           <div class="ck-tool" data-tool="split"><button id="rig-split" class="ghost" title="Split this part in the middle into two jointed halves"><i class="fa-slab-duo fa-regular fa-scissors" aria-hidden="true"></i> Split</button></div>
           <div class="ck-tool" data-tool="detach"><button id="rig-detach" class="ghost"></button></div>
+          <div class="ck-tool" data-tool="parent">
+            <label class="check" title="Each part hangs off whatever its base sits on, checked whenever the creature changes or loads. A part stays on its part while its base is still on it, and nothing jumps when one changes. Off: parts keep their parent until you Set parent.">
+              <input id="auto-parent" type="checkbox" checked /> <span>Auto parent <span class="muted">(hangs off what its base is on)</span></span>
+            </label>
+            <div class="parent-row">
+              <span class="muted small" id="parent-name"></span>
+              <button id="set-parent" class="ghost" title="Then click the part this one should hang off (a pair picks the matching side)"><i class="fa-duotone fa-regular fa-crosshairs" aria-hidden="true"></i> Set parent</button>
+            </div>
+          </div>
           <div class="ck-tool" data-tool="dup"><button id="rig-dup" class="ghost" title="Copy this limb and everything attached to it"><i class="fa-slab-duo fa-regular fa-copy" aria-hidden="true"></i> Copy</button></div>
           <div class="ck-tool" data-tool="del"><button id="rig-del" class="ghost" data-shortcut="delete" title="Remove this part and everything attached to it (Backspace)"><i class="fa-slab-duo fa-regular fa-trash" aria-hidden="true"></i> Delete</button></div>
           <div class="ck-tool" data-tool="stand"><button id="reset-pose" class="ghost" title="Straighten every joint back out"><i class="fa-duotone fa-regular fa-person" aria-hidden="true"></i> Stand up straight</button></div>

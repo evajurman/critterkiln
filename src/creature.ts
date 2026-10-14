@@ -749,7 +749,8 @@ export class Creature {
   }
   private attached = new Map<string, { key: string; main: THREE.Group; twin: THREE.Group | null; bone: BoneRT; twinBone: BoneRT | null }>();
 
-  constructor(state: CreatureState) {
+  /** `skeletonOnly`: just the posed skeleton, no meshes (for measuring it, cheaply) */
+  constructor(state: CreatureState, skeletonOnly = false) {
     this.state = state;
     this.root.add(this.group);
     this.rig = expandRig(state.rig);
@@ -772,7 +773,8 @@ export class Creature {
     this.rollAxis.visible = false;
     this.rollGizmo.add(this.rollAxis);
     this.rollGizmo.visible = false;
-    this.sync();
+    if (skeletonOnly) this.applyPose();
+    else this.sync();
   }
 
   // -------------------------------------------------------------------------
@@ -1302,6 +1304,46 @@ export class Creature {
     }
     this.state.pose = pose;
     this.state.rootOffset = this.group.position.toArray() as V3;
+  }
+
+  /** Where a bone is now, posed, in the skeleton's coordinates: its base, and the end of its straight line. */
+  posedEnds(id: string): { start: V3; end: V3 } | undefined {
+    const b = this.bones.get(id);
+    if (!b) return undefined;
+    this.group.updateMatrixWorld(true);
+    const m = this.group.matrixWorld.clone().invert().multiply(b.pivot.matrixWorld);
+    const at = (y: number) => new THREE.Vector3(0, y, 0).applyMatrix4(m).toArray() as V3;
+    return { start: at(0), end: at(b.length) };
+  }
+
+  /**
+   * A bone about to hang off `parentId` instead: the rigid move its rest frame
+   * (and everything on it) needs to stay exactly where it is now, posed, under
+   * the new parent. Null if nothing has to move. Column-major, in the
+   * skeleton's coordinates.
+   */
+  rehangMove(id: string, parentId: string): number[] | null {
+    const c = this.bones.get(id), p = this.bones.get(parentId);
+    if (!c?.parent || !p) return null;
+    this.group.updateMatrixWorld(true);
+    const toGroup = this.group.matrixWorld.clone().invert();
+    const inGroup = (o: THREE.Object3D) => toGroup.clone().multiply(o.matrixWorld);
+    // where it sits now, leaving out its own pose (which it keeps)
+    const here = inGroup(c.pivot.parent!).multiply(new THREE.Matrix4().compose(c.pivot.position, c.restQuat, new THREE.Vector3(1, 1, 1)));
+    const local = inGroup(p.pivot).invert().multiply(here);
+    // a bent parent carries its children along its curve (bendChild): take that back out
+    const bd = bendOf(p.def, p.length);
+    if (isBent(bd)) {
+      const m = new THREE.Vector3().setFromMatrixPosition(local), t = m.clone();
+      for (let i = 0; i < 8; i++) {
+        const s = Math.min(bd.len, Math.max(0, t.y));
+        const [x, y, z] = bendPoint(bd, 0, s, 0);
+        t.set(m.x - x, m.y - (y - s), m.z - z);
+      }
+      local.setPosition(t);
+    }
+    const move = p.restWorld.clone().multiply(local).multiply(c.restWorld.clone().invert());
+    return move.equals(new THREE.Matrix4()) ? null : move.elements.slice();
   }
 
   resetPose() {
