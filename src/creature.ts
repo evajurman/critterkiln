@@ -194,12 +194,10 @@ export interface CreatureState {
   colorBlend?: number;
   /** rebuild merged groups as one seamless skin when left idle (default on; see setSeamlessMode) */
   seamless?: boolean;
-  /**
-   * Blend only parts joined to each other (a part and the one it grows from),
-   * so a tail curled up to the head, or arms reaching across the body, stay
-   * separate. Default on.
-   */
+  /** legacy: on is blendWith 'connected', off 'all' */
   blendConnected?: boolean;
+  /** which touching parts blend into each other (see BlendWith); unset: from blendConnected */
+  blendWith?: BlendWith;
   /** per-material slider values (missing keys use the defaults) */
   materialSettings?: Partial<Record<StyleId, StyleSettings>>;
   attachments?: Attachment[];
@@ -299,9 +297,16 @@ let seamlessLowPoly = false;
 export function setSeamlessLowPoly(on: boolean) {
   seamlessLowPoly = on;
 }
-/** Whether two parts may blend into each other: always, or (by default) only where one grows from the other. */
-function blendable(s: CreatureState, a: BoneRT, b: BoneRT): boolean {
-  return !(s.blendConnected ?? true) || a === b || a.parent === b || b.parent === a;
+/**
+ * Which touching parts blend into each other: every one; only a part and the
+ * one it grows from (so a tail curled up to the head, or arms reaching across
+ * the body, stay separate: the default); or those, and any part a base sits
+ * in (an arm blends into everything round its shoulder, but crossed arms
+ * still stay apart).
+ */
+export type BlendWith = 'all' | 'connected' | 'neighbors';
+export function blendWithOf(s: CreatureState): BlendWith {
+  return s.blendWith ?? (s.blendConnected === false ? 'all' : 'connected');
 }
 function seamlessOn(s: CreatureState): boolean {
   return seamlessMode === 'creature' ? (s.seamless ?? true) : seamlessMode === 'on';
@@ -916,6 +921,7 @@ export class Creature {
    * bones, without rebuilding meshes (they stretch to fit until the next full build).
    */
   relayout(rig: RigState) {
+    this.baseTouch.clear();
     const next = expandRig(rig);
     for (const def of next.bones) {
       const b = this.bones.get(def.id);
@@ -999,6 +1005,7 @@ export class Creature {
   }
 
   sync() {
+    this.baseTouch.clear();
     const s = this.state;
     this.applyPlacement();
     // a glow change alone (painting the whole creature, undo) leaves every
@@ -1282,6 +1289,7 @@ export class Creature {
   }
 
   applyPose() {
+    this.baseTouch.clear();
     // only a real change re-merges: sync() calls this on every look edit too
     const before = this.list.map((b) => b.pivot.quaternion.clone());
     const pos = this.group.position.clone();
@@ -1415,7 +1423,7 @@ export class Creature {
         continue;
       }
       const base = b.mesh!.userData.baseGeo as THREE.BufferGeometry;
-      const nbrs = on && members.length > 1 ? members.filter((o) => o !== b && !o.mesh!.userData.liveGeo && blendable(s, b, o) && this.near(b, o, Math.max(k, kc))) : [];
+      const nbrs = on && members.length > 1 ? members.filter((o) => o !== b && !o.mesh!.userData.liveGeo && this.blendable(b, o) && this.near(b, o, Math.max(k, kc))) : [];
       if (nbrs.length === 0) {
         this.setMeshGeometry(b, base, false);
         continue;
@@ -1544,7 +1552,7 @@ export class Creature {
     const built: SkinEntry[] = [];
     for (const [, members] of groups) {
       // only parts that actually touch another part in the group
-      const joined = members.filter((b) => !crisp(b) && members.some((o) => o !== b && !crisp(o) && blendable(s, b, o) && this.near(b, o, kMax)));
+      const joined = members.filter((b) => !crisp(b) && members.some((o) => o !== b && !crisp(o) && this.blendable(b, o) && this.near(b, o, kMax)));
       if (joined.length < 2) continue;
       const part = s.parts[joined[0].src];
       const style = part.style ?? s.style;
@@ -1560,24 +1568,26 @@ export class Creature {
 
       // clay lumps go back on after the skin is built
       const lumps = style === 'clay' || style === 'stone' ? ((style === 'clay' ? k.lumps : k.rugged) ?? 0) * Math.min(0.012, Math.max(0.004, minR * 0.08)) : 0;
-      const onlyConnected = s.blendConnected ?? true;
+      const onlyConnected = blendWithOf(s) !== 'all';
 
       // Parts that don't blend but press together closer than the grid can
       // keep apart would fuse anyway: the one reaching in is peeled off into a
-      // skin of its own (built with the part it grows from, for that blend).
+      // skin of its own (built with the parts it blends into: the one it grows
+      // from, and with Neighbors any its base sits in).
       const peels = onlyConnected ? this.peelsFor(joined, h) : [];
       const peeled = new Set(peels.flat());
       const rest = joined.filter((b) => !peeled.has(b));
-      const sets: { members: BoneRT[]; base?: BoneRT }[] = [
-        { members: rest.filter((b) => rest.some((o) => o !== b && blendable(s, b, o) && this.near(b, o, kMax))) },
-        ...peels.map((sub) => ({ members: sub, base: sub[0].parent && joined.includes(sub[0].parent) ? sub[0].parent : undefined })),
+      const sets: { members: BoneRT[]; bases: BoneRT[] }[] = [
+        { members: rest.filter((b) => rest.some((o) => o !== b && this.blendable(b, o) && this.near(b, o, kMax))), bases: [] },
+        // two peeled parts blending into each other: the join is the first one's
+        ...peels.map((sub, i) => ({ members: sub, bases: joined.filter((o) => !sub.includes(o) && !peels.slice(0, i).some((p) => p.includes(o)) && sub.some((b) => this.blendable(b, o) && this.near(b, o, kMax))) })),
       ];
 
-      for (const { members: shown, base } of sets) {
+      for (const { members: shown, bases } of sets) {
         // crisp parts joined to these blend into the skin from their side; the skin meets them halfway
-        const beside = members.filter((o) => crisp(o) && [...shown, ...(base ? [base] : [])].some((b) => blendable(s, b, o) && this.near(b, o, kMax)));
-        const all = [...(base ? [base] : []), ...shown, ...beside];
-        if (shown.length + (base ? 1 : 0) < 2) continue;
+        const beside = members.filter((o) => crisp(o) && [...shown, ...bases].some((b) => this.blendable(b, o) && this.near(b, o, kMax)));
+        const all = [...bases, ...shown, ...beside];
+        if (shown.length + bases.length < 2) continue;
         // a part drawn as several shapes joins in as each of them
         const owners: BoneRT[] = [];
         const parts: SkinPart[] = all.flatMap((b) => {
@@ -1594,8 +1604,8 @@ export class Creature {
             facet: geo.userData.facet as number | undefined,
           }));
         });
-        const linked = onlyConnected ? (a: number, b: number) => blendable(s, owners[a], owners[b]) : undefined;
-        const keep = base || beside.length ? owners.map((o) => (o === base ? 0 : beside.includes(o) ? 2 : 1)) : undefined;
+        const linked = onlyConnected ? (a: number, b: number) => this.blendable(owners[a], owners[b]) : undefined;
+        const keep = bases.length || beside.length ? owners.map((o) => (bases.includes(o) ? 0 : beside.includes(o) ? 2 : 1)) : undefined;
         const geo = await buildSkin(parts, { h, colorBlend: kc, lowPoly, lumps, linked, keep, shouldStop: () => version !== this.skinVersion });
         if (version !== this.skinVersion) {
           // something changed meanwhile: it'll be retried once things settle again
@@ -1616,7 +1626,7 @@ export class Creature {
           owners,
           parts,
           lowPoly,
-          peeled: !!base,
+          peeled: bases.length > 0,
           painted: !!geo.userData.painted,
           colorKey: JSON.stringify([parts.map((p) => [p.color.getHex(), p.glow]), kc]),
         });
@@ -1649,7 +1659,7 @@ export class Creature {
       seamlessLowPoly,
       s.mergeRadius,
       blend,
-      s.blendConnected ?? true,
+      blendWithOf(s),
       s.rig,
       this.group.position.toArray().map(r4),
       this.list.map((b) => b.pivot.quaternion.toArray().map(r4)),
@@ -1796,7 +1806,7 @@ export class Creature {
     const queue = [start];
     while (queue.length) {
       const a = queue.pop()!;
-      for (const b of same) if (!seen.has(b) && blendable(s, a, b) && this.near(a, b, k)) (seen.add(b), queue.push(b));
+      for (const b of same) if (!seen.has(b) && this.blendable(a, b) && this.near(a, b, k)) (seen.add(b), queue.push(b));
     }
     return [...new Set([...seen].map((b) => b.src))];
   }
@@ -1816,7 +1826,7 @@ export class Creature {
     for (let i = 0; i < joined.length; i++) {
       for (let j = i + 1; j < joined.length; j++) {
         const a = joined[i], b = joined[j];
-        if (blendable(s, a, b) || !this.near(a, b, gap)) continue;
+        if (this.blendable(a, b) || !this.near(a, b, gap)) continue;
         const at = this.contact(a, b, gap);
         if (!at) continue;
         const pick = this.reachingIn(a, b, at);
@@ -1876,6 +1886,39 @@ export class Creature {
     const ga = grade(a), gb = grade(b);
     if (!Number.isFinite(ga) && !Number.isFinite(gb)) return null;
     return ga <= gb ? a : b;
+  }
+
+  /** Whether two parts may blend into each other (see BlendWith). */
+  private blendable(a: BoneRT, b: BoneRT): boolean {
+    const mode = blendWithOf(this.state);
+    if (mode === 'all' || a === b || a.parent === b || b.parent === a) return true;
+    return mode === 'neighbors' && (this.baseIn(a, b) || this.baseIn(b, a));
+  }
+
+  /** Answers of baseIn, until the pose or the parts change. */
+  private baseTouch = new Map<BoneRT, Map<BoneRT, boolean>>();
+  /**
+   * Whether part `a`'s base sits in part `b`, or within the blend distance of
+   * its surface, as posed: what makes them neighbors (see BlendWith).
+   */
+  private baseIn(a: BoneRT, b: BoneRT): boolean {
+    let row = this.baseTouch.get(a);
+    if (!row) this.baseTouch.set(a, (row = new Map()));
+    const known = row.get(b);
+    if (known !== undefined) return known;
+    const geo = b.mesh?.userData.baseGeo as THREE.BufferGeometry | undefined;
+    let touches = false;
+    if (geo) {
+      this.group.updateMatrixWorld(true);
+      const toB = b.mesh!.matrixWorld.clone().invert();
+      const q = a.pivot.getWorldPosition(new THREE.Vector3()).applyMatrix4(toB);
+      // the blend distance in b's own units
+      const sc = new THREE.Vector3().setFromMatrixScale(this.group.matrixWorld.clone().invert().multiply(b.mesh!.matrixWorld));
+      const reach = (this.state.mergeRadius ?? 0.1) / ((sc.x + sc.y + sc.z) / 3);
+      touches = exactDistance(geo, bvhFor(geo), sharedNormals(geo), q, reach, new THREE.Vector3()) < reach;
+    }
+    row.set(b, touches);
+    return touches;
   }
 
   private near(a: BoneRT, b: BoneRT, k: number): boolean {

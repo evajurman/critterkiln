@@ -550,7 +550,7 @@ body.ck-editing .panel.idle .idle-note { display: none; }
 .seamless-row { margin: 8px 0 0; font-size: 12px; }
 .seamless-row .muted { font-weight: var(--w-semi); }
 .seamless-row[hidden] { display: none; }
-.seamless-sub { margin: 4px 0 0 22px; }
+.seamless-row .seg { margin: 6px 0 0; }
 .slider.wide-label { grid-template-columns: 96px 1fr; }
 .slider.off { opacity: .4; }
 

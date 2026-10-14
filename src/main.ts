@@ -12,6 +12,7 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { FullScreenQuad, Pass } from 'three/examples/jsm/postprocessing/Pass.js';
 import {
+  blendWithOf,
   Creature,
   defaultState,
   EYE_STYLES,
@@ -20,6 +21,7 @@ import {
   setSeamlessLowPoly,
   setSeamlessMode,
   type Attachment,
+  type BlendWith,
   type BoneRT,
   type CreatureState,
   type EyeFinish,
@@ -6376,17 +6378,9 @@ function sizesIn(c: Creature): PartSizes {
     return p;
   };
   return {
-    reach(id, t) {
+    profile(id) {
       const p = profile(id);
-      if (!p) return undefined;
-      // across the drawing at that height (held inside it past its ends)
-      const f = Math.min(1, Math.max(0, (t * p.len - p.lo) / (p.hi - p.lo))) * STEPS;
-      const k = Math.min(STEPS - 1, Math.floor(f));
-      return p.w[k] + (p.w[k + 1] - p.w[k]) * (f - k) || undefined;
-    },
-    span(id) {
-      const p = profile(id);
-      return p ? [p.lo / p.len, p.hi / p.len] : undefined;
+      return p ? { from: p.lo / p.len, to: p.hi / p.len, w: p.w } : undefined;
     },
     at: (id) => c.posedEnds(id),
   };
@@ -7272,33 +7266,38 @@ function renderMerge() {
   $<HTMLInputElement>('#color-blend').value = String(state.mergeColors ? (state.colorBlend ?? 0.12) : 0);
   // colors only blend where parts blend
   $('#color-blend-row').classList.toggle('off', !on);
-  // per creature, only when Settings leaves it to each creature
-  $('#seamless-row').hidden = settings.seamless !== 'creature';
-  $<HTMLInputElement>('#seamless').checked = state.seamless ?? true;
-  $<HTMLInputElement>('#seamless').disabled = !on;
+  // None is per creature, only when Settings leaves it to each creature; the
+  // rest also shape the quick joins, so they're there even with seamless joins off
+  const perCreature = settings.seamless === 'creature';
+  const shown = perCreature && state.seamless === false ? 'none' : blendWithOf(state);
+  $('#seamless-note').textContent = settings.seamless === 'off' ? '(off in Settings: picks what the quick joins blend)' : '(smooths blended parts when idle)';
+  document.querySelectorAll<HTMLButtonElement>('#blend-with button').forEach((b) => {
+    b.hidden = b.dataset.with === 'none' && !perCreature;
+    b.classList.toggle('active', b.dataset.with === shown);
+    // greyed out only when nothing blends
+    b.disabled = !on;
+  });
   $('#seamless-row').style.opacity = on ? '1' : '.45';
-  // listed under Seamless joins, but it shapes the quick joins too: greyed out only when nothing blends
-  const sub = on;
-  $('#blend-connected-row').hidden = settings.seamless !== 'creature';
-  $<HTMLInputElement>('#blend-connected').checked = state.blendConnected ?? true;
-  $<HTMLInputElement>('#blend-connected').disabled = !sub;
-  $('#blend-connected-row').style.opacity = sub ? '1' : '.45';
 }
 
-$<HTMLInputElement>('#blend-connected').onchange = (e) => {
-  state.blendConnected = (e.target as HTMLInputElement).checked;
-  creature.markMergeDirty();
+document.querySelectorAll<HTMLButtonElement>('#blend-with button').forEach((b) => {
+  b.onclick = () => setBlendWith(b.dataset.with as BlendWith | 'none');
+});
+function setBlendWith(to: BlendWith | 'none') {
+  if (to === 'none') {
+    if (state.seamless === false) return;
+    state.seamless = false;
+  } else {
+    if (to === blendWithOf(state) && state.seamless !== false) return;
+    if (state.seamless === false) state.seamless = true;
+    state.blendWith = to;
+    delete state.blendConnected;
+    creature.markMergeDirty();
+  }
   creature.invalidateSkin();
   commit();
   renderMerge();
-};
-
-$<HTMLInputElement>('#seamless').onchange = (e) => {
-  state.seamless = (e.target as HTMLInputElement).checked;
-  creature.invalidateSkin();
-  commit();
-  renderMerge();
-};
+}
 
 for (const k of ['size', 'spacing', 'height'] as const) {
   const input = $<HTMLInputElement>(`#eye-${k}`);

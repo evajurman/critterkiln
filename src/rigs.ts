@@ -734,14 +734,14 @@ export function reattachBone(rig: RigState, sceneId: string): PartCopy[] {
 
 /**
  * A part's real size, from its drawing, by scene id: how far it reaches out
- * from its bone at `t` along it (0 base, 1 tip), and how far along the bone
- * the drawing runs (it can run past either end). Undefined falls back to the
- * bone's default widths, base to tip.
+ * from its bone (`w`, evenly spaced) from `from` to `to` along it (as a
+ * share of the bone's length: a drawing can run past either end), and where
+ * the bone is now, posed (its base, and the end of its straight line): what's
+ * measured, as that's what you see. Undefined falls back to the bone's
+ * default widths, base to tip, and its rest pose.
  */
 export interface PartSizes {
-  reach(sceneId: string, t: number): number | undefined;
-  span(sceneId: string): [number, number] | undefined;
-  /** Where the bone is now, posed (its base, and the end of its straight line): what's measured, as that's what you see. */
+  profile(sceneId: string): { from: number; to: number; w: number[] } | undefined;
   at?(sceneId: string): { start: V3; end: V3 } | undefined;
 }
 
@@ -749,31 +749,53 @@ export interface PartSizes {
 const TIP_SNAP = 0.02;
 /** a new parent has to hold the base this much more deeply (as a share of its thickness) before the current one is given up */
 const PARENT_STICK = 0.1;
+/** a base this near a part (as a share of its thickness: 1 is its surface) touches it */
+const TOUCHING = 1.25;
 
-/** a base only in a part's starting end (behind where it begins) counts this much less: that end is the joint with what it grows from */
+/** a base behind where a part's bone begins (in the end it grows out of) counts this much less: that end is the joint with what it grows from */
 const BEHIND_START = 0.5;
 
+/** Distance from point (px, py) to the segment a-b, in 2D. */
+function segDist(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+  const dx = bx - ax, dy = by - ay;
+  const l2 = dx * dx + dy * dy;
+  const t = l2 < 1e-12 ? 0 : Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / l2));
+  return Math.hypot(px - ax - dx * t, py - ay - dy * t);
+}
+
 /**
- * How well a point sits on a bone, as a base: how far out from the bone's
- * middle line it is, as a share of the part's thickness there (under 1 inside
- * it), so a base near the middle of a thin tail counts as deeper in it than
- * one just under the skin of a big body. A point on the bone's tip beats
- * anything; one behind where the bone starts counts for less (BEHIND_START),
- * unless it's the first part (nothing else holds that end).
+ * How well a point sits on a part, as a base: 1 + its distance from the
+ * part's outline (negative inside), as a share of the part's thickness at its
+ * widest. So 1 is on the surface, under 1 inside it, 0 in the middle of its
+ * widest bit, and a base in a thin tail counts as deep as one in a big body
+ * for its size. The outline is the drawing turned round the bone (its ends
+ * round off as drawn). A point on the bone's tip beats anything; one behind
+ * where its bone starts counts for less (BEHIND_START), unless it's the first
+ * part (nothing else holds that end).
  */
 function seat(p: V3, c: ExpandedBone, sizes?: PartSizes): number {
   const { start, end } = sizes?.at?.(c.id) ?? c;
   if (len3(sub3(p, end)) < TIP_SNAP) return -1e3;
   const axis = sub3(end, start);
-  const l2 = axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2];
+  const L = Math.max(len3(axis), 1e-6);
+  const u = scale3(axis, 1 / L);
   const rel = sub3(p, start);
-  const along = l2 < 1e-9 ? 0 : (rel[0] * axis[0] + rel[1] * axis[1] + rel[2] * axis[2]) / l2;
-  // the nearest point along the part, as far as its drawing runs (past the bone's ends, if drawn so)
-  const [from, to] = sizes?.span(c.id) ?? [0, 1];
-  const t = Math.max(from, Math.min(to, along));
-  const r = sizes?.reach(c.id, t) ?? (c.width + ((c.widthEnd ?? c.width) - c.width) * Math.max(0, Math.min(1, t))) / 2;
-  const depth = len3(sub3(rel, scale3(axis, t))) / Math.max(r, 1e-3);
-  return along < from && c.parent ? depth + BEHIND_START : depth;
+  // where the point is beside the part: along it, and out from its middle line
+  const y = rel[0] * u[0] + rel[1] * u[1] + rel[2] * u[2];
+  const x = len3(sub3(rel, scale3(u, y)));
+  const prof = sizes?.profile(c.id) ?? { from: 0, to: 1, w: [c.width / 2, (c.widthEnd ?? c.width) / 2] };
+  const y0 = prof.from * L, y1 = prof.to * L, n = prof.w.length - 1;
+  const at = (k: number) => y0 + ((y1 - y0) * k) / n;
+  // the outline: up the middle line from the start, round the side, back to the middle at the end
+  let d = Math.min(segDist(y, x, y0, 0, at(0), prof.w[0]), segDist(y, x, at(n), prof.w[n], y1, 0));
+  for (let k = 0; k < n; k++) d = Math.min(d, segDist(y, x, at(k), prof.w[k], at(k + 1), prof.w[k + 1]));
+  let inside = false;
+  if (y >= y0 && y <= y1) {
+    const f = Math.min(n - 1e-9, ((y - y0) / Math.max(y1 - y0, 1e-9)) * n), k = Math.floor(f);
+    inside = x <= prof.w[k] + (prof.w[k + 1] - prof.w[k]) * (f - k);
+  }
+  const score = 1 + (inside ? -d : d) / Math.max(Math.max(...prof.w), 1e-3);
+  return y < 0 && c.parent ? score + BEHIND_START : score;
 }
 
 /**
@@ -826,14 +848,30 @@ export function nearestParent(rig: RigState, sceneId: string, sizes?: PartSizes)
   const skip = (c: ExpandedBone) => own.has(c.baseId) || (pair && c.sideSign === -1);
   // a middle part only holds a pair if both sides sit on it
   const score = (c: ExpandedBone) => (pair && c.sideSign === 0 ? Math.max(seat(base, c, sizes), seat(other, c, sizes)) : seat(base, c, sizes));
-  let best: ExpandedBone | null = null, bestScore = Infinity, current = Infinity;
-  for (const c of bones) {
-    if (skip(c)) continue;
-    const s = score(c);
-    if (c.id === left.parent) current = s;
-    if (s < bestScore) (best = c), (bestScore = s);
+  const scores = new Map<ExpandedBone, number>();
+  for (const c of bones) if (!skip(c)) scores.set(c, score(c));
+  let best: ExpandedBone | null = null, bestScore = Infinity;
+  for (const [c, s] of scores) if (s < bestScore) (best = c), (bestScore = s);
+  if (!best) return me.parent;
+  // where a part grows out of another, a base touching both sits on the one
+  // growing out (a tail's root sits on the tail, though it's inside the body too);
+  // a base right on a tip stays there (fingers on a hand don't hang off each other)
+  const growsFrom = (c: ExpandedBone, from: ExpandedBone) => {
+    for (let p = c.parent ? byId.get(c.parent) : undefined; p; p = p.parent ? byId.get(p.parent) : undefined) if (p === from) return true;
+    return false;
+  };
+  while (bestScore > -1e3) {
+    let next: ExpandedBone | null = null, nextScore = Infinity;
+    for (const [c, s] of scores) if (s <= TOUCHING && s < nextScore && growsFrom(c, best)) (next = c), (nextScore = s);
+    if (!next) break;
+    best = next;
+    bestScore = nextScore;
   }
-  if (!best || current <= bestScore + PARENT_STICK) return me.parent;
+  // the part it hangs off keeps it unless the new one holds it clearly deeper
+  // (or grows out of it: then it's the more specific of the two)
+  const now = left.parent ? byId.get(left.parent) : undefined;
+  const current = now ? scores.get(now) ?? Infinity : Infinity;
+  if (best === now || (now && !growsFrom(best, now) && current <= bestScore + PARENT_STICK)) return me.parent;
   // the twin on this side of a pair
   return me.sideSign === -1 && best.sideSign === 1 ? best.baseId + 'R' : best.id;
 }
