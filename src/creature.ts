@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { bvhFor, exactDistance, sharedNormals } from './distance';
 import { buildSkin, paintSkin, type SkinPart } from './skin';
-import { bounds, buildInflatedGeometry, defaultOutline, getMeshDetail, type Solid, type Vec2 } from './inflate';
+import { bounds, buildInflatedGeometry, defaultOutline, getMeshDetail, lumpFade, type Solid, type Vec2 } from './inflate';
 import {
   castsShadow,
   glowMaterial,
@@ -1082,6 +1082,14 @@ export class Creature {
       // and from the smooth (un-lumped) shapes: lumps can fold thin parts over themselves
       const smoothOpts = { ...geoOpts, lumps: 0 };
       mesh.userData.skinGeos = () => shapes.map((sh, i) => shapeGeo(sh, i, smoothOpts));
+      // eyes sit on the smooth shape too, with the lumps eased out under them (see syncEyes)
+      if (geoOpts.lumps) {
+        mesh.userData.lumpyGeo = geo;
+        mesh.userData.smoothGeo = () =>
+          shapes.length === 1
+            ? shapeGeo(shapes[0], 0, smoothOpts)
+            : cachedGeometry(JSON.stringify([shapes, smoothOpts, getMeshDetail()]) + bendKey(bd), () => joinShapes(shapes.map((sh, i) => shapeGeo(sh, i, smoothOpts))));
+      }
       mesh.userData.opacity = p.opacity ?? 1;
       mesh.castShadow = castsShadow(style);
       // (soft shadows also draw receivers into the shadow map: glass mustn't block the light)
@@ -1606,7 +1614,19 @@ export class Creature {
         });
         const linked = onlyConnected ? (a: number, b: number) => this.blendable(owners[a], owners[b]) : undefined;
         const keep = bases.length || beside.length ? owners.map((o) => (bases.includes(o) ? 0 : beside.includes(o) ? 2 : 1)) : undefined;
-        const geo = await buildSkin(parts, { h, colorBlend: kc, lowPoly, lumps, linked, keep, shouldStop: () => version !== this.skinVersion });
+        // no lumps under the eyes (they sit on the smooth shape: see flattenUnderEyes)
+        const eyes = lumps
+          ? shown.flatMap((b) => {
+              const toSkin = toGroup.clone().multiply(b.mesh!.matrixWorld);
+              const sc = new THREE.Vector3().setFromMatrixScale(toSkin);
+              const scale = (sc.x + sc.y + sc.z) / 3;
+              return (this.eyeSpots.get(b.def.id) ?? []).map((sp) => {
+                const at = new THREE.Vector3(sp.x, sp.y, sp.z).applyMatrix4(toSkin);
+                return { x: at.x, y: at.y, z: at.z, r: (sp.eye ?? sp.r) * scale };
+              });
+            })
+          : undefined;
+        const geo = await buildSkin(parts, { h, colorBlend: kc, lowPoly, lumps, eyes, linked, keep, shouldStop: () => version !== this.skinVersion });
         if (version !== this.skinVersion) {
           // something changed meanwhile: it'll be retried once things settle again
           geo?.dispose();
@@ -1661,6 +1681,8 @@ export class Creature {
       blend,
       blendWithOf(s),
       s.rig,
+      // eyes flatten clay lumps under them (on anything else they're only dressing)
+      [...this.eyeSpots].filter(([id]) => this.bones.get(id)?.mesh?.userData.lumpyGeo).map(([id, spots]) => [id, spots.map((sp) => [sp.x, sp.y, sp.z, sp.r].map(r4))]),
       this.group.position.toArray().map(r4),
       this.list.map((b) => b.pivot.quaternion.toArray().map(r4)),
       Object.entries(s.parts).map(([id, p]) => {
@@ -2141,8 +2163,8 @@ export class Creature {
     this.mergeDirty = true;
     for (const g of this.eyes) g.removeFromParent();
     this.eyes = [];
-    // felt: clear fuzz from under the eyes (reset first; refilled below)
-    for (const b of this.list) if (b.mesh) setFuzzMask(b.mesh, []);
+    // felt: clear fuzz from under the eyes (reset first; refilled below); clay: lumps back
+    for (const b of this.list) if (b.mesh) (setFuzzMask(b.mesh, []), this.flattenUnderEyes(b, []));
     // the seamless skin reads these too: no eyes, no bare patches
     this.eyeSpots = new Map();
     if (!e.enabled) return;
@@ -2161,7 +2183,49 @@ export class Creature {
         this.placeEyes(b, pair, pairIndex, group, this.eyeSpots.get(b.def.id)!);
       }
     }
-    for (const [b] of groups) setFuzzMask(b.mesh!, this.eyeSpots.get(b.def.id)!);
+    for (const [b] of groups) {
+      setFuzzMask(b.mesh!, this.eyeSpots.get(b.def.id)!);
+      this.flattenUnderEyes(b, this.eyeSpots.get(b.def.id)!);
+    }
+  }
+
+  /**
+   * Clay and stone: ease a part's lumps out under its eyes, so each eye sits
+   * on the smooth shape it was placed on (not sunk into a lump, or tipped off
+   * one). No spots puts every lump back.
+   */
+  private flattenUnderEyes(b: BoneRT, spots: FuzzSpot[]) {
+    const mesh = b.mesh!;
+    const lumpy = mesh.userData.lumpyGeo as THREE.BufferGeometry | undefined;
+    if (!lumpy) return;
+    let geo = lumpy;
+    if (spots.length) {
+      const smooth = (mesh.userData.smoothGeo as () => THREE.BufferGeometry)();
+      const A = lumpy.getAttribute('position'), S = smooth.getAttribute('position');
+      if (A.count === S.count) {
+        geo = lumpy.clone();
+        const P = geo.getAttribute('position') as THREE.BufferAttribute;
+        for (let i = 0; i < P.count; i++) {
+          const x = S.getX(i), y = S.getY(i), z = S.getZ(i);
+          let w = 1;
+          for (const sp of spots) w *= lumpFade(Math.hypot(x - sp.x, y - sp.y, z - sp.z), sp.eye ?? sp.r);
+          P.setXYZ(i, x + (A.getX(i) - x) * w, y + (A.getY(i) - y) * w, z + (A.getZ(i) - z) * w);
+        }
+        geo.computeVertexNormals();
+        geo.computeBoundingBox();
+        geo.computeBoundingSphere();
+      }
+    }
+    const old = mesh.userData.baseGeo as THREE.BufferGeometry;
+    if (old === geo) return;
+    // the part (and its ink outline) show it; joins are rebuilt from it
+    mesh.traverse((o) => {
+      if (o instanceof THREE.Mesh && o.geometry === old) o.geometry = geo;
+    });
+    if (mesh.geometry === old) mesh.geometry = geo;
+    mesh.userData.baseGeo = geo;
+    if (old !== lumpy) old.dispose();
+    this.mergeDirty = true;
   }
 
   /**
@@ -2213,7 +2277,8 @@ export class Creature {
     // Work in the part's rest frame so eyes stick to it whatever the pose.
     const toWorld = part.restWorld;
     const toLocal = toWorld.clone().invert();
-    const geo = (part.mesh!.userData.baseGeo as THREE.BufferGeometry) ?? part.mesh!.geometry;
+    // on the smooth shape: lumps are eased out under the eyes (see flattenUnderEyes)
+    const geo = (part.mesh!.userData.smoothGeo as (() => THREE.BufferGeometry) | undefined)?.() ?? (part.mesh!.userData.baseGeo as THREE.BufferGeometry) ?? part.mesh!.geometry;
     const forward = new THREE.Vector3(...(this.rig.eyeDir ?? [0, 0, 1])).normalize();
     const up = new THREE.Vector3(0, 1, 0);
     if (Math.abs(up.dot(forward)) > 0.9) up.set(0, 0, -1);
@@ -2332,7 +2397,7 @@ export class Creature {
       });
       group.add(eye);
       // bare patch just inside the eye's own rim, so it stays hidden behind it
-      spots.push({ x: hit.point.x, y: hit.point.y, z: hit.point.z, r: r * (style === 'flat' ? 1.1 : style === 'button' ? 1.0 : 0.85) });
+      spots.push({ x: hit.point.x, y: hit.point.y, z: hit.point.z, r: r * (style === 'flat' ? 1.1 : style === 'button' ? 1.0 : 0.85), eye: r });
     }
   }
 

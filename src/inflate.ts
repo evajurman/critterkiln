@@ -536,6 +536,16 @@ export function applyLumps(geo: THREE.BufferGeometry, amp: number, cap?: Float32
   geo.computeVertexNormals();
 }
 
+/**
+ * How much clay lumping is left at distance `d` from an eye of radius `r`:
+ * none under the eye (it sits on the smooth shape, as placed), easing back in
+ * just past its rim.
+ */
+export function lumpFade(d: number, r: number): number {
+  const t = Math.max(0, Math.min(1, (d - 1.1 * r) / (0.8 * r)));
+  return t * t * (3 - 2 * t);
+}
+
 /** Default capsule-ish outline running along +Y from 0 to length. */
 export function defaultOutline(length: number, width: number, widthEnd = width): Vec2[] {
   const out: Vec2[] = [];

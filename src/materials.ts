@@ -1633,6 +1633,8 @@ export interface FuzzSpot {
   y: number;
   z: number;
   r: number;
+  /** the eye's own radius (clay lumps fade out under it: see lumpFade) */
+  eye?: number;
 }
 
 function emptyMask(): THREE.Vector4[] {

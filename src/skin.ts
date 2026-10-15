@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { MeshBVH } from 'three-mesh-bvh';
 import { bvhFor, exactDistance, insideByRay, sharedNormals } from './distance';
-import { applyLumps } from './inflate';
+import { applyLumps, lumpFade } from './inflate';
 
 /**
  * Seamless skins: rebuild a group of merged parts as ONE continuous surface.
@@ -38,6 +38,8 @@ export interface SkinOptions {
   lowPoly: boolean;
   /** clay lump strength to add back onto the finished skin (0 = none) */
   lumps?: number;
+  /** eyes (centre and radius, in skin space): no lumps under them (see lumpFade) */
+  eyes?: { x: number; y: number; z: number; r: number }[];
   /** polled between chunks: return true to abandon the build */
   shouldStop: () => boolean;
   /**
@@ -711,6 +713,14 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
       if (m < cap[a]) cap[a] = m;
       if (m < cap[b]) cap[b] = m;
       if (m < cap[c]) cap[c] = m;
+    }
+    // eyes sit on the smooth shape: lumps fade out under them
+    if (opts.eyes?.length) {
+      const P0 = geo.getAttribute('position') as THREE.BufferAttribute;
+      for (let i = 0; i < P0.count; i++) {
+        const x = P0.getX(i), y = P0.getY(i), z = P0.getZ(i);
+        for (const e of opts.eyes) cap[i] *= lumpFade(Math.hypot(x - e.x, y - e.y, z - e.z), e.r);
+      }
     }
     // pushed every which way, a tight crease's sides can fold over too
     // (lumps are gentle slopes: no face should turn more than ~45 degrees)
