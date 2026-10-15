@@ -25,6 +25,7 @@ import {
   type StyleSettings,
 } from './materials';
 import { MAX_BEND, bendCurve, expandRig, onCurve, type BendCurve, type ExpandedBone, type ExpandedRig, type RigState, type V3 } from './rigs';
+import type { PartAnim } from './animate';
 import { buildThing, disposeThing, partPieceGeometry, type Thing, type WrapSurface } from './stuff';
 
 /** One drawn shape of a part, puffed up on its own: drawn from the front (the default) or from the side. */
@@ -207,6 +208,8 @@ export interface CreatureState {
   placement?: Placement;
   /** settle onto the floor after every bend or resize (default on; lifting the creature turns it off) */
   keepFloor?: boolean;
+  /** looping motions, per part (scene id): see src/animate.ts */
+  anims?: Record<string, PartAnim>;
 }
 
 export interface Placement {
@@ -1296,16 +1299,42 @@ export class Creature {
     return [(bb.min.x + bb.max.x) / 2, (bb.min.y + bb.max.y) / 2, bb.max.z * 0.9];
   }
 
+  /**
+   * Looping motion shown on top of the pose (Animate tab): per bone, a turn
+   * after its pose and how puffed up it is. Never saved into the pose.
+   */
+  private anim: Map<string, { q: THREE.Quaternion; s: number }> | null = null;
+  /** meshes puffed by Breathe, to put back to their own width */
+  private puffed = new Set<THREE.Mesh>();
+  setAnim(a: Map<string, { q: THREE.Quaternion; s: number }> | null) {
+    if (!a && !this.anim) return;
+    this.anim = a;
+    this.applyPose();
+  }
+
   applyPose() {
     this.baseTouch.clear();
     // only a real change re-merges: sync() calls this on every look edit too
     const before = this.list.map((b) => b.pivot.quaternion.clone());
+    const puffBefore = [...this.puffed].map((m) => m.scale.x).join();
     const pos = this.group.position.clone();
+    for (const m of this.puffed) m.scale.x = m.scale.z = 1;
+    this.puffed.clear();
     for (const b of this.list) {
       const q = this.state.pose[b.def.id];
       b.pivot.quaternion.copy(b.restQuat);
       if (q) b.pivot.quaternion.multiply(new THREE.Quaternion(...q));
+      const a = this.anim?.get(b.def.id);
+      if (a) {
+        b.pivot.quaternion.multiply(a.q);
+        // TODO(anim): eyes and attached stuff don't puff with the part
+        if (b.mesh && a.s !== 1) {
+          b.mesh.scale.x = b.mesh.scale.z = a.s;
+          this.puffed.add(b.mesh);
+        }
+      }
     }
+    if ([...this.puffed].map((m) => m.scale.x).join() !== puffBefore) this.mergeDirty = true;
     this.group.position.set(...this.state.rootOffset);
     if (!this.group.position.equals(pos) || this.list.some((b, i) => !b.pivot.quaternion.equals(before[i]))) this.mergeDirty = true;
   }
@@ -1313,8 +1342,11 @@ export class Creature {
   capturePose() {
     const pose: CreatureState['pose'] = {};
     for (const b of this.list) {
-      if (b.pivot.quaternion.angleTo(b.restQuat) > 1e-4) {
-        const q = b.restQuat.clone().invert().multiply(b.pivot.quaternion);
+      // the looping motion on top is left out
+      const a = this.anim?.get(b.def.id);
+      const posed = a ? b.pivot.quaternion.clone().multiply(a.q.clone().invert()) : b.pivot.quaternion;
+      if (posed.angleTo(b.restQuat) > 1e-4) {
+        const q = b.restQuat.clone().invert().multiply(posed);
         pose[b.def.id] = [q.x, q.y, q.z, q.w];
       }
     }
@@ -1460,6 +1492,11 @@ export class Creature {
 
   markMergeDirty() {
     this.mergeDirty = true;
+  }
+
+  /** joins still waiting to be (fully) fused: updateMerge() has more to do */
+  get mergePending(): boolean {
+    return this.mergeDirty;
   }
 
   /**
@@ -1685,6 +1722,7 @@ export class Creature {
       [...this.eyeSpots].filter(([id]) => this.bones.get(id)?.mesh?.userData.lumpyGeo).map(([id, spots]) => [id, spots.map((sp) => [sp.x, sp.y, sp.z, sp.r].map(r4))]),
       this.group.position.toArray().map(r4),
       this.list.map((b) => b.pivot.quaternion.toArray().map(r4)),
+      [...this.puffed].map((m) => r4(m.scale.x)),
       Object.entries(s.parts).map(([id, p]) => {
         const style = p.style ?? s.style;
         const k = this.settingsFor(style);

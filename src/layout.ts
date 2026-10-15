@@ -16,7 +16,7 @@
 /** 'shape', 'look', or a made tab's id */
 export type Tab = string;
 /** what a tab started from: its defaults, for Reset */
-type Base = 'shape' | 'look';
+type Base = 'shape' | 'look' | 'animate';
 interface TabDef {
   id: string;
   name: string;
@@ -89,6 +89,8 @@ const TOOLS: Record<string, ToolDef> = {
   dof: { name: 'Depth of field', icon: duo('crosshairs'), kind: 'wide', always: true },
   'photo-clear': { name: 'Transparent background', icon: duo('chess-board'), kind: 'wide', always: true },
   photo: { name: 'Take photo', icon: slab('camera'), kind: 'wide', always: true },
+  anim: { name: 'Part animation', icon: slab('arrows-rotate'), kind: 'wide' },
+  'anim-play': { name: 'Play loop', icon: slab('circle'), kind: 'wide', always: true },
 };
 
 interface Sec {
@@ -157,31 +159,42 @@ const SECTIONS: Omit<Sec, 'place'>[] = [
   { id: 'camera', name: 'Camera', icon: 'arrows-rotate', color: '#5b6170', tools: ['views'] },
   { id: 'backdrop', name: 'Backdrop', icon: 'image', color: '#8a63d2', tools: ['backdrop-color', 'ground', 'light-turn', 'ao', 'dof'], fold: true },
   { id: 'photo', name: 'Photo', icon: 'camera', color: '#3b82f6', tools: ['photo-clear', 'photo'], fold: true },
+  { id: 'anim', name: 'Animate this part', icon: 'arrows-rotate', color: '#e0609a', tools: ['anim'] },
+  { id: 'loop', name: 'Loop', icon: 'circle', color: '#8a63d2', tools: ['anim-play'] },
 ];
 /** The two tabs differ only in where their sections start out, and in their gizmos */
 const DEFAULT_PLACES: Record<Base, Record<string, Place>> = {
   shape: {
     plan: 'side', parts: 'side', part: 'side', grow: 'side', pose: 'side', color: 'hidden', material: 'hidden',
-    quick: 'tl', mirror: 'tl', eyes: 'tl', attach: 'tl', camera: 'br', backdrop: 'hidden', photo: 'hidden',
+    quick: 'tl', mirror: 'tl', eyes: 'tl', attach: 'tl', camera: 'br', backdrop: 'hidden', photo: 'hidden', anim: 'hidden', loop: 'hidden',
   },
   look: {
     plan: 'hidden', parts: 'hidden', part: 'hidden', grow: 'hidden', pose: 'hidden', color: 'side', material: 'side',
-    quick: 'tl', mirror: 'hidden', eyes: 'tl', attach: 'tl', camera: 'br', backdrop: 'tr', photo: 'tr',
+    quick: 'tl', mirror: 'hidden', eyes: 'tl', attach: 'tl', camera: 'br', backdrop: 'tr', photo: 'tr', anim: 'hidden', loop: 'hidden',
+  },
+  animate: {
+    plan: 'hidden', parts: 'side', part: 'hidden', grow: 'hidden', pose: 'hidden', color: 'hidden', material: 'hidden',
+    quick: 'hidden', mirror: 'tl', eyes: 'hidden', attach: 'hidden', camera: 'br', backdrop: 'tr', photo: 'tr', anim: 'side', loop: 'side',
   },
 };
-const DEFAULT_GIZMOS: Record<Base, Gizmos> = { shape: 'full', look: 'none' };
+const DEFAULT_GIZMOS: Record<Base, Gizmos> = { shape: 'full', look: 'none', animate: 'none' };
 /** each tool's home section, where it goes back to if its own section is deleted */
 const HOME = new Map(SECTIONS.flatMap((s) => s.tools.map((t) => [t, s.id] as const)));
 const PLACE_NAMES: [Place, string][] = [
   ['side', 'Sidebar'], ['tl', 'Top left'], ['tr', 'Top right'], ['bl', 'Bottom left'], ['br', 'Bottom right'], ['hidden', 'Hidden'],
 ];
 const made = (t: Tab) => tabs.find((o) => o.id === t);
-const tabName = (t: Tab) => (t === 'shape' ? 'Shape' : t === 'look' ? 'Look' : (made(t)?.name ?? 'Tab'));
-const baseOf = (t: Tab): Base => (t === 'shape' || t === 'look' ? t : (made(t)?.base ?? 'shape'));
+const BASES: readonly Base[] = ['shape', 'look', 'animate'];
+const isBase = (t: unknown): t is Base => BASES.includes(t as Base);
+const tabName = (t: Tab) => (t === 'shape' ? 'Shape' : t === 'look' ? 'Look' : t === 'animate' ? 'Animate' : (made(t)?.name ?? 'Tab'));
+const baseOf = (t: Tab): Base => (isBase(t) ? t : (made(t)?.base ?? 'shape'));
 
 function defaults(t: Tab): Layout {
   const b = baseOf(t);
-  return { sections: SECTIONS.map((s) => ({ ...s, tools: [...s.tools], place: DEFAULT_PLACES[b][s.id] })), gizmos: DEFAULT_GIZMOS[b] };
+  const sections = SECTIONS.map((s) => ({ ...s, tools: [...s.tools], place: DEFAULT_PLACES[b][s.id] }));
+  // Animate: the part's motion and the loop come first
+  if (b === 'animate') for (const id of ['loop', 'anim']) sections.unshift(...sections.splice(sections.findIndex((s) => s.id === id), 1));
+  return { sections, gizmos: DEFAULT_GIZMOS[b] };
 }
 
 /** A saved layout, with anything stale dropped and any tool it's missing (new in the app) put back home, where it sits by default. */
@@ -237,14 +250,14 @@ const tabs: TabDef[] = (Array.isArray(saved.tabs) ? (saved.tabs as Partial<TabDe
         name: typeof t.name === 'string' && t.name.trim() ? t.name.slice(0, 24) : 'Tab',
         icon: ICONS.some(([n]) => n === t.icon) ? t.icon! : 'wand-magic-sparkles',
         color: typeof t.color === 'string' && /^#[0-9a-f]{6}$/i.test(t.color) ? t.color : COLORS[0],
-        base: t.base === 'look' ? 'look' : 'shape',
+        base: isBase(t.base) ? t.base : 'shape',
       } as TabDef]
     : [],
 );
 /** Off: the tabs along the top are just their icons (Shape, Look and Stuff too) */
 let showTabNames = saved.showTabNames !== false;
 const toolIds = (raw: unknown) => (Array.isArray(raw) ? (raw as unknown[]).filter((id): id is string => typeof id === 'string' && !!TOOLS[id]) : []);
-const layouts: Record<Tab, Layout> = { shape: repair(saved.shape, 'shape'), look: repair(saved.look, 'look') };
+const layouts: Record<Tab, Layout> = { shape: repair(saved.shape, 'shape'), look: repair(saved.look, 'look'), animate: repair(saved.animate, 'animate') };
 for (const t of tabs) layouts[t.id] = repair(saved[t.id], t.id);
 /** options the notice was told never to mention again */
 let quietTools = new Set(toolIds(saved.quietTools));
@@ -628,7 +641,7 @@ function showUpdateNotice(missing: string[]) {
       const act = b.dataset.act;
       if (act === 'reset') {
         // Shape and Look back to how they start out (keeping which handles show)
-        for (const t of ['shape', 'look']) layouts[t] = { ...defaults(t), gizmos: layouts[t].gizmos };
+        for (const t of BASES) layouts[t] = { ...defaults(t), gizmos: layouts[t].gizmos };
         quietTools.clear();
         closePops();
         render();

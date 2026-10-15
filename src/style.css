@@ -1237,3 +1237,17 @@ html.theme-color[data-mode="custom"] {
 .ck-tab-row .piece-icon { flex: none; width: 30px; height: 30px; opacity: 1; background: var(--card); border-radius: 8px; }
 .ck-tab-row .ck-tab-name { color: var(--ink); }
 .ck-menu-links { display: flex; justify-content: space-between; gap: 8px; margin-top: 10px; }
+
+/* Animate tab (proof of concept) */
+.anim-kinds { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 8px; }
+.anim-kinds button { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 7px 4px; border-radius: 10px; border: 1.5px solid transparent; background: var(--bg); color: var(--muted); font-weight: var(--w-bold); font-size: 11.5px; cursor: var(--cursor-click); }
+.anim-kinds button i { font-size: 17px; }
+.anim-kinds button.active { background: var(--sel-bg); border-color: var(--blue); color: var(--sel-ink); }
+.anim-kinds button:disabled { opacity: .5; cursor: default; }
+.anim-speed-row { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.anim-speed-row .seg { flex: 1; margin: 4px 0; }
+.anim-play-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.anim-play-row #anim-play { width: auto; flex: none; padding-inline: 14px; }
+.anim-play-row input { flex: 1; min-width: 0; }
+#anim-render { width: 100%; }
+#anim-render.recording { color: #e5484d; }

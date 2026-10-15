@@ -612,11 +612,60 @@ export interface SplitResult {
   pairs: [string, string][];
   /** height (along the bone) of the cut, in the bone's drawing coordinates */
   at: number;
+  /**
+   * how much each half's piece of drawing is stretched along its bone to fit
+   * it (a split at a bend: each half is shorter end to end than the curve it
+   * keeps). Unset: 1.
+   */
+  lowScale?: number;
+  highScale?: number;
 }
 
 /**
- * Split a bone at its middle into two jointed halves. Anything that hung off
- * the far half moves to the new bone; a bendy bone shares its curve between them.
+ * A definition's rest frame (as the creature builds it, for the +X twin): X
+ * across the drawing, Y along the bone, Z out of the drawing.
+ */
+function defAxes(d: BoneDef): { x: V3; y: V3; z: V3 } {
+  const y = scale3(sub3(d.end, d.start), 1 / (len3(sub3(d.end, d.start)) || 1));
+  const dot = (a: V3, b: V3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  let x = sub3(d.side, scale3(y, dot(d.side, y)));
+  if (len3(x) < 1e-3) x = sub3([1, 0, 0], scale3(y, y[0]));
+  if (len3(x) < 1e-3) x = [0, 0, 1];
+  x = scale3(x, 1 / len3(x));
+  if (d.roll) x = turn3(x, y, d.roll);
+  const z = cross3(x, y);
+  return { x, y, z: scale3(z, 1 / (len3(z) || 1)) };
+}
+
+/**
+ * Where to split a bone drawn with bend points: at the first one (the knee of
+ * a bent leg), as a height along its drawing. Null for none, or one right by an end.
+ */
+function firstBendCut(d: BoneDef, len: number): number | null {
+  if (!d.bendNodes?.length) return null;
+  const first = Math.min(...bendNodeAt(d, len).filter((f) => f > 0.08 && f < 0.92));
+  return Number.isFinite(first) ? first * len : null;
+}
+
+/** How far along its curve each of a bone's bend points is, 0..1 (the nearest sample to it). */
+function bendNodeAt(d: BoneDef, len: number): number[] {
+  const c = bendCurve(d.bendNodes!, len, d.bendRound);
+  return d.bendNodes!.map((n) => {
+    const q = scale3(n, len);
+    let best = 0, bestD = Infinity;
+    for (let i = 0; i <= c.k; i++) {
+      const dd = len3(sub3([c.pts[i * 3], c.pts[i * 3 + 1], c.pts[i * 3 + 2]], q));
+      if (dd < bestD) (bestD = dd), (best = i);
+    }
+    return best / c.k;
+  });
+}
+
+/**
+ * Split a bone into two jointed halves: at its first bend point if it has one
+ * (the joint goes right on the bend, each half keeping its share of the
+ * curve), otherwise at its middle. Anything that hung off the far half moves
+ * to the new bone; a bendy bone shares its curve between them.
  */
 export function splitBone(rig: RigState, sceneId: string): SplitResult | null {
   const f = findDef(rig, sceneId);
@@ -625,6 +674,8 @@ export function splitBone(rig: RigState, sceneId: string): SplitResult | null {
   const dir = sub3(d.end, d.start);
   const len = len3(dir);
   if (len < 0.04) return null;
+  const cut = firstBendCut(d, len);
+  if (cut !== null) return splitAtBend(rig, d, len, cut);
   const mid = round3(scale3(add3(d.start, d.end), 0.5));
   const w0 = d.width, w1 = d.widthEnd ?? d.width;
   const wMid = Math.round(((w0 + w1) / 2) * 1000) / 1000;
@@ -685,6 +736,81 @@ export function splitBone(rig: RigState, sceneId: string): SplitResult | null {
   rig.bones.splice(rig.bones.indexOf(d) + 1, 0, upper);
   const lower = partIds(d), top = partIds(upper);
   return { pairs: lower.map((id, i) => [id, top[i]] as [string, string]), at: len / 2 };
+}
+
+/** splitBone at a bend point: the cut is `cut` along the drawing (of `len`). */
+function splitAtBend(rig: RigState, d: BoneDef, len: number, cut: number): SplitResult {
+  const c = bendCurve(d.bendNodes!, len, d.bendRound);
+  const ax = defAxes(d);
+  const start: V3 = [...d.start], end: V3 = [...d.end];
+  // a point on the old curve (at height y along the drawing), in the skeleton
+  const world = (y: number): V3 => {
+    const p = onCurve(c, len, 0, y, 0).p;
+    return add3(start, add3(add3(scale3(ax.x, p[0]), scale3(ax.y, p[1])), scale3(ax.z, p[2])));
+  };
+  const joint = round3(world(cut));
+  const f = cut / len;
+  const w0 = d.width, w1 = d.widthEnd ?? d.width;
+  const wCut = Math.round((w0 + (w1 - w0) * f) * 1000) / 1000;
+  // each half keeps the bend points that fall in it (where they are along the curve);
+  // one with none takes its middle, so a piece of an arc stays an arc
+  const nodeAt = bendNodeAt(d, len).map((t) => t * len);
+  const inside = (lo: number, hi: number) => {
+    const ys = nodeAt.filter((y) => y > lo + len * 0.02 && y < hi - len * 0.02).sort((p, q) => p - q);
+    // plus a point between each pair (ends included), so a half holds an S-bend, not just a circle
+    const stops = [lo, ...ys, hi];
+    return ys.length ? stops.slice(1).flatMap((y, i) => (i < ys.length ? [(stops[i] + y) / 2, y] : [(stops[i] + y) / 2])) : [(lo + hi) / 2];
+  };
+  const yLow = inside(0, cut), yHigh = inside(cut, len);
+  const nid = uniqueId(rig, d.id.replace(/\d+$/, ''));
+  const upper: BoneDef = {
+    ...structuredClone(d),
+    id: nid,
+    name: d.name.replace(/ \d+$/, '') + ' 2',
+    parent: d.id,
+    start: joint,
+    end,
+    width: wCut,
+    widthEnd: w1,
+    anchor: false,
+    loose: undefined,
+  };
+  d.end = joint;
+  d.widthEnd = wCut;
+  delete d.bendRound;
+  delete upper.bendRound;
+  // each half's share of the curve, measured off its own new straight line
+  const nodesFor = (b: BoneDef, ys: number[]): V3[] => {
+    const a = defAxes(b), l = len3(sub3(b.end, b.start)) || 1;
+    return ys.map((y) => {
+      const w = sub3(world(y), b.start);
+      const r = (v: number) => Math.round((v / l) * 1000) / 1000;
+      const dot = (u: V3) => w[0] * u[0] + w[1] * u[1] + w[2] * u[2];
+      return [r(dot(a.x)), r(dot(a.y)), r(dot(a.z))] as V3;
+    });
+  };
+  d.bendNodes = nodesFor(d, yLow);
+  upper.bendNodes = nodesFor(upper, yHigh);
+
+  // children attached past the cut now hang off the new bone
+  const dir = sub3(end, start);
+  const along = (p: V3) => ((p[0] - start[0]) * dir[0] + (p[1] - start[1]) * dir[1] + (p[2] - start[2]) * dir[2]) / (len * len);
+  for (const o of rig.bones) {
+    if (o === upper) continue;
+    if (o.parent === d.id) {
+      if (along(o.start) > f) o.parent = nid;
+    } else if (!o.mirror && d.mirror && (o.parent === d.id + 'L' || o.parent === d.id + 'R')) {
+      const side = o.parent.slice(-1);
+      if (along(side === 'R' ? mirrorV(o.start) : o.start) > f) o.parent = nid + side;
+    }
+  }
+  rig.bones.splice(rig.bones.indexOf(d) + 1, 0, upper);
+  const lower = partIds(d), top = partIds(upper);
+  // each half's drawing laid on the same stretch of curve as before: the
+  // drawing runs along the straight length, so scale it from the cut's
+  const lowScale = len3(sub3(d.end, d.start)) / cut;
+  const highScale = len3(sub3(upper.end, upper.start)) / (len - cut);
+  return { pairs: lower.map((id, i) => [id, top[i]] as [string, string]), at: cut, lowScale, highScale };
 }
 
 /** Add one segment continuing on from the tip of a bone (a hand, a tail tip...). */

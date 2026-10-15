@@ -72,6 +72,8 @@ import {
   type StyleId,
 } from './materials';
 import { installScrollbars } from './scrollbars';
+import { applyPalette, GIFEncoder, quantize } from 'gifenc';
+import { ANIM_KINDS, animOffset, animP, defaultAnim, leanAt, leanOf, leanQuat, mirrorAnim, reachAt, reachRim, rimLean, type PartAnim } from './animate';
 import { customTabs, gizmos, initLayout, setLayoutIdle, setLayoutTab, setSceneColors, type Tab } from './layout';
 import { installCursorPress } from './cursorPress';
 import { captureShortcut, hasCustomShortcuts, is, keyLabel, labelShortcuts, renderShortcutSheet, resetShortcuts, ridesSurface, stopListening } from './shortcuts';
@@ -752,6 +754,8 @@ interface World {
   workbench?: Thing;
   /** scene name, used for .scene files */
   name?: string;
+  /** how long one whole animation loop takes, seconds (Animate tab) */
+  animSecs?: number;
 }
 
 const WORLD_KEY = 'creature-creator/world';
@@ -798,7 +802,7 @@ function loadWorld(): World | null {
     if (raw) {
       const w = JSON.parse(raw) as World;
       const list = (w.creatures ?? []).map(migrate).filter((s): s is CreatureState => !!s);
-      if (list.length) return { creatures: list, active: Math.min(Math.max(0, w.active ?? 0), list.length - 1), workbench: w.workbench, name: w.name };
+      if (list.length) return { creatures: list, active: Math.min(Math.max(0, w.active ?? 0), list.length - 1), workbench: w.workbench, name: w.name, animSecs: w.animSecs };
     }
     // the single-creature autosave from before scenes existed
     const old = localStorage.getItem(OLD_KEY);
@@ -827,6 +831,14 @@ function migrate(data: unknown): CreatureState | null {
       s.pose = {};
       delete s.rigId;
     }
+    // from the pose-keyframes try: a creature closed mid-Animate gets its own pose back
+    const kf = s as { keys?: unknown; animBase?: { pose: CreatureState['pose']; root: V3 } };
+    if (kf.animBase) {
+      s.pose = kf.animBase.pose;
+      s.rootOffset = kf.animBase.root;
+    }
+    delete kf.animBase;
+    delete kf.keys;
     const e = s.eyes as Partial<CreatureState['eyes']> & { size?: number; spacing?: number; height?: number };
     if (!e.pairs) {
       s.eyes = {
@@ -5990,6 +6002,7 @@ function renderEyes() {
 
 function renderUI() {
   if (!creature.bones.has(selected)) selected = creature.list[0].def.id;
+  renderAnim();
   renderRigs();
   renderParts();
   renderPartCard();
@@ -6296,11 +6309,11 @@ $('#rig-split').onclick = () => {
     const shapes = partShapes(p);
     const below = shapes.flatMap((sh) => {
       const l = clipLoop(sh.outline, r.at, 'below');
-      return l ? [{ ...sh, outline: l }] : [];
+      return l ? [{ ...sh, outline: l.map(([x, y]) => [x, y * (r.lowScale ?? 1)] as Vec2) }] : [];
     });
     const above = shapes.flatMap((sh) => {
       const l = clipLoop(sh.outline, r.at, 'above');
-      return l ? [{ ...sh, outline: l.map(([x, y]) => [x, y - r.at] as Vec2) }] : [];
+      return l ? [{ ...sh, outline: l.map(([x, y]) => [x, (y - r.at) * (r.highScale ?? 1)] as Vec2) }] : [];
     });
     setPartShapes(p, below);
     setPartShapes(upper, above);
@@ -7458,14 +7471,18 @@ function withCleanScene<T>(fn: () => T): T {
   const skel = handlesVisible();
   const helper = gizmo.getHelper();
   const gizmoShown = helper.visible;
+  // the Animate tab's drawn motion path and its handles
+  const pathShown = animViz.visible;
   creature.setSkeletonVisible(false);
   creature.flash(null, 0);
   helper.visible = false;
+  animViz.visible = false;
   try {
     return fn();
   } finally {
     creature.setSkeletonVisible(skel);
     helper.visible = gizmoShown;
+    animViz.visible = pathShown;
   }
 }
 
@@ -7731,7 +7748,8 @@ function shadowsChanged(): boolean {
  */
 const SETTLE_AFTER_MS = 600;
 function settleWhenIdle(now: number) {
-  const busy = !!drawState || !!drag || gizmo.dragging || mode === 'stuff';
+  // a playing loop changes the shape every frame: skins wait till it's paused
+  const busy = !!drawState || !!drag || gizmo.dragging || mode === 'stuff' || animMoving() || !!animRendering;
   let building = false;
   for (const c of creatures) {
     if (c.skinState === 'building') building = true;
@@ -7780,6 +7798,7 @@ function loop(now: number) {
   if (mode === 'stuff') flashPiece(drawState ? 0 : Math.max(0, f));
   else creature.flash(drawState ? null : selected, Math.max(0, f));
   if (creature.tickBoing(now)) invalidate(1);
+  tickAnim(now);
   // while something's dragged, moving joins blend colors more cheaply (see setDragging)
   const dragging = !!drag || gizmo.dragging;
   // on the fast setting, moving joins aren't fused at all until it's let go
@@ -7801,6 +7820,526 @@ function loop(now: number) {
   composer.render();
   watchSpeed(now);
 }
+
+// ---------------------------------------------------------------------------
+// Animate tab (proof of concept): looping motions on parts, see src/animate.ts
+//
+// The picked part's motion is drawn in the view: a dotted loop where its tip
+// will go, arrows for which way, a dot riding it now, and two handles. The
+// middle one moves the whole motion; the edge one sets how big and which way.
+//
+// TODO(anim): tests; a keyboard shortcut for the tab; animate-based custom tabs
+// (only the built-in Animate tab plays); GIF export is Render GIF, below;
+// eyes/stuff don't puff with Breathe; a playing loop re-fuses joins every frame;
+// dragging a handle on a curved part is only approximate (it aims the bone's
+// straight line); the handles have no hover cursor.
+
+// (plain var/function: commit() and renderUI() can ask before this part of the file has run)
+var ANIM_TAB = 'animate' as const;
+let animPlaying = true;
+/** where in the loop we are, 0..1 */
+let animT = 0;
+let animLast = 0;
+let animKey = '';
+const animSecs = () => world.animSecs ?? 1.5;
+function animOn() {
+  return mode === ANIM_TAB;
+}
+const animMoving = () => animOn() && animPlaying && creatures.some((c) => c.state.anims && Object.keys(c.state.anims).length);
+
+function tickAnim(now: number) {
+  const dt = animLast ? Math.min(100, now - animLast) : 0;
+  animLast = now;
+  if (!animOn()) {
+    if (animKey) {
+      animKey = '';
+      for (const c of creatures) {
+        c.setAnim(null);
+        c.applyPose();
+      }
+      animViz.visible = false;
+      invalidate();
+    }
+    return;
+  }
+  // a GIF being rendered poses each frame itself
+  if (animRendering) return;
+  if (animPlaying) animT = (animT + dt / 1000 / animSecs()) % 1;
+  showAnimAt(animT);
+  drawAnimPath();
+  const time = $<HTMLInputElement>('#anim-time');
+  if (document.activeElement !== time) time.value = String(animT);
+}
+
+/** Every creature as it is at loop time `t` (only redone when something changed). */
+function showAnimAt(t: number) {
+  const key = t + JSON.stringify(creatures.map((c) => c.state.anims ?? null));
+  if (key === animKey) return;
+  animKey = key;
+  for (const c of creatures) {
+    const list = Object.entries(c.state.anims ?? {}).filter(([id]) => c.bones.has(id));
+    const reach = list.filter(([id, a]) => reaching(c, id, a));
+    const swing = list.filter((e) => !reach.includes(e));
+    // back to the plain pose first (reaching bends parts outside the motions), and
+    // measure where each reaching tip rests: in the creature's own space, so a
+    // planted foot stays put however the body above it moves
+    c.setAnim(null);
+    c.applyPose();
+    if (reach.length) {
+      c.root.updateMatrixWorld(true);
+      restTips.set(c, new Map(reach.map(([id]) => [id, c.root.worldToLocal(c.bones.get(id)!.tip.getWorldPosition(new THREE.Vector3()))])));
+    }
+    c.setAnim(swing.length ? new Map(swing.map(([id, a]) => [id, animOffset(a, t)])) : null);
+    if (reach.length) {
+      c.root.updateMatrixWorld(true);
+      for (const [id, a] of reach) {
+        const rest = restTips.get(c)!.get(id)!;
+        c.dragTip(id, c.root.localToWorld(rest.clone().add(reachAt(a, animP(a, t), reachLen(c, id)))), true);
+      }
+    }
+  }
+  invalidate(1);
+}
+
+/** The parts that bend when `id` reaches: it and the ones above it, as Pull limbs picks them. None if nothing above it can bend. */
+function reachChain(c: Creature, id: string): BoneRT[] {
+  const b = c.bones.get(id);
+  if (!b) return [];
+  const chain = [b];
+  const branches = (p: BoneRT) => c.list.filter((o) => o.parent === p).length > 1;
+  for (let p = b.parent; p && !p.def.anchor && !branches(p); p = p.parent) chain.push(p);
+  return chain.length > 1 ? chain : [];
+}
+const reaching = (c: Creature, id: string, a: PartAnim) => a.kind !== 'breathe' && a.reach !== false && reachChain(c, id).length > 0;
+/** how far a reaching part can reach: the parts that bend, end to end */
+const reachLen = (c: Creature, id: string) => reachChain(c, id).reduce((n, b) => n + b.length, 0);
+/** where each reaching tip rests, in its creature's own space (measured with no motion on) */
+const restTips = new WeakMap<Creature, Map<string, THREE.Vector3>>();
+
+function selAnim(): PartAnim | undefined {
+  return state.anims?.[selected];
+}
+
+/** Change the picked part's motion (and its twin's, with Mirror on), or take it away. */
+function setAnim(a: PartAnim | null) {
+  const anims = (state.anims ??= {});
+  const b = creature.bones.get(selected);
+  const twin = b && rigLocked() ? creature.twinOf(b) : null;
+  if (a) anims[selected] = a;
+  else delete anims[selected];
+  if (twin && twin !== b) {
+    // the twin is worked out from this side, so its timing stays half a loop off when walking
+    if (a) anims[twin.def.id] = mirrorAnim(a);
+    else delete anims[twin.def.id];
+  }
+  if (!Object.keys(anims).length) delete state.anims;
+}
+
+function renderAnim() {
+  const a = selAnim();
+  const b = idle ? undefined : creature.bones.get(selected);
+  $('#anim-kinds').replaceChildren(
+    ...[{ kind: null, name: 'Still', icon: 'pause', title: 'No motion on this part' }, ...ANIM_KINDS].map((k) => {
+      const btn = document.createElement('button');
+      btn.innerHTML = `<i class="fa-duotone fa-regular fa-${k.icon}" aria-hidden="true"></i>${k.name}`;
+      btn.title = k.title;
+      btn.classList.toggle('active', (a?.kind ?? null) === k.kind);
+      btn.disabled = !b;
+      btn.onclick = () => {
+        // switching motion keeps its size, place and timing
+        // a fresh motion on a part that bends a knee: a stride the leg can reach
+        const fresh = k.kind ? { ...defaultAnim(k.kind), ...(k.kind !== 'breathe' && reachChain(creature, selected).length ? { size: 14 } : {}) } : null;
+        setAnim(k.kind ? (a ? { ...a, kind: k.kind, size: k.kind === 'breathe' || a.kind === 'breathe' ? fresh!.size : a.size } : fresh) : null);
+        renderAnim();
+        commit();
+      };
+      return btn;
+    }),
+  );
+  $('#anim-opts').hidden = !a || !b;
+  if (a) {
+    $('#anim-size-row').hidden = a.kind !== 'breathe';
+    $<HTMLInputElement>('#anim-size').value = String(a.size);
+    $<HTMLInputElement>('#anim-phase').value = String(a.phase);
+    $<HTMLInputElement>('#anim-opposite').checked = !!a.opposite;
+    for (const s of $('#anim-speed').querySelectorAll<HTMLButtonElement>('button')) s.classList.toggle('active', Number(s.dataset.speed) === a.speed);
+    $<HTMLInputElement>('#anim-reach').checked = a.reach !== false;
+  }
+  const canReach = !!b && reachChain(creature, selected).length > 0;
+  $('#anim-reach-row').hidden = !canReach || !a || a.kind === 'breathe';
+  // an unlinked pair has no twin: its sides are timed with Timing instead
+  const twin = b ? creature.twinOf(b) : null;
+  const paired = !!twin && twin !== b;
+  $('#anim-opposite-row').hidden = !paired || !rigLocked();
+  $('#anim-note').textContent = !b
+    ? 'Pick a part to give it a motion.'
+    : !a
+      ? ''
+      : a.kind === 'breathe'
+        ? ''
+        : `${canReach && a.reach !== false ? 'The tip follows the path for real; the part above bends to reach it. ' : ''}Drag the dots in the view: the middle one moves the whole ${a.kind === 'swing' ? 'swing' : 'loop'}, the edge one sets its size and direction.${paired && !rigLocked() ? ' Mirror is off: only this side moves.' : ''}`;
+  iconLabel($('#anim-play'), faClassic(animPlaying ? 'pause' : 'play'), animPlaying ? 'Pause' : 'Play');
+  $<HTMLInputElement>('#anim-secs').value = String(animSecs());
+}
+
+for (const [id, field] of [['#anim-size', 'size'], ['#anim-phase', 'phase']] as const) {
+  const input = $<HTMLInputElement>(id);
+  input.oninput = () => {
+    const a = selAnim();
+    if (a) setAnim({ ...a, [field]: parseFloat(input.value) });
+  };
+  input.onchange = () => commit();
+}
+$<HTMLInputElement>('#anim-reach').onchange = (e) => {
+  const a = selAnim();
+  if (a) setAnim({ ...a, reach: (e.target as HTMLInputElement).checked ? undefined : false });
+  renderAnim();
+  commit();
+};
+$<HTMLInputElement>('#anim-opposite').onchange = (e) => {
+  const a = selAnim();
+  if (a) setAnim({ ...a, opposite: (e.target as HTMLInputElement).checked || undefined });
+  commit();
+};
+for (const btn of $('#anim-speed').querySelectorAll<HTMLButtonElement>('button')) {
+  btn.onclick = () => {
+    const a = selAnim();
+    if (!a) return;
+    setAnim({ ...a, speed: Number(btn.dataset.speed) });
+    renderAnim();
+    commit();
+  };
+}
+$('#anim-play').onclick = () => {
+  animPlaying = !animPlaying;
+  renderAnim();
+};
+$<HTMLInputElement>('#anim-time').oninput = (e) => {
+  animPlaying = false;
+  animT = parseFloat((e.target as HTMLInputElement).value);
+  renderAnim();
+};
+$<HTMLInputElement>('#anim-secs').oninput = (e) => {
+  world.animSecs = parseFloat((e.target as HTMLInputElement).value);
+};
+$<HTMLInputElement>('#anim-secs').onchange = () => commit();
+
+// ---- the motion, drawn in the view ----
+
+const animViz = new THREE.Group();
+animViz.visible = false;
+animViz.renderOrder = 999;
+const vizMat = (color: number, opacity = 1) => new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthTest: false, depthWrite: false });
+const pathLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineDashedMaterial({ color: 0xffffff, dashSize: 0.04, gapSize: 0.03, transparent: true, opacity: 0.9, depthTest: false }));
+const spokeLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xe0609a, transparent: true, opacity: 0.8, depthTest: false }));
+const ball = new THREE.SphereGeometry(1, 16, 12);
+const rider = new THREE.Mesh(ball, vizMat(0xffffff));
+const centerHandle = new THREE.Mesh(ball, vizMat(0x3b82f6));
+const rimHandle = new THREE.Mesh(ball, vizMat(0xe0609a));
+const arrowGeo = new THREE.ConeGeometry(0.5, 1.4, 12);
+const arrows = [0, 1, 2, 3].map(() => new THREE.Mesh(arrowGeo, vizMat(0xffffff, 0.9)));
+for (const o of [pathLine, spokeLine, rider, centerHandle, rimHandle, ...arrows]) {
+  o.renderOrder = 999;
+  o.frustumCulled = false;
+  animViz.add(o);
+}
+scene.add(animViz);
+
+/** The picked part, posed but without its own motion: where its base is, which way its frame faces, and where its tip sits in it. */
+function partFrame() {
+  const b = creature.bones.get(selected)!;
+  creature.root.updateMatrixWorld(true);
+  const q = b.pivot.parent!.getWorldQuaternion(new THREE.Quaternion()).multiply(b.restQuat);
+  const p = state.pose[selected];
+  if (p) q.multiply(new THREE.Quaternion(...p));
+  const scale = b.pivot.getWorldScale(new THREE.Vector3()).x;
+  const tip = b.tip.position.clone().multiplyScalar(scale);
+  return { base: b.pivot.getWorldPosition(new THREE.Vector3()), q, tip };
+}
+
+/** Where the tip is, leaning by `lean` (degrees, as stored). */
+function tipAt(f: ReturnType<typeof partFrame>, lean: [number, number], flip?: boolean) {
+  return f.tip.clone().applyQuaternion(leanQuat(lean, flip)).applyQuaternion(f.q).add(f.base);
+}
+
+function drawAnimPath() {
+  const a = selAnim();
+  const show = animOn() && !idle && !!a && a.kind !== 'breathe' && creature.bones.has(selected);
+  if (animViz.visible !== show) invalidate(1);
+  animViz.visible = show;
+  if (!show) return;
+  let at: (p: number) => THREE.Vector3, centerAt: THREE.Vector3, rimAt: THREE.Vector3, anchor: THREE.Vector3;
+  if (reaching(creature, selected, a)) {
+    const rest = restTips.get(creature)?.get(selected);
+    if (!rest) return;
+    const L = reachLen(creature, selected);
+    const W = (v: THREE.Vector3) => creature.root.localToWorld(rest.clone().add(v));
+    at = (p) => W(reachAt(a, p, L));
+    centerAt = W(reachRim({ ...a, size: 0 }, L));
+    rimAt = W(reachRim(a, L));
+    anchor = W(new THREE.Vector3());
+  } else {
+    const f = partFrame();
+    at = (p) => tipAt(f, leanAt(a, p), a.flip);
+    centerAt = tipAt(f, [a.x, a.z], a.flip);
+    rimAt = tipAt(f, rimLean(a), a.flip);
+    anchor = f.base;
+  }
+  const pts = Array.from({ length: 97 }, (_, i) => at(i / 96));
+  pathLine.geometry.dispose();
+  pathLine.geometry = new THREE.BufferGeometry().setFromPoints(pts);
+  pathLine.computeLineDistances();
+  // handles keep a steady size on screen
+  const r = view.position.distanceTo(anchor) * 0.011;
+  rider.position.copy(at(animP(a, animT)));
+  rider.scale.setScalar(r * 0.8);
+  centerHandle.position.copy(centerAt);
+  centerHandle.scale.setScalar(r * 1.3);
+  rimHandle.position.copy(rimAt);
+  rimHandle.scale.setScalar(r * 1.3);
+  spokeLine.geometry.dispose();
+  spokeLine.geometry = new THREE.BufferGeometry().setFromPoints([centerHandle.position, rimHandle.position]);
+  // arrows along the way it goes (spaced evenly, away from the handles)
+  arrows.forEach((m, i) => {
+    const p = 0.125 + i * 0.25;
+    const here = at(p), ahead = at(p + 0.01).sub(here);
+    m.visible = ahead.lengthSq() > 1e-12;
+    m.position.copy(here);
+    m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), ahead.normalize());
+    m.scale.setScalar(r * 1.1);
+  });
+  invalidate(1);
+}
+
+/** A handle being dragged */
+let animDrag: { which: 'center' | 'rim'; id: number } | null = null;
+
+function rayAt(e: PointerEvent) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  raycaster.setFromCamera(new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1), view);
+  return raycaster.ray;
+}
+
+viewport.addEventListener(
+  'pointerdown',
+  (e) => {
+    if (!animViz.visible || e.button !== 0) return;
+    rayAt(e);
+    const hit = raycaster.intersectObjects([centerHandle, rimHandle])[0];
+    if (!hit) return;
+    // the handle, not the camera or the part under it
+    e.stopPropagation();
+    e.preventDefault();
+    viewport.setPointerCapture(e.pointerId);
+    animDrag = { which: hit.object === centerHandle ? 'center' : 'rim', id: e.pointerId };
+  },
+  { capture: true },
+);
+viewport.addEventListener(
+  'pointermove',
+  (e) => {
+    const a = selAnim();
+    if (!animDrag || e.pointerId !== animDrag.id || !a) return;
+    e.stopPropagation();
+    const ray = rayAt(e);
+    if (reaching(creature, selected, a)) return dragReach(a, ray);
+    const f = partFrame();
+    // the tip stays on a ball round the base: aim at where the pointer meets it (or the nearest point to it)
+    const R = f.tip.length();
+    const handle = (animDrag.which === 'center' ? centerHandle : rimHandle).position;
+    const toBase = f.base.clone().sub(ray.origin);
+    const along = toBase.dot(ray.direction);
+    const closest = ray.origin.clone().addScaledVector(ray.direction, along);
+    const miss = closest.distanceTo(f.base);
+    let point: THREE.Vector3;
+    if (miss >= R) point = closest.sub(f.base).setLength(R).add(f.base);
+    else {
+      const h = Math.sqrt(R * R - miss * miss);
+      const near = ray.origin.clone().addScaledVector(ray.direction, along - h);
+      const far = ray.origin.clone().addScaledVector(ray.direction, along + h);
+      point = near.distanceTo(handle) <= far.distanceTo(handle) ? near : far;
+    }
+    // into the part's own frame, measured from where its tip points at rest
+    const d = point.sub(f.base).applyQuaternion(f.q.clone().invert()).normalize();
+    d.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(f.tip.clone().normalize(), new THREE.Vector3(0, 1, 0)));
+    const lean = leanOf(d, a.flip);
+    if (animDrag.which === 'center') setAnim({ ...a, x: Math.round(lean[0]), z: Math.round(lean[1]) });
+    else {
+      const dx = lean[0] - a.x, dz = lean[1] - a.z;
+      setAnim({ ...a, size: Math.round(Math.min(90, Math.hypot(dx, dz))), dir: Math.round(Math.atan2(dz, dx) / (Math.PI / 180)) });
+    }
+  },
+  { capture: true },
+);
+/** Dragging a reaching part's handles: the motion lives in the creature's space, not on a ball. */
+function dragReach(a: PartAnim, ray: THREE.Ray) {
+  const rest = restTips.get(creature)?.get(selected);
+  if (!rest || !animDrag) return;
+  const D = Math.PI / 180, k = reachLen(creature, selected) * D;
+  const o = creature.root.worldToLocal(ray.origin.clone());
+  const d = creature.root.worldToLocal(ray.origin.clone().add(ray.direction)).sub(o).normalize();
+  const center = rest.clone().add(reachRim({ ...a, size: 0 }, k / D));
+  // the pointer on a plane through `at` facing `normal` (null if it runs along it)
+  const onPlane = (at: THREE.Vector3, normal: THREE.Vector3) => {
+    const den = normal.dot(d);
+    return Math.abs(den) < 1e-4 ? null : o.clone().addScaledVector(d, normal.dot(at.clone().sub(o)) / den);
+  };
+  const unmirror = (v: THREE.Vector3) => (a.flip ? v.setX(-v.x) : v);
+  // centre and edge slide over the level the motion sits at
+  const q = onPlane(center, new THREE.Vector3(0, 1, 0));
+  if (!q) return;
+  if (animDrag.which === 'center') {
+    const off = unmirror(q.sub(rest));
+    setAnim({ ...a, x: Math.round(off.x / k), z: Math.round(off.z / k) });
+  } else {
+    const v = unmirror(q.sub(center));
+    setAnim({ ...a, size: Math.round(Math.min(90, Math.hypot(v.x, v.z) / k)), dir: Math.round(Math.atan2(v.x, v.z) / D) });
+  }
+}
+
+const endAnimDrag = (e: PointerEvent) => {
+  if (!animDrag || e.pointerId !== animDrag.id) return;
+  e.stopPropagation();
+  animDrag = null;
+  commit();
+};
+viewport.addEventListener('pointerup', endAnimDrag, { capture: true });
+viewport.addEventListener('pointercancel', endAnimDrag, { capture: true });
+
+// ---- rendering one loop out as a GIF ----
+//
+// Not a live recording: each frame is posed, then waits for its joins to finish
+// fusing (and, with Seamless, for the seamless skin to be built) before it's
+// drawn, so nothing is caught half-blended. Exactly 25 frames a second (GIF
+// times frames in hundredths), a whole number of frames per loop.
+// TODO(anim): Seamless can take ~30 s a frame on a big creature (a coarser skin just for renders?); transparent background; a size option; WebM/MP4 out too; frames are
+// held in memory, so very long loops at a big size could run out.
+
+const GIF_FPS = 25;
+/** the longest side of the GIF, in pixels */
+const GIF_MAX = 640;
+/** how far a pixel's color (summed over red, green and blue) can move before the GIF changes it */
+const GIF_STICKY = 9;
+let animRendering: { cancel: boolean } | null = null;
+let gifSeamless = false;
+
+const frameWait = () => new Promise((r) => requestAnimationFrame(() => r(null)));
+
+/** Fuse every join the pose moved, all the way (and build seamless skins, if asked). */
+async function finishJoins(seamless: boolean) {
+  for (const c of creatures) {
+    c.setDragging(false);
+    for (let n = 0; n < 2000 && (c.updateMerge() || c.mergePending); n++) if (!c.mergePending) break;
+  }
+  if (!seamless) return;
+  for (const c of creatures) {
+    if (c.skinState === 'none') await c.settle();
+    while (c.skinState === 'building') await frameWait();
+    // dress the new skin in the current look
+    c.updateMerge();
+  }
+}
+
+function setRenderButton(text: string, busy: boolean) {
+  const btn = $('#anim-render');
+  iconLabel(btn, faClassic(busy ? 'xmark' : 'file-image'), text);
+  btn.classList.toggle('recording', busy);
+}
+
+$('#anim-render').onclick = async () => {
+  if (animRendering) {
+    animRendering.cancel = true;
+    return;
+  }
+  const job = (animRendering = { cancel: false });
+  const wasPlaying = animPlaying, wasT = animT;
+  animPlaying = false;
+  animViz.visible = false;
+  renderAnim();
+  const frames = Math.max(2, Math.round(animSecs() * GIF_FPS));
+  const src = renderer.domElement;
+  const k = Math.min(1, GIF_MAX / Math.max(src.width, src.height));
+  const w = Math.round(src.width * k), h = Math.round(src.height * k);
+  const scratch = document.createElement('canvas');
+  scratch.width = w;
+  scratch.height = h;
+  const ctx = scratch.getContext('2d', { willReadFrequently: true })!;
+  const shots: Uint8ClampedArray[] = [];
+  try {
+    const started = performance.now();
+    for (let i = 0; i < frames && !job.cancel; i++) {
+      // how long the rest will take, going by the frames so far (Seamless can be minutes)
+      const left = i ? ((performance.now() - started) / i) * (frames - i) / 1000 : 0;
+      const eta = left > 90 ? `, about ${Math.round(left / 60)} min left` : left > 5 ? `, about ${Math.round(left)} s left` : '';
+      setRenderButton(`Frame ${i + 1} of ${frames}${eta} (click to stop)`, true);
+      showAnimAt(i / frames);
+      await finishJoins(gifSeamless);
+      // draw it now and copy it straight off (the canvas clears after it's shown)
+      scene.updateMatrixWorld();
+      renderer.shadowMap.needsUpdate = true;
+      composer.render();
+      ctx.drawImage(src, 0, 0, w, h);
+      shots.push(ctx.getImageData(0, 0, w, h).data);
+      await frameWait();
+    }
+    if (!job.cancel) {
+      setRenderButton('Making the GIF…', true);
+      await frameWait();
+      // one palette for every frame (sampled across all of them), so colors don't shimmer
+      const step = Math.max(1, Math.floor((shots.length * w * h) / 400_000));
+      // each frame is sampled on its own, so size it per frame (rounding up each time)
+      const sample = new Uint8ClampedArray(shots.length * Math.ceil((w * h) / step) * 4);
+      let o = 0;
+      for (const s of shots) for (let p = 0; p < w * h; p += step) sample.set(s.subarray(p * 4, p * 4 + 4), (o++) * 4);
+      const palette = quantize(sample.subarray(0, o * 4), 256);
+      const gif = GIFEncoder();
+      // Sticky colors: a pixel keeps last frame's color unless it's really changed
+      // since that color was picked. Soft shadows shift a hair as the pose moves,
+      // and with only a few dark colors to go round, a whole shadow would
+      // otherwise flicker between two of them.
+      const anchor = new Uint8ClampedArray(w * h * 4);
+      let last: Uint8Array | null = null;
+      for (const s of shots) {
+        const index = applyPalette(s, palette);
+        if (last) {
+          for (let p = 0, q = 0; p < w * h; p++, q += 4) {
+            const d = Math.abs(s[q] - anchor[q]) + Math.abs(s[q + 1] - anchor[q + 1]) + Math.abs(s[q + 2] - anchor[q + 2]);
+            if (d <= GIF_STICKY) index[p] = last[p];
+            else anchor.set(s.subarray(q, q + 4), q);
+          }
+        } else anchor.set(s);
+        gif.writeFrame(index, w, h, { palette, delay: 1000 / GIF_FPS });
+        last = index;
+      }
+      gif.finish();
+      const url = URL.createObjectURL(new Blob([gif.bytes() as Uint8Array<ArrayBuffer>], { type: 'image/gif' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${(world.name || state.name || 'critter').trim()}-loop.gif`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      hint(`GIF saved: ${frames} frames`, 2400);
+    }
+  } catch (err) {
+    console.error(err);
+    hint('Couldn’t make the GIF', 3000, true);
+  } finally {
+    animRendering = null;
+    setRenderButton('Render GIF', false);
+    animT = wasT;
+    animPlaying = wasPlaying;
+    animKey = '';
+    renderAnim();
+    invalidate();
+  }
+};
+for (const b of $('#anim-gif-joins').querySelectorAll<HTMLButtonElement>('button')) {
+  b.onclick = () => {
+    gifSeamless = b.dataset.joins === 'seamless';
+    for (const o of $('#anim-gif-joins').querySelectorAll('button')) o.classList.toggle('active', o === b);
+  };
+}
+setRenderButton('Render GIF', false);
 
 // ---------------------------------------------------------------------------
 // boot

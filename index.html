@@ -45,6 +45,7 @@
         <div class="modes" role="tablist">
           <button data-mode="shape" class="active" data-shortcut="shape" title="Shape: draw, stretch, grow and pose your creature (1)"><i class="fa-slab-duo fa-regular fa-hand" aria-hidden="true"></i><span class="lbl"> Shape</span></button>
           <button data-mode="look" data-shortcut="look" title="Look: colors, materials and stuff to wear (2)"><i class="fa-slab-duo fa-regular fa-palette" aria-hidden="true"></i><span class="lbl"> Look</span></button>
+          <button data-mode="animate" title="Animate: give parts looping motions, ready to record"><i class="fa-slab-duo fa-regular fa-video" aria-hidden="true"></i><span class="lbl"> Animate</span></button>
           <button data-mode="stuff" data-shortcut="stuff" title="Stuff: make things to wear and carry (3)"><i class="fa-slab-duo fa-regular fa-briefcase" aria-hidden="true"></i><span class="lbl"> Stuff</span></button>
         </div>
         <div class="spacer"></div>
@@ -270,6 +271,38 @@
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
+          <div class="ck-tool" data-tool="anim">
+            <div class="anim-kinds" id="anim-kinds"></div>
+            <div id="anim-opts">
+              <p class="muted small" id="anim-note"></p>
+              <label class="slider" id="anim-size-row" title="How much it puffs up"><span>Size</span><input id="anim-size" type="range" min="0" max="40" step="1" />
+                <span class="ends"><em>a little</em><em>a lot</em></span></label>
+              <div class="anim-speed-row"><span>Speed</span>
+                <div class="seg" id="anim-speed" title="Times round per loop: always a whole number, so it loops">
+                  <button data-speed="1">×1</button><button data-speed="2">×2</button><button data-speed="3">×3</button><button data-speed="4">×4</button>
+                </div>
+              </div>
+              <label class="slider" title="Start later in the motion: shift parts against each other, like feet"><span>Timing</span><input id="anim-phase" type="range" min="0" max="1" step="0.01" />
+                <span class="ends"><em>0</em><em>a whole time round</em></span></label>
+              <label class="check" id="anim-reach-row" title="The tip follows the path for real and the part above bends to reach it, like a knee (so a foot can lift). Off: it just swings from its base"><input id="anim-reach" type="checkbox" /> Bend the part above <span class="muted">(knee)</span></label>
+              <label class="check" id="anim-opposite-row" title="With Mirror on, the other side runs half a time round behind: left foot, right foot"><input id="anim-opposite" type="checkbox" /> Other side opposite <span class="muted">(walking)</span></label>
+            </div>
+          </div>
+          <div class="ck-tool" data-tool="anim-play">
+            <div class="anim-play-row">
+              <button id="anim-play" class="primary"></button>
+              <input id="anim-time" type="range" min="0" max="1" step="0.001" title="Where in the loop: drag to look at one moment" />
+            </div>
+            <label class="slider" title="How long one whole loop takes"><span>Loop length</span><input id="anim-secs" type="range" min="0.5" max="6" step="0.1" />
+              <span class="ends"><em>quick</em><em>slow</em></span></label>
+            <div class="anim-render-row">
+              <div class="seg" id="anim-gif-joins" title="How the joins look in the GIF">
+                <button data-joins="blended" class="active" title="Joins fully blended on every frame: quick">Blended</button>
+                <button data-joins="seamless" title="Joins rebuilt as one seamless skin on every frame, like the view when it's still: smoothest, but much slower">Seamless</button>
+              </div>
+              <button id="anim-render" class="ghost" title="Draw one whole loop, frame by frame, and save it as a GIF"></button>
             </div>
           </div>
           <div class="ck-tool" data-tool="attach"><button id="rig-attach" class="pill-toggle" title="Put something from My stuff on this part"><i class="fa-slab-duo fa-regular fa-paperclip" aria-hidden="true"></i> Attach stuff…</button></div>
