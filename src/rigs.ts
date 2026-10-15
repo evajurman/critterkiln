@@ -752,6 +752,9 @@ const PARENT_STICK = 0.1;
 /** a base this near a part (as a share of its thickness: 1 is its surface) touches it */
 const TOUCHING = 1.25;
 
+/** a base this near where a part begins (a share of its length) sits beside it, not on it: they grow from the same spot */
+const SIBLING = 0.25;
+
 /** a base behind where a part's bone begins (in the end it grows out of) counts this much less: that end is the joint with what it grows from */
 const BEHIND_START = 0.5;
 
@@ -796,6 +799,15 @@ function seat(p: V3, c: ExpandedBone, sizes?: PartSizes): number {
   }
   const score = 1 + (inside ? -d : d) / Math.max(Math.max(...prof.w), 1e-3);
   return y < 0 && c.parent ? score + BEHIND_START : score;
+}
+
+/** How far along a part a point is: 0 where its bone starts, 1 at its tip. */
+function along(p: V3, c: ExpandedBone, sizes?: PartSizes): number {
+  const { start, end } = sizes?.at?.(c.id) ?? c;
+  const axis = sub3(end, start);
+  const l2 = Math.max(axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2], 1e-12);
+  const rel = sub3(p, start);
+  return (rel[0] * axis[0] + rel[1] * axis[1] + rel[2] * axis[2]) / l2;
 }
 
 /**
@@ -853,25 +865,37 @@ export function nearestParent(rig: RigState, sceneId: string, sizes?: PartSizes)
   let best: ExpandedBone | null = null, bestScore = Infinity;
   for (const [c, s] of scores) if (s < bestScore) (best = c), (bestScore = s);
   if (!best) return me.parent;
+  // A base beside where a part starts, and on what that part grows from too,
+  // sits side by side with it: both hang off what they grow from, so posing
+  // one doesn't swing the other (two arms from one shoulder, a second tail by
+  // the first: Seamless joins > Neighbors still blends them into each other).
+  const beside = (c: ExpandedBone) => along(base, c, sizes) < SIBLING;
+  for (let up = best.parent ? byId.get(best.parent) : undefined; up && bestScore > -1e3 && beside(best); up = up.parent ? byId.get(up.parent) : undefined) {
+    const s = scores.get(up);
+    if (s === undefined || s > TOUCHING) break;
+    best = up;
+    bestScore = s;
+  }
   // where a part grows out of another, a base touching both sits on the one
-  // growing out (a tail's root sits on the tail, though it's inside the body too);
-  // a base right on a tip stays there (fingers on a hand don't hang off each other)
+  // growing out (a hand's fingers sit on the hand, though they're in the arm too),
+  // unless it's beside that one's start (above); a base right on a tip stays
+  // there (fingers on a hand don't hang off each other)
   const growsFrom = (c: ExpandedBone, from: ExpandedBone) => {
     for (let p = c.parent ? byId.get(c.parent) : undefined; p; p = p.parent ? byId.get(p.parent) : undefined) if (p === from) return true;
     return false;
   };
   while (bestScore > -1e3) {
     let next: ExpandedBone | null = null, nextScore = Infinity;
-    for (const [c, s] of scores) if (s <= TOUCHING && s < nextScore && growsFrom(c, best)) (next = c), (nextScore = s);
+    for (const [c, s] of scores) if (s <= TOUCHING && s < nextScore && growsFrom(c, best) && !beside(c)) (next = c), (nextScore = s);
     if (!next) break;
     best = next;
     bestScore = nextScore;
   }
   // the part it hangs off keeps it unless the new one holds it clearly deeper
-  // (or grows out of it: then it's the more specific of the two)
+  // (or one grows out of the other: the rules above chose between those)
   const now = left.parent ? byId.get(left.parent) : undefined;
   const current = now ? scores.get(now) ?? Infinity : Infinity;
-  if (best === now || (now && !growsFrom(best, now) && current <= bestScore + PARENT_STICK)) return me.parent;
+  if (best === now || (now && !growsFrom(best, now) && !growsFrom(now, best) && current <= bestScore + PARENT_STICK)) return me.parent;
   // the twin on this side of a pair
   return me.sideSign === -1 && best.sideSign === 1 ? best.baseId + 'R' : best.id;
 }

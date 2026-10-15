@@ -196,7 +196,7 @@ export interface CreatureState {
   seamless?: boolean;
   /** legacy: on is blendWith 'connected', off 'all' */
   blendConnected?: boolean;
-  /** which touching parts blend into each other (see BlendWith); unset: from blendConnected */
+  /** which touching parts blend into each other (see BlendWith); unset: from blendConnected, or Neighbors */
   blendWith?: BlendWith;
   /** per-material slider values (missing keys use the defaults) */
   materialSettings?: Partial<Record<StyleId, StyleSettings>>;
@@ -300,13 +300,13 @@ export function setSeamlessLowPoly(on: boolean) {
 /**
  * Which touching parts blend into each other: every one; only a part and the
  * one it grows from (so a tail curled up to the head, or arms reaching across
- * the body, stay separate: the default); or those, and any part a base sits
- * in (an arm blends into everything round its shoulder, but crossed arms
- * still stay apart).
+ * the body, stay separate); or those, and any part a base sits in (an arm
+ * blends into everything round its shoulder, but crossed arms still stay
+ * apart: the default).
  */
 export type BlendWith = 'all' | 'connected' | 'neighbors';
 export function blendWithOf(s: CreatureState): BlendWith {
-  return s.blendWith ?? (s.blendConnected === false ? 'all' : 'connected');
+  return s.blendWith ?? (s.blendConnected === false ? 'all' : s.blendConnected ? 'connected' : 'neighbors');
 }
 function seamlessOn(s: CreatureState): boolean {
   return seamlessMode === 'creature' ? (s.seamless ?? true) : seamlessMode === 'on';
@@ -1898,27 +1898,31 @@ export class Creature {
   /** Answers of baseIn, until the pose or the parts change. */
   private baseTouch = new Map<BoneRT, Map<BoneRT, boolean>>();
   /**
-   * Whether part `a`'s base sits in part `b`, or within the blend distance of
-   * its surface, as posed: what makes them neighbors (see BlendWith).
+   * Whether part `a`'s base sits in part `b`, as posed: the start of `a` (as
+   * thick as `a` is there) overlaps or rests on `b`. What makes them neighbors (see
+   * BlendWith). Not the blend distance: turned up, that reaches across to
+   * parts that only pass by, like crossed arms' hands at each other's elbows.
    */
   private baseIn(a: BoneRT, b: BoneRT): boolean {
     let row = this.baseTouch.get(a);
     if (!row) this.baseTouch.set(a, (row = new Map()));
     const known = row.get(b);
     if (known !== undefined) return known;
-    const geo = b.mesh?.userData.baseGeo as THREE.BufferGeometry | undefined;
-    let touches = false;
-    if (geo) {
-      this.group.updateMatrixWorld(true);
-      const toB = b.mesh!.matrixWorld.clone().invert();
-      const q = a.pivot.getWorldPosition(new THREE.Vector3()).applyMatrix4(toB);
-      // the blend distance in b's own units
-      const sc = new THREE.Vector3().setFromMatrixScale(this.group.matrixWorld.clone().invert().multiply(b.mesh!.matrixWorld));
-      const reach = (this.state.mergeRadius ?? 0.1) / ((sc.x + sc.y + sc.z) / 3);
-      touches = exactDistance(geo, bvhFor(geo), sharedNormals(geo), q, reach, new THREE.Vector3()) < reach;
-    }
+    // with half its thickness to spare: a base resting on a part's surface counts
+    const touches = this.reachAt(a, b) < 1.5 * Math.max(0, -this.reachAt(a, a));
     row.set(b, touches);
     return touches;
+  }
+
+  /** How far part `a`'s base is from part `b`'s surface, in creature units (negative inside, Infinity when far). */
+  private reachAt(a: BoneRT, b: BoneRT): number {
+    const geo = b.mesh?.userData.baseGeo as THREE.BufferGeometry | undefined;
+    if (!geo) return Infinity;
+    this.group.updateMatrixWorld(true);
+    const q = a.pivot.getWorldPosition(new THREE.Vector3()).applyMatrix4(b.mesh!.matrixWorld.clone().invert());
+    const sc = new THREE.Vector3().setFromMatrixScale(this.group.matrixWorld.clone().invert().multiply(b.mesh!.matrixWorld));
+    const scale = (sc.x + sc.y + sc.z) / 3;
+    return exactDistance(geo, bvhFor(geo), sharedNormals(geo), q, 1 / scale, new THREE.Vector3()) * scale;
   }
 
   private near(a: BoneRT, b: BoneRT, k: number): boolean {
