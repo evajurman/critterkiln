@@ -8021,8 +8021,10 @@ function renderAnim() {
   );
   const stuff = selStuff();
   if (stuff) return renderStuffAnim(stuff);
-  $('#anim-reverse-row').hidden = true;
   const a = selAnim();
+  // every motion but Breathe has a way round
+  $('#anim-reverse-row').hidden = !a || a.kind === 'breathe';
+  $<HTMLInputElement>('#anim-reverse').checked = !!a?.reverse;
   $('#anim-kinds').replaceChildren(
     ...[{ kind: null, name: 'Still', icon: 'pause', title: 'No motion on this part' }, ...ANIM_KINDS].map((k) => {
       const btn = document.createElement('button');

@@ -39,6 +39,8 @@ export interface PartAnim {
   reach?: boolean;
   /** timing offset, as a fraction of one time round (0..1) */
   phase: number;
+  /** go round the shape the other way (a Half circle: walking backwards) */
+  reverse?: boolean;
   /** a pair: the other side runs half a time round behind (for walking) */
   opposite?: boolean;
   /** the other side of a pair, worked out from this one: its frame is a mirror image, so Z flips */
@@ -85,7 +87,7 @@ function shapeAt(kind: AnimKind, p: number): [number, number] {
 /** The lean at `p` of one time round, in degrees (as stored: before any flip). */
 export function leanAt(a: PartAnim, p: number): [number, number] {
   if (a.kind === 'breathe') return [a.x, a.z];
-  const [u, v] = shapeAt(a.kind, p);
+  const [u, v] = shapeAt(a.kind, a.reverse ? 1 - p : p);
   const c = Math.cos(a.dir * D), s = Math.sin(a.dir * D);
   return [(u * c - v * s) * a.size + a.x, (u * s + v * c) * a.size + a.z];
 }
@@ -132,7 +134,7 @@ export function animOffset(a: PartAnim, t: number): { q: THREE.Quaternion; s: nu
  * it always lifts straight up.
  */
 export function reachAt(a: PartAnim, p: number, reachLen: number): THREE.Vector3 {
-  const [u, v] = a.kind === 'breathe' ? [0, 0] : shapeAt(a.kind, p);
+  const [u, v] = a.kind === 'breathe' ? [0, 0] : shapeAt(a.kind, a.reverse ? 1 - p : p);
   const k = reachLen * D;
   const { along, lift } = reachAxes(a);
   const out = new THREE.Vector3(a.x * k, 0, a.z * k).addScaledVector(along, u * a.size * k).addScaledVector(lift, v * a.size * k);
