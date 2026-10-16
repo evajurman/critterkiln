@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { buildSkin, type SkinPart } from './skin';
+import { loadGrids, saveGrids } from './gridStore';
+import { buildSkin, skinGrids, type SkinPart } from './skin';
 import type { SkinJob, SkinProgress, SkinReply } from './skinPool';
 
 /**
@@ -50,6 +51,10 @@ self.onmessage = async (e: MessageEvent<SkinJob | { cancel: number }>) => {
     }));
     const n = parts.length;
     const link = opts.linked;
+    // the parts' distance grids, as far as they were measured on earlier visits
+    const grids = skinGrids(parts, opts.h);
+    const shapes = parts.map((p) => p.geo);
+    await loadGrids(shapes, grids.s, grids.band);
     const geo = await buildSkin(parts, {
       h: opts.h,
       colorBlend: opts.colorBlend,
@@ -81,6 +86,8 @@ self.onmessage = async (e: MessageEvent<SkinJob | { cancel: number }>) => {
     if (index) transfer.push(index.buffer);
     if (fade) transfer.push(fade.start.buffer, fade.part.buffer, fade.d.buffer);
     self.postMessage(out, { transfer: [...new Set(transfer)] });
+    // keep what was measured for next time (after the skin's on its way)
+    void saveGrids(shapes, grids.s, grids.band);
   } catch (err) {
     cancelled.delete(id);
     self.postMessage({ id, geo: null, error: String((err as Error)?.stack ?? err) } satisfies SkinReply);

@@ -93,6 +93,9 @@ export class DistanceGrid {
     this.by = (this.ny >> 3) + 1;
   }
 
+  /** grid points measured since the grid was made or last saved (see gridStore) */
+  fresh = 0;
+
   /** node (i, j, k), measured now if it hasn't been */
   private node(i: number, j: number, k: number): number {
     const key = (i >> 3) + this.bx * ((j >> 3) + this.by * (k >> 3));
@@ -104,28 +107,138 @@ export class DistanceGrid {
     this.p.set(this.ox + i * this.s, this.oy + j * this.s, this.oz + k * this.s);
     let d = exactDistance(this.geo, this.bvh, this.normals, this.p, this.band, this.g);
     if (!Number.isFinite(d)) d = insideByRay(this.geo, this.bvh, this.p) ? -this.band : this.band;
+    this.fresh++;
     return (b[at] = d);
+  }
+
+  /** Everything measured so far, to keep (block keys, and their 512 values each). */
+  dump(): { keys: Int32Array; values: Float32Array } {
+    const keys = new Int32Array(this.blocks.size), values = new Float32Array(this.blocks.size * 512);
+    let n = 0;
+    for (const [key, b] of this.blocks) (keys[n] = key), values.set(b, 512 * n++);
+    return { keys, values };
+  }
+
+  /** Take back what a dump of the same shape held (points measured since are kept). */
+  load(d: { keys: Int32Array; values: Float32Array }) {
+    for (let n = 0; n < d.keys.length; n++) {
+      const saved = d.values.subarray(512 * n, 512 * n + 512);
+      const b = this.blocks.get(d.keys[n]);
+      if (!b) this.blocks.set(d.keys[n], saved.slice());
+      else for (let a = 0; a < 512; a++) if (b[a] !== b[a]) b[a] = saved[a];
+    }
+  }
+
+  /** the 8 grid points round cell (i, j, k), into `c` (x fastest); from one block when they all lie in it */
+  private readonly c = new Float64Array(8);
+  private corners(i: number, j: number, k: number) {
+    const c = this.c;
+    if ((i & 7) < 7 && (j & 7) < 7 && (k & 7) < 7) {
+      const b = this.blocks.get((i >> 3) + this.bx * ((j >> 3) + this.by * (k >> 3)));
+      if (b) {
+        const at = (i & 7) + 8 * ((j & 7) + 8 * (k & 7));
+        c[0] = b[at], c[1] = b[at + 1], c[2] = b[at + 8], c[3] = b[at + 9];
+        c[4] = b[at + 64], c[5] = b[at + 65], c[6] = b[at + 72], c[7] = b[at + 73];
+        // all measured already: the usual case once a part has been skinned before
+        if (c[0] === c[0] && c[1] === c[1] && c[2] === c[2] && c[3] === c[3] && c[4] === c[4] && c[5] === c[5] && c[6] === c[6] && c[7] === c[7]) return;
+      }
+    }
+    for (let n = 0; n < 8; n++) c[n] = this.node(i + (n & 1), j + ((n >> 1) & 1), k + ((n >> 2) & 1));
   }
 
   /**
    * Signed distance at local point `q` (blended between the grid points
    * round it), or Infinity when it's further than `maxD` from the surface,
-   * like exactDistance. `maxD` should be well inside the band.
+   * like exactDistance. `maxD` should be inside the band. With `grad`, also
+   * its gradient (the way out, not normalised). With `side`, a point beyond
+   * `maxD` (or off the grid) gives the band, signed by which side of the part
+   * it's on, instead of Infinity.
    */
-  sample(q: THREE.Vector3, maxD: number): number {
+  sample(q: THREE.Vector3, maxD: number, grad?: THREE.Vector3, side = false): number {
     const fx = (q.x - this.ox) / this.s, fy = (q.y - this.oy) / this.s, fz = (q.z - this.oz) / this.s;
     const i = Math.floor(fx), j = Math.floor(fy), k = Math.floor(fz);
     // off the grid: further than the band, outside the part
-    if (i < 0 || j < 0 || k < 0 || i >= this.nx - 1 || j >= this.ny - 1 || k >= this.nz - 1) return Infinity;
+    if (i < 0 || j < 0 || k < 0 || i >= this.nx - 1 || j >= this.ny - 1 || k >= this.nz - 1) {
+      grad?.set(0, 0, 0);
+      return side ? this.band : Infinity;
+    }
     const u = fx - i, v = fy - j, w = fz - k;
-    const c000 = this.node(i, j, k), c100 = this.node(i + 1, j, k), c010 = this.node(i, j + 1, k), c110 = this.node(i + 1, j + 1, k);
-    const c001 = this.node(i, j, k + 1), c101 = this.node(i + 1, j, k + 1), c011 = this.node(i, j + 1, k + 1), c111 = this.node(i + 1, j + 1, k + 1);
-    const d =
-      ((c000 * (1 - u) + c100 * u) * (1 - v) + (c010 * (1 - u) + c110 * u) * v) * (1 - w) +
-      ((c001 * (1 - u) + c101 * u) * (1 - v) + (c011 * (1 - u) + c111 * u) * v) * w;
-    return Math.abs(d) > maxD ? Infinity : d;
+    this.corners(i, j, k);
+    const c = this.c;
+    const x00 = c[0] + (c[1] - c[0]) * u, x10 = c[2] + (c[3] - c[2]) * u, x01 = c[4] + (c[5] - c[4]) * u, x11 = c[6] + (c[7] - c[6]) * u;
+    const y0 = x00 + (x10 - x00) * v, y1 = x01 + (x11 - x01) * v;
+    const d = y0 + (y1 - y0) * w;
+    if (grad) {
+      const gx = ((c[1] - c[0]) * (1 - v) + (c[3] - c[2]) * v) * (1 - w) + ((c[5] - c[4]) * (1 - v) + (c[7] - c[6]) * v) * w;
+      grad.set(gx / this.s, ((x10 - x00) * (1 - w) + (x11 - x01) * w) / this.s, (y1 - y0) / this.s);
+    }
+    if (Math.abs(d) <= maxD) return d;
+    return side ? (d < 0 ? -this.band : this.band) : Infinity;
+  }
+
+  /**
+   * As sample (with its gradient), but blended smoothly (Catmull-Rom) from
+   * the 4x4x4 points round it rather than straight between the nearest 8.
+   * Straight blending rounds a curved part a little smaller than it is (most
+   * on thin points); this doesn't. For placing the skin's points exactly.
+   */
+  private readonly cw = new Float64Array(12);
+  sampleSmooth(q: THREE.Vector3, maxD: number, grad: THREE.Vector3): number {
+    const fx = (q.x - this.ox) / this.s, fy = (q.y - this.oy) / this.s, fz = (q.z - this.oz) / this.s;
+    const i = Math.floor(fx), j = Math.floor(fy), k = Math.floor(fz);
+    if (i < 1 || j < 1 || k < 1 || i >= this.nx - 2 || j >= this.ny - 2 || k >= this.nz - 2) return this.sample(q, maxD, grad);
+    // weights (and their slopes) along each axis
+    const w = this.cw;
+    const weights = (t: number, o: number) => {
+      const t2 = t * t, t3 = t2 * t;
+      w[o] = (-t3 + 2 * t2 - t) / 2;
+      w[o + 1] = (3 * t3 - 5 * t2 + 2) / 2;
+      w[o + 2] = (-3 * t3 + 4 * t2 + t) / 2;
+      w[o + 3] = (t3 - t2) / 2;
+    };
+    const slopes = (t: number, o: number) => {
+      const t2 = t * t;
+      ds[o] = (-3 * t2 + 4 * t - 1) / 2;
+      ds[o + 1] = (9 * t2 - 10 * t) / 2;
+      ds[o + 2] = (-9 * t2 + 8 * t + 1) / 2;
+      ds[o + 3] = (3 * t2 - 2 * t) / 2;
+    };
+    const ds = smoothSlopes;
+    weights(fx - i, 0), weights(fy - j, 4), weights(fz - k, 8);
+    slopes(fx - i, 0), slopes(fy - j, 4), slopes(fz - k, 8);
+    // the 4 points along each axis lie in at most 2 blocks: look each block up once
+    const bi = smoothBlock, li = smoothLocal;
+    for (let a = 0; a < 4; a++) {
+      bi[a] = (i - 1 + a) >> 3;
+      li[a] = (i - 1 + a) & 7;
+      bi[4 + a] = (j - 1 + a) >> 3;
+      li[4 + a] = (j - 1 + a) & 7;
+      bi[8 + a] = (k - 1 + a) >> 3;
+      li[8 + a] = (k - 1 + a) & 7;
+    }
+    let d = 0, gx = 0, gy = 0, gz = 0;
+    let lastKey = -1, block: Float32Array | undefined;
+    for (let c = 0; c < 4; c++) {
+      for (let b = 0; b < 4; b++) {
+        for (let a = 0; a < 4; a++) {
+          const key = bi[a] + this.bx * (bi[4 + b] + this.by * bi[8 + c]);
+          if (key !== lastKey) (block = this.blocks.get(key)), (lastKey = key);
+          let v = block ? block[li[a] + 8 * (li[4 + b] + 8 * li[8 + c])] : NaN;
+          // not measured yet: now (which may make the block)
+          if (v !== v) (v = this.node(i - 1 + a, j - 1 + b, k - 1 + c)), (lastKey = -1);
+          d += v * w[a] * w[4 + b] * w[8 + c];
+          gx += v * ds[a] * w[4 + b] * w[8 + c];
+          gy += v * w[a] * ds[4 + b] * w[8 + c];
+          gz += v * w[a] * w[4 + b] * ds[8 + c];
+        }
+      }
+    }
+    grad.set(gx / this.s, gy / this.s, gz / this.s);
+    return Math.abs(d) <= maxD ? d : Infinity;
   }
 }
+const smoothSlopes = new Float64Array(12);
+const smoothBlock = new Int32Array(12), smoothLocal = new Int32Array(12);
 
 const gridCache = new WeakMap<THREE.BufferGeometry, DistanceGrid[]>();
 /** A part's distance grid with this spacing, at least this wide (made once, then reused for every pose). */

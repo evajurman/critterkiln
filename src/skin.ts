@@ -1,6 +1,5 @@
 import * as THREE from 'three';
-import { MeshBVH } from 'three-mesh-bvh';
-import { bvhFor, distanceGrid, exactDistance, insideByRay, sharedNormals, type DistanceGrid } from './distance';
+import { bvhFor, distanceGrid, exactDistance, sharedNormals, type DistanceGrid } from './distance';
 import { applyLumps, lumpFade } from './inflate';
 
 /**
@@ -85,14 +84,24 @@ const yieldFrame = () =>
     channel.port2.postMessage(0);
   });
 
+/**
+ * The distance grids (see DistanceGrid) a skin of these parts reads every
+ * distance off: as fine as the skin's own grid, and as far out as anything
+ * asks (sorting the skin's blocks: a block's half diagonal past the band), with
+ * a cell to spare. Known before building, so they can be fetched (see gridStore).
+ */
+export function skinGrids(parts: { k: number }[], h: number): { s: number; band: number } {
+  const band = h * 4 * Math.sqrt(3) + Math.max(...parts.map((p) => p.k));
+  return { s: h, band: band + 2 * Math.sqrt(3) * h + h };
+}
+
 /** Build the skin geometry (in skin space), or null if abandoned. */
 export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<THREE.BufferGeometry | null> {
   const h = opts.h;
   const kMax = Math.max(...parts.map((p) => p.k));
   // distances further than this don't matter for the surface
   const band = h * 4 * Math.sqrt(3) + kMax;
-  // the fine pass looks no further than a join plus a couple of cells (see reachP); the grid goes a little beyond
-  const gridBand = kMax + 4.5 * h;
+  const gridBand = skinGrids(parts, h).band;
 
   const prepared: Prepared[] = parts.map((p, index) => {
     p.geo.computeBoundingBox();
@@ -148,14 +157,12 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
   const grad = new THREE.Vector3();
   const pt = new THREE.Vector3();
 
-  /** Signed distance to one part; `exact` resolves far points too (for inside/outside). */
+  /** Signed distance to one part; `exact` gives far points too (just which side they're on, as +-the band). */
   const partDistance = (pp: Prepared, p: THREE.Vector3, exact: boolean): number => {
     if (!pp.box.containsPoint(p)) return Infinity;
     q.copy(p).applyMatrix4(pp.fromSkin);
-    const d = exactDistance(pp.geo, pp.bvh, pp.normals, q, band, grad);
-    if (Number.isFinite(d) || !exact) return d;
-    // far from this part: all we need is which side of it we're on
-    return insideByRay(pp.geo, pp.bvh, q) ? -band : band;
+    const d = pp.grid.sample(q, band, undefined, exact);
+    return Math.abs(d) > band ? Math.sign(d) * band : d;
   };
 
   /** The blended field: polynomial smooth-min of every part's distance. NaN = far from everything. */
@@ -286,15 +293,15 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
   /** the part is out of reach from every node in the block: its distance there is just ±reach */
   const relFar: boolean[] = [];
   const active: number[] = [];
-  /** smooth union at `p` over just the parts near this block (`rel`), off their grids or measured exactly */
-  const nodeField = (p: THREE.Vector3, exact: boolean): number => {
+  /** smooth union at `p` over just the parts near this block (`rel`) */
+  const nodeField = (p: THREE.Vector3): number => {
     let f = Infinity;
     for (let r = 0; r < rel.length; r++) {
       const pp = rel[r];
       q.copy(p).applyMatrix4(pp.fromSkin);
       // only distances within the join size (plus a couple of cells) shape the surface
       const reachP = pp.k + 2.5 * h;
-      let d = relFar[r] ? Infinity : exact ? exactDistance(pp.geo, pp.bvh, pp.normals, q, reachP, grad) : pp.grid.sample(q, reachP);
+      let d = relFar[r] ? Infinity : pp.grid.sample(q, reachP);
       // beyond reach from this node: same side as the block centre
       if (!Number.isFinite(d)) d = relSide[r] * reachP;
       if (link) {
@@ -331,12 +338,12 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
         for (const pp of prepared) {
           if (!pp.box.containsPoint(center) && pp.box.distanceToPoint(center) > halfDiag) continue;
           q.copy(center).applyMatrix4(pp.fromSkin);
-          const d = exactDistance(pp.geo, pp.bvh, pp.normals, q, band + halfDiag, grad);
-          if (Number.isFinite(d)) {
+          const d = pp.grid.sample(q, band + halfDiag, undefined, true);
+          if (Math.abs(d) <= band + halfDiag) {
             rel.push(pp);
             relSide.push(d < 0 ? -1 : 1);
             relFar.push(Math.abs(d) - halfDiag > pp.k + 2.5 * h);
-          } else if (insideByRay(pp.geo, pp.bvh, q)) {
+          } else if (d < 0) {
             buried = true;
             break;
           }
@@ -351,13 +358,7 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
                 continue;
               }
               pt.set(origin.x + i * h, origin.y + j * h, origin.z + k * h);
-              // First off the parts' distance grids. Those are out by less than
-              // a cell, and only the points next to the surface (the ends of
-              // the cell edges it crosses) shape it: those are measured again
-              // exactly, so sharp tips finer than the grid stay as sharp.
-              let f = nodeField(pt, false);
-              if (Math.abs(f - grown) < 2.5 * h) f = nodeField(pt, true);
-              setNode(i, j, k, f - grown);
+              setNode(i, j, k, nodeField(pt) - grown);
             }
           }
         }
@@ -511,17 +512,32 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
   // each part's own shape, sharp points and all.
   const lin = prepared.map((pp) => new THREE.Matrix3().setFromMatrix4(pp.fromSkin).transpose());
   const g = new THREE.Vector3(), gp = new THREE.Vector3();
-  /** the blended field at `p`, its gradient into `out` (as `field`, with the smooth-min's gradient) */
-  const fieldGrad = (p: THREE.Vector3, out: THREE.Vector3): number => {
+  /**
+   * Off the grids: how steep the steepest-least part near the last point
+   * fieldGrad looked at was. A true distance is 1 steep everywhere; blended
+   * between grid points it's well under 1 only where the distance has a crease
+   * (a sharp tip or a thin edge, which the grid rounds off).
+   */
+  let leastSteep = 1;
+  /**
+   * The blended field at `p`, its gradient into `out` (as `field`, with the
+   * smooth-min's gradient). `exact` measures each part instead of reading its
+   * grid; `smooth` reads the grids smoothly (see DistanceGrid.sampleSmooth).
+   */
+  const fieldGrad = (p: THREE.Vector3, out: THREE.Vector3, exact = false, smooth = false): number => {
     let f = Infinity;
     let m = 0;
+    leastSteep = 1;
     for (let i = 0; i < prepared.length; i++) {
       const pp = prepared[i];
       if (!pp.box.containsPoint(p)) continue;
       q.copy(p).applyMatrix4(pp.fromSkin);
-      const d = exactDistance(pp.geo, pp.bvh, pp.normals, q, band, gp);
+      const d = exact ? exactDistance(pp.geo, pp.bvh, pp.normals, q, band, gp) : smooth ? pp.grid.sampleSmooth(q, band, gp) : pp.grid.sample(q, band, gp);
       if (!Number.isFinite(d)) continue;
-      // a local-space gradient back into skin space
+      // a local-space gradient (of unit length, as a true distance's is) back into skin space
+      const gl = gp.length();
+      if (!exact && Math.abs(d) < 3 * h && gl < leastSteep) leastSteep = gl;
+      if (gl > 1e-9) gp.divideScalar(gl);
       gp.applyMatrix3(lin[i]);
       if (link) {
         ids[m] = i;
@@ -544,14 +560,27 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
     if (link) return m ? combine(m, out) : Infinity;
     return f;
   };
-  /** move `p` onto the surface (f = 0) by a few Newton steps, never more than a couple of cells each */
+  /**
+   * Move `p` onto the surface (f = 0) by a few Newton steps, never more than
+   * a couple of cells each: off the grids, and where they round a sharp tip or
+   * edge off (see leastSteep), again with the parts measured exactly, so points
+   * stay as sharp as the parts drew them.
+   */
   const settle = (p: THREE.Vector3) => {
-    for (let it = 0; it < 3; it++) {
-      const f = fieldGrad(p, g);
-      const g2 = g.lengthSq();
-      if (!Number.isFinite(f) || g2 < 1e-8 || Math.abs(f) < h * 1e-3) break;
-      const step = Math.max(-2 * h, Math.min(2 * h, f / Math.sqrt(g2)));
-      p.addScaledVector(g, -step / Math.sqrt(g2));
+    let creased = false;
+    for (let exact = 0; exact < 2; exact++) {
+      // (where it's creased: on from where the grids put it, which is close, so a couple of steps do)
+      if (exact && !creased) return;
+      // the last steps read the grids smoothly: that's what places the point
+      for (let it = 0; it < (exact ? 2 : 4); it++) {
+        const f = fieldGrad(p, g, !!exact, it >= 2);
+        if (leastSteep < 0.9) creased = true;
+        const g2 = g.lengthSq();
+        if (!Number.isFinite(f) || g2 < 1e-8 || Math.abs(f) < h * 1e-3) break;
+        const step = Math.max(-2 * h, Math.min(2 * h, f / Math.sqrt(g2)));
+        p.addScaledVector(g, -step / Math.sqrt(g2));
+      }
+      if (!exact) creased ||= (fieldGrad(p, g, false, true), leastSteep < 0.9);
     }
   };
   /**
@@ -597,7 +626,7 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
       const pp = prepared[i];
       if (!pp.box.containsPoint(p)) continue;
       q.copy(p).applyMatrix4(pp.fromSkin);
-      const d = exactDistance(pp.geo, pp.bvh, pp.normals, q, 3 * h, gp);
+      const d = pp.grid.sample(q, 3 * h);
       if (!Number.isFinite(d)) continue;
       if (d < da) (b = a, db = da, a = i, da = d);
       else if (d < db) (b = i, db = d);
@@ -613,19 +642,39 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
   }
   unfold(pos, unsettled, index);
 
-  /** how thick the mesh is under each vertex: straight in along its normal to the far side */
-  const thicknessOf = async (mesh: THREE.BufferGeometry): Promise<Float32Array | null> => {
-    const bvh = new MeshBVH(mesh);
+  /**
+   * How thick the skin is under each vertex: straight in along its normal to
+   * the far side, or just `limit` past it (only thin places matter; finite, so
+   * it can still be scaled down, as lumps are under the eyes). Stepped
+   * through the blended field rather than cast at the mesh: inside, the field
+   * says how far the nearest surface is, so each step can go that far.
+   */
+  const inward = new THREE.Vector3(), probe = new THREE.Vector3(), probeGrad = new THREE.Vector3();
+  const thicknessOf = async (mesh: THREE.BufferGeometry, limit: number): Promise<Float32Array | null> => {
     const P = mesh.getAttribute('position') as THREE.BufferAttribute;
     const N = mesh.getAttribute('normal') as THREE.BufferAttribute;
-    const out = new Float32Array(P.count);
-    const inward = new THREE.Ray();
+    const out = new Float32Array(P.count).fill(limit);
+    const least = 0.02 * h;
     for (let v = 0; v < P.count; v++) {
-      inward.direction.fromBufferAttribute(N, v).negate();
-      // start just inside so the ray doesn't hit the vertex's own triangles
-      inward.origin.fromBufferAttribute(P, v).addScaledVector(inward.direction, h * 1e-3);
-      const hit = bvh.raycastFirst(inward, THREE.DoubleSide);
-      out[v] = hit ? hit.distance : Infinity;
+      inward.fromBufferAttribute(N, v).negate();
+      pt.fromBufferAttribute(P, v);
+      // (the point itself can sit a hair outside the field read straight off the
+      // grids, which rounds things a little small: the far side only counts once inside)
+      let t = least, tWas = 0, fWas = 0, inside = false;
+      for (let it = 0; it < 48 && t <= limit; it++) {
+        const f = fieldGrad(probe.copy(pt).addScaledVector(inward, t), probeGrad);
+        if (!Number.isFinite(f)) break;
+        if (f > 0 && inside) {
+          // out the far side: between the last two steps
+          out[v] = tWas + ((t - tWas) * -fWas) / (f - fWas || 1);
+          break;
+        }
+        if (f <= 0) inside = true;
+        tWas = t;
+        fWas = f;
+        // (still outside: across briskly, not creeping up on the surface in ever smaller steps)
+        t += inside ? Math.max(-f, least) : Math.max(f, 0.1 * h);
+      }
       if ((v & 4095) === 0 && (await breathe())) return null;
     }
     return out;
@@ -647,7 +696,8 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
       g0.setAttribute('position', new THREE.Float32BufferAttribute(grow, 3));
       g0.setIndex(tris);
       g0.computeVertexNormals();
-      const thick = await thicknessOf(g0);
+      // (edges are split where they're long next to the thickness: that's a few cells at most)
+      const thick = await thicknessOf(g0, 8 * h);
       g0.dispose();
       if (!thick) return null;
       const split = new Map<number, number>();
@@ -722,7 +772,7 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
         const pp = prepared[i];
         if (!pp.box.containsPoint(c)) continue;
         q.copy(c).applyMatrix4(pp.fromSkin);
-        const d = exactDistance(pp.geo, pp.bvh, pp.normals, q, band, gp);
+        const d = pp.grid.sample(q, band);
         if (!Number.isFinite(d)) continue;
         if (keep[i] === 1) {
           if (d < dk) (dk = d, ik = i);
@@ -746,7 +796,8 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
     reached('lumps', 0);
     // lumps are as big all over, which a thin point can't take (they'd make
     // it bulge and kink): cap them at a fraction of how thick the skin is there
-    const thick = await thicknessOf(geo);
+    // (a lump only outgrows its cap, a twentieth of the thickness, where it's under ~30 lumps thick)
+    const thick = await thicknessOf(geo, 30 * opts.lumps);
     if (!thick) return null;
     // the very end of a point looks in along its whole length, so it goes by
     // its neighbours too (or it'd be lumped sideways into a little barb)
@@ -802,7 +853,7 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
     const ds = new Float32Array(prepared.length);
     const acc = new THREE.Vector3(), accN = new THREE.Vector3(), tmp = new THREE.Vector3(), nv = new THREE.Vector3();
     // measured once, out as far as painting the colors will want too (see fadeDistances)
-    const fade = await fadeDistances(geo, parts, 0, Math.max(band, fadeReach(opts.colorBlend > 0 ? 2 * opts.colorBlend : 0.1)), (f) => (reached('rest', 0.9 * f), breathe()));
+    const fade = await fadeDistances(geo, parts, 0, Math.min(gridBand - 2 * h, Math.max(band, fadeReach(opts.colorBlend > 0 ? 2 * opts.colorBlend : 0.1))), (f) => (reached('rest', 0.9 * f), breathe()), { s: h, band: gridBand });
     if (!fade) return null;
     for (let v = 0; v < P.count; v++) {
       pt.fromBufferAttribute(P, v);
@@ -985,8 +1036,8 @@ const fadeReach = (need: number) => Math.max(need, Math.min(0.8, 2 * need));
  * (while building a skin), it yields now and then, and null means abandoned.
  */
 function fadeDistances(geo: THREE.BufferGeometry, parts: SkinPart[], need: number): FadeDistances;
-function fadeDistances(geo: THREE.BufferGeometry, parts: SkinPart[], need: number, reach: number, breathe: (done: number) => Promise<boolean>): Promise<FadeDistances | null>;
-function fadeDistances(geo: THREE.BufferGeometry, parts: SkinPart[], need: number, reach?: number, breathe?: (done: number) => Promise<boolean>): FadeDistances | Promise<FadeDistances | null> {
+function fadeDistances(geo: THREE.BufferGeometry, parts: SkinPart[], need: number, reach: number, breathe: (done: number) => Promise<boolean>, grids?: { s: number; band: number }): Promise<FadeDistances | null>;
+function fadeDistances(geo: THREE.BufferGeometry, parts: SkinPart[], need: number, reach?: number, breathe?: (done: number) => Promise<boolean>, grids?: { s: number; band: number }): FadeDistances | Promise<FadeDistances | null> {
   const cached = geo.userData.fade as FadeDistances | undefined;
   if (!breathe) {
     if (cached && cached.reach >= need) return cached;
@@ -994,7 +1045,7 @@ function fadeDistances(geo: THREE.BufferGeometry, parts: SkinPart[], need: numbe
     for (let r = gen.next(); ; r = gen.next()) if (r.done) return r.value;
   }
   return (async () => {
-    const gen = measureFade(geo, parts, reach!);
+    const gen = measureFade(geo, parts, reach!, grids);
     for (let r = gen.next(); ; r = gen.next()) {
       if (r.done) return r.value;
       if (await breathe(r.value)) return null;
@@ -1003,12 +1054,14 @@ function fadeDistances(geo: THREE.BufferGeometry, parts: SkinPart[], need: numbe
 }
 
 /** fadeDistances' measuring, pausing every so often (yielding how far along it is). */
-function* measureFade(geo: THREE.BufferGeometry, parts: SkinPart[], reach: number): Generator<number, FadeDistances> {
+function* measureFade(geo: THREE.BufferGeometry, parts: SkinPart[], reach: number, grids?: { s: number; band: number }): Generator<number, FadeDistances> {
   const pos = geo.getAttribute('position') as THREE.BufferAttribute;
   const prepared = parts.map((p) => ({
     p,
     bvh: bvhFor(p.geo),
     normals: sharedNormals(p.geo),
+    // (while building a skin: the grids it was built from, already filled in near its surface)
+    grid: grids ? distanceGrid(p.geo, grids.s, grids.band) : undefined,
     fromSkin: p.toSkin.clone().invert(),
     box: p.geo.boundingBox!.clone().applyMatrix4(p.toSkin).expandByScalar(reach),
   }));
@@ -1023,7 +1076,7 @@ function* measureFade(geo: THREE.BufferGeometry, parts: SkinPart[], reach: numbe
       const pp = prepared[i];
       if (!pp.box.containsPoint(pt)) continue;
       q.copy(pt).applyMatrix4(pp.fromSkin);
-      const d = exactDistance(pp.p.geo, pp.bvh, pp.normals, q, reach, grad, false);
+      const d = pp.grid ? Math.abs(pp.grid.sample(q, reach)) : exactDistance(pp.p.geo, pp.bvh, pp.normals, q, reach, grad, false);
       if (!Number.isFinite(d)) continue;
       part.push(i);
       dist.push(d);
