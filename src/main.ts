@@ -8060,13 +8060,6 @@ function renderAnim() {
   const twin = b ? creature.twinOf(b) : null;
   const paired = !!twin && twin !== b;
   $('#anim-opposite-row').hidden = !paired || !rigLocked();
-  $('#anim-note').textContent = !b
-    ? 'Pick a part to give it a motion.'
-    : !a
-      ? ''
-      : a.kind === 'breathe'
-        ? ''
-        : `${canReach && a.reach !== false ? 'The tip follows the path for real; the part above bends to reach it. ' : ''}Drag the dots in the view: the middle one moves the whole ${a.kind === 'swing' ? 'swing' : 'loop'}, the edge one sets its size and direction.${paired && !rigLocked() ? ' Mirror is off: only this side moves.' : ''}`;
   renderLoopBar();
 }
 
@@ -8105,14 +8098,6 @@ function renderStuffAnim(x: Attachment) {
     $<HTMLInputElement>('#anim-reverse').checked = !!a.reverse;
     for (const s of $('#anim-speed').querySelectorAll<HTMLButtonElement>('button')) s.classList.toggle('active', Number(s.dataset.speed) === a.speed);
   }
-  const notes: Record<StuffKind, string> = {
-    orbit: 'Drag the blue dot to what it goes round, the pink one to tip the way round, and the purple loop to make it wider or narrower.',
-    spin: 'Drag the blue dot to where it spins round, and the pink one to set the way it turns.',
-    swing: 'Drag the blue dot to where it hangs from, and the pink one to set the line it swings about.',
-    bob: 'Drag the pink dot to how far, and which way, it floats.',
-    pulse: 'Drag the blue dot to where it grows from.',
-  };
-  $('#anim-note').textContent = a ? notes[a.kind] : 'Give this piece of stuff a motion of its own.';
   renderLoopBar();
 }
 
