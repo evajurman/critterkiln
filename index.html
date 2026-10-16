@@ -274,6 +274,7 @@
             </div>
           </div>
           <div class="ck-tool" data-tool="anim">
+            <div class="anim-stuff" id="anim-stuff" hidden></div>
             <div class="anim-kinds" id="anim-kinds"></div>
             <div id="anim-opts">
               <p class="muted small" id="anim-note"></p>
@@ -286,6 +287,7 @@
               </div>
               <label class="slider" title="Start later in the motion: shift parts against each other, like feet"><span>Timing</span><input id="anim-phase" type="range" min="0" max="1" step="0.01" />
                 <span class="ends"><em>0</em><em>a whole time round</em></span></label>
+              <label class="check" id="anim-reverse-row" hidden title="Go round the other way"><input id="anim-reverse" type="checkbox" /> Reverse</label>
               <label class="check" id="anim-reach-row" title="The tip follows the path for real and the part above bends to reach it, like a knee (so a foot can lift). Off: it just swings from its base"><input id="anim-reach" type="checkbox" /> Bend the part above <span class="muted">(knee)</span></label>
               <label class="check" id="anim-opposite-row" title="With Mirror on, the other side runs half a time round behind: left foot, right foot"><input id="anim-opposite" type="checkbox" /> Other side opposite <span class="muted">(walking)</span></label>
             </div>
@@ -304,6 +306,7 @@
               </div>
               <button id="anim-render" class="ghost" title="Draw one whole loop, frame by frame, and save it as a GIF"></button>
             </div>
+            <button id="anim-clear" class="link" title="Take every motion off every part and piece of stuff in the scene (Undo brings them back)">Remove all animations</button>
           </div>
           <div class="ck-tool" data-tool="attach"><button id="rig-attach" class="pill-toggle" title="Put something from My stuff on this part"><i class="fa-slab-duo fa-regular fa-paperclip" aria-hidden="true"></i> Attach stuff…</button></div>
           <div class="ck-tool" data-tool="backdrop-color">

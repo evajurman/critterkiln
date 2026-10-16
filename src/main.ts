@@ -73,7 +73,7 @@ import {
 } from './materials';
 import { installScrollbars } from './scrollbars';
 import { applyPalette, GIFEncoder, quantize } from 'gifenc';
-import { ANIM_KINDS, animOffset, animP, defaultAnim, leanAt, leanOf, leanQuat, mirrorAnim, reachAt, reachRim, rimLean, type PartAnim } from './animate';
+import { ANIM_KINDS, animOffset, animP, defaultAnim, leanAt, leanOf, leanQuat, mirrorAnim, reachAt, reachRim, rimLean, orbitOut, STUFF_KINDS, stuffMove, stuffP, type PartAnim, type StuffAnim, type StuffKind } from './animate';
 import { customTabs, gizmos, initLayout, setLayoutIdle, setLayoutTab, setSceneColors, type Tab } from './layout';
 import { installCursorPress } from './cursorPress';
 import { captureShortcut, hasCustomShortcuts, is, keyLabel, labelShortcuts, renderShortcutSheet, resetShortcuts, ridesSurface, stopListening } from './shortcuts';
@@ -1699,7 +1699,7 @@ canvas.addEventListener('pointerup', (e) => {
     return;
   }
   const att = pickAttachment(e.clientX, e.clientY);
-  if (att) return pickStuff(att);
+  if (att) return animOn() ? pickAnimStuff(att) : pickStuff(att);
   const id = pickPart(e.clientX, e.clientY);
   if (id) {
     deselectAttachment();
@@ -6124,6 +6124,7 @@ function setMode(m: Mode) {
     setOrtho(m === 'stuff' || sceneOrtho);
   }
   mode = m;
+  if (m === ANIM_TAB) deselectAttachment();
   applyDof();
   if (m === 'look' || m === 'stuff') unlock(m);
   document.querySelectorAll<HTMLButtonElement>('.modes button').forEach((b) => b.classList.toggle('active', b.dataset.mode === m));
@@ -7855,6 +7856,7 @@ function tickAnim(now: number) {
       animKey = '';
       for (const c of creatures) {
         c.setAnim(null);
+        c.setStuffAnim(null);
         c.applyPose();
       }
       animViz.visible = false;
@@ -7873,10 +7875,12 @@ function tickAnim(now: number) {
 
 /** Every creature as it is at loop time `t` (only redone when something changed). */
 function showAnimAt(t: number) {
-  const key = t + JSON.stringify(creatures.map((c) => c.state.anims ?? null));
+  const key = t + JSON.stringify(creatures.map((c) => [c.state.anims ?? null, (c.state.attachments ?? []).map((x) => x.anim ?? null)]));
   if (key === animKey) return;
   animKey = key;
   for (const c of creatures) {
+    const moving = (c.state.attachments ?? []).filter((x) => x.anim);
+    c.setStuffAnim(moving.length ? new Map(moving.map((x) => [x.id, stuffMove(x.anim!, stuffP(x.anim!, t), c.stuffFrame(x.id)?.center)])) : null);
     const list = Object.entries(c.state.anims ?? {}).filter(([id]) => c.bones.has(id));
     const reach = list.filter(([id, a]) => reaching(c, id, a));
     const swing = list.filter((e) => !reach.includes(e));
@@ -7920,6 +7924,65 @@ function selAnim(): PartAnim | undefined {
   return state.anims?.[selected];
 }
 
+/** the piece of stuff being animated (picked in the view or from the panel), instead of the part */
+let animStuff = '';
+function selStuff(): Attachment | undefined {
+  return animStuff ? state.attachments?.find((x) => x.id === animStuff) : undefined;
+}
+/** The stuff on the picked part (a mirrored item shows on its twin part too). */
+function stuffHere(): Attachment[] {
+  return (state.attachments ?? []).filter((x) => {
+    if (x.bone === selected) return true;
+    const b = creature.bones.get(x.bone);
+    return x.mirror && !!b && creature.mirrorBoneOf(b)?.def.id === selected;
+  });
+}
+function pickAnimStuff(id: string) {
+  const a = state.attachments?.find((x) => x.id === id);
+  if (!a) return;
+  if (creature.bones.has(a.bone) && (selected !== a.bone || idle)) selectPart(a.bone, false);
+  animStuff = id;
+  renderAnim();
+}
+
+/** A fresh motion for a piece of stuff: its handles start somewhere that makes sense for the kind. */
+function freshStuffAnim(kind: StuffKind, x: Attachment, keep?: StuffAnim): StuffAnim {
+  const f = creature.stuffFrame(x.id)!;
+  const up = creature.upIn(x.bone);
+  const v = (w: THREE.Vector3) => w.toArray().map((n) => Math.round(n * 1000) / 1000) as V3;
+  const base = { kind, size: kind === 'swing' ? 20 : kind === 'pulse' ? 15 : 25, speed: keep?.speed ?? 1, phase: keep?.phase ?? 0, reverse: keep?.reverse };
+  switch (kind) {
+    case 'orbit': {
+      // round the nearest other stuff on the same part (stars round a ring), about the way it faces; or round the part
+      const others = (state.attachments ?? []).filter((o) => o.id !== x.id && o.bone === x.bone).map((o) => creature.stuffFrame(o.id)).filter((o) => !!o);
+      const near = others.sort((p, q) => p.center.distanceTo(f.center) - q.center.distanceTo(f.center))[0];
+      return near ? { ...base, center: v(near.center), axis: v(near.normal) } : { ...base, center: v(new THREE.Vector3(0, f.center.y, 0)), axis: [0, 1, 0] };
+    }
+    case 'spin':
+      return { ...base, center: v(f.center), axis: v(f.normal) };
+    case 'swing':
+      return { ...base, center: v(f.origin), axis: v(f.side) };
+    case 'bob':
+      return { ...base, center: v(f.center), axis: v(up.multiplyScalar(f.size * 0.25)) };
+    case 'pulse':
+      return { ...base, center: v(f.center), axis: v(up) };
+  }
+}
+
+/** The motion being edited (the stuff's, or the part's), and a way to change it. */
+function curMotion(): { speed: number; phase: number; size: number } | undefined {
+  return selStuff()?.anim ?? selAnim();
+}
+function patchMotion(p: Partial<StuffAnim & PartAnim>) {
+  const x = selStuff();
+  if (x) {
+    if (x.anim) x.anim = { ...x.anim, ...p } as StuffAnim;
+    return;
+  }
+  const a = selAnim();
+  if (a) setAnim({ ...a, ...p } as PartAnim);
+}
+
 /** Change the picked part's motion (and its twin's, with Mirror on), or take it away. */
 function setAnim(a: PartAnim | null) {
   const anims = (state.anims ??= {});
@@ -7936,8 +7999,30 @@ function setAnim(a: PartAnim | null) {
 }
 
 function renderAnim() {
-  const a = selAnim();
   const b = idle ? undefined : creature.bones.get(selected);
+  // the stuff on this part, to animate instead of the part
+  const here = b ? stuffHere() : [];
+  if (animStuff && !here.some((x) => x.id === animStuff)) animStuff = '';
+  const chips = $('#anim-stuff');
+  chips.hidden = !here.length;
+  chips.replaceChildren(
+    ...[null, ...here].map((x) => {
+      const btn = document.createElement('button');
+      btn.className = 'anim-chip';
+      btn.classList.toggle('active', (x?.id ?? '') === animStuff);
+      btn.innerHTML = x ? `<i class="fa-slab-duo fa-regular fa-paperclip" aria-hidden="true"></i> ${(x.thing.name || 'Stuff').replace(/[&<>"]/g, '')}${x.anim ? ' •' : ''}` : 'This part';
+      btn.title = x ? 'Animate this piece of stuff' : 'Animate the part itself';
+      btn.onclick = () => {
+        animStuff = x?.id ?? '';
+        renderAnim();
+      };
+      return btn;
+    }),
+  );
+  const stuff = selStuff();
+  if (stuff) return renderStuffAnim(stuff);
+  $('#anim-reverse-row').hidden = true;
+  const a = selAnim();
   $('#anim-kinds').replaceChildren(
     ...[{ kind: null, name: 'Still', icon: 'pause', title: 'No motion on this part' }, ...ANIM_KINDS].map((k) => {
       const btn = document.createElement('button');
@@ -7959,6 +8044,7 @@ function renderAnim() {
   $('#anim-opts').hidden = !a || !b;
   if (a) {
     $('#anim-size-row').hidden = a.kind !== 'breathe';
+    $<HTMLInputElement>('#anim-size').max = '40';
     $<HTMLInputElement>('#anim-size').value = String(a.size);
     $<HTMLInputElement>('#anim-phase').value = String(a.phase);
     $<HTMLInputElement>('#anim-opposite').checked = !!a.opposite;
@@ -7978,16 +8064,58 @@ function renderAnim() {
       : a.kind === 'breathe'
         ? ''
         : `${canReach && a.reach !== false ? 'The tip follows the path for real; the part above bends to reach it. ' : ''}Drag the dots in the view: the middle one moves the whole ${a.kind === 'swing' ? 'swing' : 'loop'}, the edge one sets its size and direction.${paired && !rigLocked() ? ' Mirror is off: only this side moves.' : ''}`;
+  renderLoopBar();
+}
+
+function renderLoopBar() {
   iconLabel($('#anim-play'), faClassic(animPlaying ? 'pause' : 'play'), animPlaying ? 'Pause' : 'Play');
   $<HTMLInputElement>('#anim-secs').value = String(animSecs());
+  $<HTMLButtonElement>('#anim-clear').disabled = !creatures.some((c) => (c.state.anims && Object.keys(c.state.anims).length) || c.state.attachments?.some((x) => x.anim));
+}
+
+/** The panel for a piece of stuff's motion. */
+function renderStuffAnim(x: Attachment) {
+  const a = x.anim;
+  $('#anim-kinds').replaceChildren(
+    ...[{ kind: null, name: 'Still', icon: 'pause', title: 'No motion on this piece of stuff' }, ...STUFF_KINDS].map((k) => {
+      const btn = document.createElement('button');
+      btn.innerHTML = `<i class="fa-duotone fa-regular fa-${k.icon}" aria-hidden="true"></i>${k.name}`;
+      btn.title = k.title;
+      btn.classList.toggle('active', (a?.kind ?? null) === k.kind);
+      btn.onclick = () => {
+        x.anim = k.kind ? freshStuffAnim(k.kind, x, a) : undefined;
+        renderAnim();
+        commit();
+      };
+      return btn;
+    }),
+  );
+  $('#anim-opts').hidden = !a;
+  $('#anim-reach-row').hidden = $('#anim-opposite-row').hidden = true;
+  if (a) {
+    const sized = a.kind === 'swing' || a.kind === 'pulse';
+    $('#anim-size-row').hidden = !sized;
+    $<HTMLInputElement>('#anim-size').max = a.kind === 'swing' ? '90' : '60';
+    $<HTMLInputElement>('#anim-size').value = String(a.size);
+    $<HTMLInputElement>('#anim-phase').value = String(a.phase);
+    $('#anim-reverse-row').hidden = a.kind !== 'orbit' && a.kind !== 'spin';
+    $<HTMLInputElement>('#anim-reverse').checked = !!a.reverse;
+    for (const s of $('#anim-speed').querySelectorAll<HTMLButtonElement>('button')) s.classList.toggle('active', Number(s.dataset.speed) === a.speed);
+  }
+  const notes: Record<StuffKind, string> = {
+    orbit: 'Drag the blue dot to what it goes round, the pink one to tip the way round, and the purple loop to make it wider or narrower.',
+    spin: 'Drag the blue dot to where it spins round, and the pink one to set the way it turns.',
+    swing: 'Drag the blue dot to where it hangs from, and the pink one to set the line it swings about.',
+    bob: 'Drag the pink dot to how far, and which way, it floats.',
+    pulse: 'Drag the blue dot to where it grows from.',
+  };
+  $('#anim-note').textContent = a ? notes[a.kind] : 'Give this piece of stuff a motion of its own.';
+  renderLoopBar();
 }
 
 for (const [id, field] of [['#anim-size', 'size'], ['#anim-phase', 'phase']] as const) {
   const input = $<HTMLInputElement>(id);
-  input.oninput = () => {
-    const a = selAnim();
-    if (a) setAnim({ ...a, [field]: parseFloat(input.value) });
-  };
+  input.oninput = () => patchMotion({ [field]: parseFloat(input.value) });
   input.onchange = () => commit();
 }
 $<HTMLInputElement>('#anim-reach').onchange = (e) => {
@@ -8003,13 +8131,26 @@ $<HTMLInputElement>('#anim-opposite').onchange = (e) => {
 };
 for (const btn of $('#anim-speed').querySelectorAll<HTMLButtonElement>('button')) {
   btn.onclick = () => {
-    const a = selAnim();
-    if (!a) return;
-    setAnim({ ...a, speed: Number(btn.dataset.speed) });
+    if (!curMotion()) return;
+    patchMotion({ speed: Number(btn.dataset.speed) });
     renderAnim();
     commit();
   };
 }
+$<HTMLInputElement>('#anim-reverse').onchange = (e) => {
+  patchMotion({ reverse: (e.target as HTMLInputElement).checked || undefined });
+  commit();
+};
+$('#anim-clear').onclick = () => {
+  // every motion in the scene: parts and stuff, every creature (Undo brings them back)
+  for (const c of creatures) {
+    delete c.state.anims;
+    for (const x of c.state.attachments ?? []) delete x.anim;
+  }
+  commit();
+  renderAnim();
+  hint('All animations removed (Undo brings them back)', 2400);
+};
 $('#anim-play').onclick = () => {
   animPlaying = !animPlaying;
   renderAnim();
@@ -8030,14 +8171,20 @@ const animViz = new THREE.Group();
 animViz.visible = false;
 animViz.renderOrder = 999;
 const vizMat = (color: number, opacity = 1) => new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthTest: false, depthWrite: false });
-const pathLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineDashedMaterial({ color: 0xffffff, dashSize: 0.04, gapSize: 0.03, transparent: true, opacity: 0.9, depthTest: false }));
+const PATH_COLOR = 0xb44dff;
+const pathLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineDashedMaterial({ color: PATH_COLOR, dashSize: 0.04, gapSize: 0.03, transparent: true, opacity: 1, depthTest: false }));
+/** a dark line under the dashes: the path reads on a light backdrop as well as a dark one */
+const pathUnder = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0x1b1030, transparent: true, opacity: 0.55, depthTest: false }));
 const spokeLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xe0609a, transparent: true, opacity: 0.8, depthTest: false }));
 const ball = new THREE.SphereGeometry(1, 16, 12);
-const rider = new THREE.Mesh(ball, vizMat(0xffffff));
+const rider = new THREE.Mesh(ball, vizMat(PATH_COLOR));
 const centerHandle = new THREE.Mesh(ball, vizMat(0x3b82f6));
 const rimHandle = new THREE.Mesh(ball, vizMat(0xe0609a));
 const arrowGeo = new THREE.ConeGeometry(0.5, 1.4, 12);
-const arrows = [0, 1, 2, 3].map(() => new THREE.Mesh(arrowGeo, vizMat(0xffffff, 0.9)));
+const arrows = [0, 1, 2, 3].map(() => new THREE.Mesh(arrowGeo, vizMat(PATH_COLOR)));
+pathUnder.renderOrder = 998;
+pathUnder.frustumCulled = false;
+animViz.add(pathUnder);
 for (const o of [pathLine, spokeLine, rider, centerHandle, rimHandle, ...arrows]) {
   o.renderOrder = 999;
   o.frustumCulled = false;
@@ -8063,6 +8210,9 @@ function tipAt(f: ReturnType<typeof partFrame>, lean: [number, number], flip?: b
 }
 
 function drawAnimPath() {
+  const x = animOn() && !idle ? selStuff() : undefined;
+  if (x) return drawStuffPath(x);
+  rimHandle.visible = centerHandle.visible = spokeLine.visible = true;
   const a = selAnim();
   const show = animOn() && !idle && !!a && a.kind !== 'breathe' && creature.bones.has(selected);
   if (animViz.visible !== show) invalidate(1);
@@ -8086,9 +8236,7 @@ function drawAnimPath() {
     anchor = f.base;
   }
   const pts = Array.from({ length: 97 }, (_, i) => at(i / 96));
-  pathLine.geometry.dispose();
-  pathLine.geometry = new THREE.BufferGeometry().setFromPoints(pts);
-  pathLine.computeLineDistances();
+  setPath(pts);
   // handles keep a steady size on screen
   const r = view.position.distanceTo(anchor) * 0.011;
   rider.position.copy(at(animP(a, animT)));
@@ -8111,8 +8259,111 @@ function drawAnimPath() {
   invalidate(1);
 }
 
+/**
+ * A piece of stuff's motion, in its part's frame: the path a point on it
+ * traces, the blue handle (centre) and the pink one (the line it turns
+ * about, or for Bob where it floats to).
+ */
+function stuffViz(x: Attachment) {
+  const a = x.anim!;
+  const f = creature.stuffFrame(x.id);
+  const b = creature.bones.get(x.bone);
+  if (!f || !b) return null;
+  const c = new THREE.Vector3(...a.center), axis = new THREE.Vector3(...a.axis);
+  const unit = axis.lengthSq() > 1e-12 ? axis.clone().normalize() : new THREE.Vector3(0, 1, 0);
+  // spinning and pulsing turn round the item's own middle: trace a point off to its side instead
+  const off = new THREE.Vector3().crossVectors(unit, Math.abs(unit.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0)).normalize();
+  const traced = a.kind === 'spin' ? c.clone().addScaledVector(off, Math.max(f.size * 0.4, 0.02)) : f.center.clone();
+  const reach = Math.max(f.size * 0.6, traced.distanceTo(c), 0.05);
+  const rim = a.kind === 'bob' ? f.center.clone().add(axis) : c.clone().addScaledVector(unit, reach);
+  return { f, b, c, rim, at: (p: number) => traced.clone().applyMatrix4(stuffMove(a, p, f.center)) };
+}
+
+function drawStuffPath(x: Attachment) {
+  const a = x.anim;
+  const v = a && stuffViz(x);
+  if (animViz.visible !== !!v) invalidate(1);
+  animViz.visible = !!v;
+  if (!a || !v) return;
+  const W = (p: THREE.Vector3) => v.b.pivot.localToWorld(p.clone());
+  const at = (p: number) => W(v.at(p));
+  const pts = Array.from({ length: 97 }, (_, i) => at(i / 96));
+  setPath(pts);
+  const r = view.position.distanceTo(pts[0]) * 0.011;
+  rider.position.copy(at(stuffP(a, animT)));
+  rider.scale.setScalar(r * 0.8);
+  // Bob has no centre to move; Pulse no line
+  centerHandle.visible = a.kind !== 'bob';
+  rimHandle.visible = a.kind !== 'pulse';
+  centerHandle.position.copy(W(a.kind === 'bob' ? v.f.center : v.c));
+  centerHandle.scale.setScalar(r * 1.3);
+  rimHandle.position.copy(W(v.rim));
+  rimHandle.scale.setScalar(r * 1.3);
+  spokeLine.geometry.dispose();
+  spokeLine.geometry = new THREE.BufferGeometry().setFromPoints([centerHandle.position, rimHandle.position]);
+  spokeLine.visible = a.kind !== 'pulse';
+  arrows.forEach((m, i) => {
+    const p = 0.125 + i * 0.25;
+    const here = at(p), ahead = at(p + 0.01).sub(here);
+    m.visible = ahead.lengthSq() > 1e-12;
+    m.position.copy(here);
+    if (m.visible) m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), ahead.normalize());
+    m.scale.setScalar(r * 1.1);
+  });
+  invalidate(1);
+}
+
+/** Dragging a piece of stuff's handles: across the view, through where the handle is. */
+function dragStuff(x: Attachment, ray: THREE.Ray) {
+  const a = x.anim;
+  const v = a && stuffViz(x);
+  if (!a || !v || !animDrag) return;
+  if (animDrag.which === 'radius') return dragOrbitSize(x, a, v, ray);
+  const handle = (animDrag.which === 'center' ? centerHandle : rimHandle).position;
+  const facing = view.getWorldDirection(new THREE.Vector3());
+  const den = facing.dot(ray.direction);
+  if (Math.abs(den) < 1e-6) return;
+  const hit = ray.origin.clone().addScaledVector(ray.direction, facing.dot(handle.clone().sub(ray.origin)) / den);
+  const q = v.b.pivot.worldToLocal(hit);
+  const r3 = (w: THREE.Vector3) => w.toArray().map((n) => Math.round(n * 1000) / 1000) as V3;
+  if (animDrag.which === 'center') x.anim = { ...a, center: r3(q) };
+  else if (a.kind === 'bob') x.anim = { ...a, axis: r3(q.sub(v.f.center)) };
+  else {
+    const d = q.sub(v.c);
+    if (d.lengthSq() > 1e-10) x.anim = { ...a, axis: r3(d.normalize()) };
+  }
+}
+
+function setPath(pts: THREE.Vector3[]) {
+  for (const l of [pathLine, pathUnder]) {
+    l.geometry.dispose();
+    l.geometry = new THREE.BufferGeometry().setFromPoints(pts);
+  }
+  pathLine.computeLineDistances();
+}
+
+/** Dragging an Orbit's loop: how far the pointer is from the line it goes round sets how wide it is. */
+function dragOrbitSize(x: Attachment, a: StuffAnim, v: NonNullable<ReturnType<typeof stuffViz>>, ray: THREE.Ray) {
+  const pivot = v.b.pivot;
+  const o = pivot.worldToLocal(ray.origin.clone());
+  const d = pivot.worldToLocal(ray.origin.clone().add(ray.direction)).sub(o).normalize();
+  const axis = new THREE.Vector3(...a.axis).normalize();
+  // on the loop's own plane; seen edge on, across the view instead
+  let den = axis.dot(d), normal = axis;
+  if (Math.abs(den) < 0.15) {
+    normal = pivot.worldToLocal(pivot.getWorldPosition(new THREE.Vector3()).add(view.getWorldDirection(new THREE.Vector3()))).sub(pivot.worldToLocal(pivot.getWorldPosition(new THREE.Vector3()))).normalize();
+    den = normal.dot(d);
+    if (Math.abs(den) < 1e-6) return;
+  }
+  const q = o.clone().addScaledVector(d, normal.dot(v.c.clone().sub(o)) / den);
+  const placed = orbitOut(a, v.f.center).length();
+  if (placed < 1e-4) return;
+  const wide = orbitOut(a, q).length() / placed;
+  x.anim = { ...a, radius: Math.round(Math.min(8, Math.max(0.05, wide)) * 100) / 100 };
+}
+
 /** A handle being dragged */
-let animDrag: { which: 'center' | 'rim'; id: number } | null = null;
+let animDrag: { which: 'center' | 'rim' | 'radius'; id: number } | null = null;
 
 function rayAt(e: PointerEvent) {
   const rect = renderer.domElement.getBoundingClientRect();
@@ -8125,21 +8376,30 @@ viewport.addEventListener(
   (e) => {
     if (!animViz.visible || e.button !== 0) return;
     rayAt(e);
-    const hit = raycaster.intersectObjects([centerHandle, rimHandle])[0];
+    // an Orbit's loop can be grabbed too, to make it wider or narrower
+    const orbiting = selStuff()?.anim?.kind === 'orbit';
+    raycaster.params.Line.threshold = rider.scale.x * 1.2;
+    const hit = raycaster.intersectObjects([centerHandle, rimHandle, ...(orbiting ? [rider, ...arrows, pathLine] : [])].filter((h) => h.visible))[0];
     if (!hit) return;
     // the handle, not the camera or the part under it
     e.stopPropagation();
     e.preventDefault();
     viewport.setPointerCapture(e.pointerId);
-    animDrag = { which: hit.object === centerHandle ? 'center' : 'rim', id: e.pointerId };
+    animDrag = { which: hit.object === centerHandle ? 'center' : hit.object === rimHandle ? 'rim' : 'radius', id: e.pointerId };
   },
   { capture: true },
 );
 viewport.addEventListener(
   'pointermove',
   (e) => {
+    if (!animDrag || e.pointerId !== animDrag.id) return;
+    const x = selStuff();
+    if (x) {
+      e.stopPropagation();
+      return dragStuff(x, rayAt(e));
+    }
     const a = selAnim();
-    if (!animDrag || e.pointerId !== animDrag.id || !a) return;
+    if (!a) return;
     e.stopPropagation();
     const ray = rayAt(e);
     if (reaching(creature, selected, a)) return dragReach(a, ray);

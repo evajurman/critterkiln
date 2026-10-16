@@ -16,6 +16,7 @@
  * TODO(anim): unit tests for animOffset (loop closure at p=0/1, twin mirroring) and leanOf (inverse of animOffset).
  */
 import * as THREE from 'three';
+import type { V3 } from './rigs';
 
 export type AnimKind = 'circle' | 'half' | 'swing' | 'eight' | 'breathe';
 
@@ -152,4 +153,85 @@ export function reachRim(a: PartAnim, reachLen: number): THREE.Vector3 {
   const out = new THREE.Vector3(a.x * k, 0, a.z * k).addScaledVector(reachAxes(a).along, a.size * k);
   if (a.flip) out.x = -out.x;
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Stuff motions: a looping move for a piece of stuff on a part, on the same
+// loop as the parts (whole times round, so it closes).
+
+export type StuffKind = 'orbit' | 'spin' | 'bob' | 'swing' | 'pulse';
+
+export interface StuffAnim {
+  kind: StuffKind;
+  /** Swing: degrees each way; Pulse: percent bigger */
+  size: number;
+  /** times round per loop (a whole number, so it loops) */
+  speed: number;
+  /** timing offset, as a fraction of one time round (0..1) */
+  phase: number;
+  /** Orbit and Spin: go round the other way */
+  reverse?: boolean;
+  /** Orbit: how wide, against how far it's placed from the centre (1, unset: as placed). Only while it moves: its placement stays put */
+  radius?: number;
+  /** in the part's frame: what it goes round, spins round, swings from or grows from (the blue handle) */
+  center: V3;
+  /**
+   * in the part's frame (the pink handle): the line it turns about (Orbit,
+   * Spin, Swing: only its direction counts), or for Bob how far and which way
+   * it floats
+   */
+  axis: V3;
+}
+
+export const STUFF_KINDS: { kind: StuffKind; name: string; icon: string; title: string }[] = [
+  { kind: 'orbit', name: 'Orbit', icon: 'planet-ringed', title: 'Goes round a point: stars round a ring. Starts round the nearest other stuff on the part, or the part itself' },
+  { kind: 'spin', name: 'Spin', icon: 'arrows-spin', title: 'Turns in place, round the way it faces: a halo, a propeller' },
+  { kind: 'bob', name: 'Bob', icon: 'arrows-up-down', title: 'Floats up and down' },
+  { kind: 'swing', name: 'Swing', icon: 'arrows-left-right', title: 'Rocks back and forth from where it’s attached: an earring, a tassel' },
+  { kind: 'pulse', name: 'Pulse', icon: 'heart-pulse', title: 'Grows and shrinks' },
+];
+
+/**
+ * The move (in the part's frame) a piece of stuff makes at `p` of one time
+ * round, after its own placement. `from`: the item's middle (an Orbit wider
+ * or narrower than placed pushes it out from the line it goes round).
+ */
+export function stuffMove(a: StuffAnim, p: number, from?: THREE.Vector3): THREE.Matrix4 {
+  const c = new THREE.Vector3(...a.center);
+  const around = (m: THREE.Matrix4) => new THREE.Matrix4().makeTranslation(c.x, c.y, c.z).multiply(m).multiply(new THREE.Matrix4().makeTranslation(-c.x, -c.y, -c.z));
+  const axis = new THREE.Vector3(...a.axis);
+  const unit = axis.lengthSq() > 1e-12 ? axis.clone().normalize() : new THREE.Vector3(0, 1, 0);
+  const wave = Math.sin(TAU * p);
+  switch (a.kind) {
+    case 'orbit':
+    case 'spin': {
+      const turn = around(new THREE.Matrix4().makeRotationAxis(unit, TAU * p * (a.reverse ? -1 : 1)));
+      const k = a.kind === 'orbit' ? (a.radius ?? 1) : 1;
+      if (k === 1 || !from) return turn;
+      // out from the line it goes round, before it turns
+      const out = orbitOut(a, from).multiplyScalar(k - 1);
+      return turn.multiply(new THREE.Matrix4().makeTranslation(out.x, out.y, out.z));
+    }
+    case 'swing':
+      return around(new THREE.Matrix4().makeRotationAxis(unit, a.size * D * wave));
+    case 'bob':
+      return new THREE.Matrix4().makeTranslation(axis.x * wave, axis.y * wave, axis.z * wave);
+    case 'pulse': {
+      const k = 1 + (a.size / 100) * wave;
+      return around(new THREE.Matrix4().makeScale(k, k, k));
+    }
+  }
+}
+
+/** How far a piece of stuff (its middle at `from`) is out from the line an Orbit goes round: across the line, not along it. */
+export function orbitOut(a: StuffAnim, from: THREE.Vector3): THREE.Vector3 {
+  const axis = new THREE.Vector3(...a.axis);
+  const unit = axis.lengthSq() > 1e-12 ? axis.normalize() : new THREE.Vector3(0, 1, 0);
+  const d = from.clone().sub(new THREE.Vector3(...a.center));
+  return d.addScaledVector(unit, -d.dot(unit));
+}
+
+/** Where in one time round a piece of stuff is at loop time `t`. */
+export function stuffP(a: StuffAnim, t: number): number {
+  return (((t * Math.max(1, Math.round(a.speed)) + a.phase) % 1) + 1) % 1;
 }

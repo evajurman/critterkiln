@@ -1250,4 +1250,10 @@ html.theme-color[data-mode="custom"] {
 .anim-play-row #anim-play { width: auto; flex: none; padding-inline: 14px; }
 .anim-play-row input { flex: 1; min-width: 0; }
 #anim-render { width: 100%; }
+.anim-stuff { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
+.anim-chip { border: 1.5px solid transparent; background: var(--bg); color: var(--muted); border-radius: 999px; padding: 4px 10px; font-weight: var(--w-bold); font-size: 12px; cursor: var(--cursor-click); }
+.anim-chip.active { background: var(--sel-bg); border-color: var(--blue); color: var(--sel-ink); }
+#anim-clear { display: block; margin: 8px auto 0; }
 #anim-render.recording { color: #e5484d; }
+/* rows like .check set their own display, which would beat [hidden] */
+.ck-tool[data-tool="anim"] [hidden], .ck-tool[data-tool="anim-play"] [hidden] { display: none !important; }

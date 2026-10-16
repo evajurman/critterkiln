@@ -25,7 +25,7 @@ import {
   type StyleSettings,
 } from './materials';
 import { MAX_BEND, bendCurve, expandRig, onCurve, type BendCurve, type ExpandedBone, type ExpandedRig, type RigState, type V3 } from './rigs';
-import type { PartAnim } from './animate';
+import type { PartAnim, StuffAnim } from './animate';
 import { buildThing, disposeThing, partPieceGeometry, type Thing, type WrapSurface } from './stuff';
 
 /** One drawn shape of a part, puffed up on its own: drawn from the front (the default) or from the side. */
@@ -173,6 +173,8 @@ export interface Attachment {
   mirror: boolean;
   /** shrink wrap: pressed onto the part's surface like a decal (instead of the thing's own bend) */
   wrap?: boolean;
+  /** a looping motion in the Animate tab: see src/animate.ts */
+  anim?: StuffAnim;
 }
 
 export interface CreatureState {
@@ -1186,9 +1188,7 @@ export class Creature {
         }
         for (const g of [rec.main, rec.twin]) g?.traverse((o) => (o.userData.attachmentId = a.id));
       }
-      rec.main.position.set(...a.position);
-      rec.main.quaternion.set(...a.quaternion);
-      rec.main.scale.set(...a.scale);
+      this.placeStuff(a, rec.main);
       this.updateTwin(a.id);
     }
     for (const [id, rec] of this.attached) {
@@ -1276,6 +1276,72 @@ export class Creature {
       rec.twin.matrix.copy(r).invert().multiply(new THREE.Matrix4().makeScale(-1, 1, 1)).multiply(r).multiply(rec.main.matrix);
     } else rec.twin.matrix.makeScale(1, 1, -1).multiply(rec.main.matrix);
     rec.twin.matrixWorldNeedsUpdate = true;
+  }
+
+  /**
+   * Looping stuff motions (Animate tab): per attachment, a move in its part's
+   * frame applied after its own placement. Never saved into the placement.
+   */
+  private stuffAnim: Map<string, THREE.Matrix4> | null = null;
+  setStuffAnim(m: Map<string, THREE.Matrix4> | null) {
+    if (!m && !this.stuffAnim) return;
+    this.stuffAnim = m;
+    for (const a of this.state.attachments ?? []) {
+      const rec = this.attached.get(a.id);
+      if (!rec) continue;
+      this.placeStuff(a, rec.main);
+      this.updateTwin(a.id);
+    }
+  }
+
+  /** Put an attachment where it's placed (plus its motion, if one's showing). */
+  private placeStuff(a: Attachment, g: THREE.Group) {
+    g.position.set(...a.position);
+    g.quaternion.set(...a.quaternion);
+    g.scale.set(...a.scale);
+    const m = this.stuffAnim?.get(a.id);
+    if (!m) return;
+    g.updateMatrix();
+    new THREE.Matrix4().multiplyMatrices(m, g.matrix).decompose(g.position, g.quaternion, g.scale);
+  }
+
+  /**
+   * An attachment's own frame, as placed (no motion), in its part's frame:
+   * the middle of what it's made of, which way its drawing faces (its Z, out
+   * of the board), its X, and how big it is across.
+   */
+  stuffFrame(id: string): { center: THREE.Vector3; normal: THREE.Vector3; side: THREE.Vector3; size: number; origin: THREE.Vector3 } | null {
+    const a = this.state.attachments?.find((x) => x.id === id);
+    const rec = this.attached.get(id);
+    if (!a || !rec) return null;
+    const place = new THREE.Matrix4().compose(new THREE.Vector3(...a.position), new THREE.Quaternion(...a.quaternion), new THREE.Vector3(...a.scale));
+    // its contents' box in its own (unplaced) frame
+    rec.main.updateMatrixWorld(true);
+    const toMain = rec.main.matrixWorld.clone().invert();
+    const box = new THREE.Box3();
+    rec.main.traverse((o) => {
+      const geo = (o as THREE.Mesh).geometry as THREE.BufferGeometry | undefined;
+      if (!(o instanceof THREE.Mesh) || !geo) return;
+      if (!geo.boundingBox) geo.computeBoundingBox();
+      box.union(geo.boundingBox!.clone().applyMatrix4(toMain.clone().multiply(o.matrixWorld)));
+    });
+    const c = box.isEmpty() ? new THREE.Vector3() : box.getCenter(new THREE.Vector3());
+    const size = box.isEmpty() ? 0.1 : box.getSize(new THREE.Vector3()).applyMatrix4(new THREE.Matrix4().makeScale(...a.scale)).length();
+    const q = new THREE.Quaternion(...a.quaternion);
+    return {
+      center: c.applyMatrix4(place),
+      normal: new THREE.Vector3(0, 0, 1).applyQuaternion(q),
+      side: new THREE.Vector3(1, 0, 0).applyQuaternion(q),
+      size: Math.abs(size),
+      origin: new THREE.Vector3(...a.position),
+    };
+  }
+
+  /** Which way is up (the creature's +Y, at rest) in a part's frame. */
+  upIn(boneId: string): THREE.Vector3 {
+    const b = this.bones.get(boneId);
+    if (!b) return new THREE.Vector3(0, 1, 0);
+    return new THREE.Vector3(0, 1, 0).transformDirection(b.restGroup.clone().invert());
   }
 
   attachmentObject(id: string): THREE.Group | null {
