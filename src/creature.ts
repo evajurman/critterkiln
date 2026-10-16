@@ -455,6 +455,51 @@ function bendPoint(bd: Bend, x: number, y: number, z: number): [number, number, 
   return [c * u2 - s * w, y2, s * u2 + c * w, phi];
 }
 
+/** A bone's frame at `s` along it (straight-bone height): the centre line there, and its side, along and out directions. */
+function bendFrame(bd: Bend, s: number) {
+  const at = (x: number, y: number, z: number) => new THREE.Vector3(...bendPoint(bd, x, y, z).slice(0, 3));
+  const p = at(0, s, 0);
+  const x = at(1, s, 0).sub(p).normalize();
+  const z = at(0, s, 1).sub(p).normalize();
+  return { p, x, t: new THREE.Vector3().crossVectors(z, x).normalize(), z };
+}
+
+/**
+ * Carry a point (and a facing) in a part's frame from one shape of its bone
+ * to another: the same spot on it, `kLen` times as far along and `kWidth`
+ * times as far out from its middle, however either one's bent. For things
+ * stuck on a part (its eyes) while the part's stretched or grown.
+ */
+export function carryOnBend(from: Bend, to: Bend, kWidth: number, p: THREE.Vector3, n?: THREE.Vector3): { p: THREE.Vector3; n?: THREE.Vector3 } {
+  const kLen = to.len / Math.max(from.len, 1e-6);
+  // the nearest spot on the centre line (a little past either end, for the caps)
+  const dist = (s: number) => new THREE.Vector3(...bendPoint(from, 0, s, 0).slice(0, 3)).distanceToSquared(p);
+  const steps = 64, lo = -0.5 * from.len, span = 2 * from.len;
+  let s = lo, best = Infinity;
+  for (let i = 0; i <= steps; i++) {
+    const y = lo + (span * i) / steps;
+    const d = dist(y);
+    if (d < best) (best = d), (s = y);
+  }
+  let a = s - span / steps, b = s + span / steps;
+  for (let i = 0; i < 24; i++) {
+    const m1 = a + (b - a) / 3, m2 = b - (b - a) / 3;
+    if (dist(m1) < dist(m2)) b = m2;
+    else a = m1;
+  }
+  s = (a + b) / 2;
+  const f = bendFrame(from, s);
+  const d = p.clone().sub(f.p);
+  const x = d.dot(f.x), z = d.dot(f.z);
+  s += d.dot(f.t);
+  const g = bendFrame(to, s * kLen);
+  const out = new THREE.Vector3(...bendPoint(to, x * kWidth, s * kLen, z * kWidth).slice(0, 3));
+  if (!n) return { p: out };
+  // a facing tilts the other way to the stretch (a surface's normal)
+  const nn = g.x.multiplyScalar(n.dot(f.x) / kWidth).add(g.t.multiplyScalar(n.dot(f.t) / kLen)).add(g.z.multiplyScalar(n.dot(f.z) / kWidth));
+  return { p: out, n: nn.normalize() };
+}
+
 /** Turn a direction vector (x, y, z) by the bend's local turn angle `phi`. */
 function bendVector(bd: Bend, phi: number, x: number, y: number, z: number): [number, number, number] {
   const c = Math.cos(bd.dir), s = Math.sin(bd.dir);
@@ -954,6 +999,7 @@ export class Creature {
       const bd = bendOf(def, length);
       const tipAt = bendPoint(bd, 0, length, 0);
       b.tip.position.set(tipAt[0], tipAt[1], tipAt[2]);
+      this.followEyes(b, bd);
       this.placeBendHandles(b, bd);
       b.line.geometry.dispose();
       b.line.geometry = new THREE.BufferGeometry().setFromPoints(bonePoints(bd));
@@ -2383,6 +2429,22 @@ export class Creature {
   }
 
   /**
+   * While a part's stretched (its mesh not yet rebuilt), its eyes ride the
+   * same spots on it, from where they were placed on the mesh as built to the
+   * bone's new shape `to`. They're placed afresh once it's rebuilt.
+   */
+  private followEyes(b: BoneRT, to: Bend) {
+    const from = (b.mesh?.userData.bend as Bend | undefined) ?? { len: b.length, theta: 0, dir: 0 };
+    for (const g of this.eyes) {
+      if (g.parent !== b.pivot) continue;
+      for (const eye of g.children) {
+        const rest = eye.userData.rest as THREE.Vector3 | undefined;
+        if (rest) eye.position.copy(carryOnBend(from, to, 1, rest).p);
+      }
+    }
+  }
+
+  /**
    * Clay and stone: ease a part's lumps out under its eyes, so each eye sits
    * on the smooth shape it was placed on (not sunk into a lump, or tipped off
    * one). No spots puts every lump back.
@@ -2572,6 +2634,8 @@ export class Creature {
       eye.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
       // stand-off: lift the eye out along its facing direction
       eye.position.copy(hit.point).addScaledVector(z, (pair.lift ?? e.lift ?? 0) * r * 1.2);
+      // (where it sits on the mesh as built, for riding a stretch: see followEyes)
+      eye.userData.rest = eye.position.clone();
       const style = EYE_STYLES.some((o) => o.id === e.style) ? e.style : 'googly';
       const built = buildEye(style, r, sgn, partStyle, this.settingsFor(partStyle), e);
       // a textured material lays out the same patch on every eye (they're the same shape) unless shifted

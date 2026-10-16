@@ -504,13 +504,22 @@ export function scaleBone(rig: RigState, sceneId: string, kLen: number, kWidth: 
     b.start = round3(add3(b.start, by));
     b.end = round3(add3(b.end, by));
     for (const k of kids(b.id)) shiftTree(k, by);
+    if (b.mirror) {
+      for (const k of kids(b.id + 'L')) shiftTree(k, by);
+      for (const k of kids(b.id + 'R')) shiftTree(k, mirrorV(by));
+    }
   };
-  for (const c of kids(d.id)) {
-    const rel = sub3(c.start, d.start);
-    const t = rel[0] * u[0] + rel[1] * u[1] + rel[2] * u[2];
-    const lateral = sub3(rel, scale3(u, t));
-    const next = add3(add3(d.start, scale3(u, t * kLen)), scale3(lateral, kWidth));
-    shiftTree(c, sub3(next, c.start));
+  // (a single limb on one side of a pair hangs off that twin, laid out where it is rather than on the left side)
+  const sides: [string, (v: V3) => V3][] = d.mirror ? [[d.id + 'L', (v) => v], [d.id + 'R', mirrorV]] : [];
+  for (const [parent, side] of [[d.id, (v: V3) => v] as [string, (v: V3) => V3], ...sides]) {
+    const start = side(d.start), along = side(u);
+    for (const c of kids(parent)) {
+      const rel = sub3(c.start, start);
+      const t = rel[0] * along[0] + rel[1] * along[1] + rel[2] * along[2];
+      const lateral = sub3(rel, scale3(along, t));
+      const next = add3(add3(start, scale3(along, t * kLen)), scale3(lateral, kWidth));
+      shiftTree(c, sub3(next, c.start));
+    }
   }
   return kLen;
 }

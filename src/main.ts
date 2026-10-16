@@ -12,7 +12,9 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { FullScreenQuad, Pass } from 'three/examples/jsm/postprocessing/Pass.js';
 import {
+  bendOf,
   blendWithOf,
+  carryOnBend,
   Creature,
   defaultState,
   EYE_STYLES,
@@ -1268,10 +1270,11 @@ function scaleDrawnPart(id: string, k: number) {
   const part = b && state.parts[b.src];
   if (!b || !part) return;
   creature.capturePose();
+  const before = structuredClone(state.rig);
+  // (bend points are fractions of the length, so the curve grows with it as it is)
   const kY = scaleBone(state.rig, id, k, k);
-  const def = state.rig.bones.find((d) => d.id === b.def.baseId);
+  carryEyes(before, new Set([b.def.baseId]), k);
   const r4 = (v: number) => Math.round(v * 1e4) / 1e4;
-  if (def?.bendNodes) def.bendNodes = def.bendNodes.map((n) => n.map((v) => r4(v * k)) as V3);
   setPartShapes(part, partShapes(part).map((sh) => ({ ...sh, outline: sh.outline.map(([x, y]) => [r4(x * k), r4(y * kY)] as Vec2) })));
   if (!state.rig.base.startsWith('custom')) state.rig.base = 'custom';
   buildCreature();
@@ -1534,12 +1537,8 @@ function dragTipTo(id: string, hit: THREE.Vector3) {
       creature.capturePose();
       state.rig = JSON.parse(st.base) as RigState;
       st.kY.clear();
-      for (const b of chain) {
-        st.kY.set(b.src, scaleBone(state.rig, b.def.id, k, 1));
-        // a curve through bend points grows with the part, the same shape
-        const def = state.rig.bones.find((x) => x.id === b.def.baseId);
-        if (def?.bendNodes) def.bendNodes = def.bendNodes.map((n) => n.map((v) => Math.round(v * k * 1e4) / 1e4) as V3);
-      }
+      // (a curve through bend points grows with the part, the same shape: they're fractions of its length)
+      for (const b of chain) st.kY.set(b.src, scaleBone(state.rig, b.def.id, k, 1));
       creature.relayout(state.rig);
       // the meshes re-bent to their new lengths, as they'll be rebuilt on letting go
       for (const b of chain) creature.previewBend(b.def.id);
@@ -1635,6 +1634,10 @@ canvas.addEventListener('pointerup', (e) => {
     creature.capturePose();
     if (d.stretch && d.stretch.k !== 1) {
       // a limb stretched to reach: drawn parts lengthen with it, and the meshes are rebuilt at their new lengths
+      // (eyes placed by hand on them staying on the same spots)
+      const base = JSON.parse(d.stretch.base) as RigState;
+      const stretched = new Set(expandRig(base).bones.filter((b) => d.stretch!.kY.has(b.id)).map((b) => b.baseId));
+      carryEyes(base, stretched, 1);
       const r4 = (v: number) => Math.round(v * 1e4) / 1e4;
       for (const [src, kY] of d.stretch.kY) {
         const part = state.parts[src];
@@ -1815,6 +1818,27 @@ function pickEye(x: number, y: number): number | null {
 let eyeDrag: { pair: number; sgn: number } | null = null;
 
 const round4 = (v: THREE.Vector3) => v.toArray().map((x) => Math.round(x * 1e4) / 1e4) as V3;
+
+/**
+ * Eyes placed by hand on parts that were just stretched or grown (`ids`, by
+ * definition, from the skeleton `before`), kept on the same spots of them.
+ * Ones placed from Spacing and Height find their spots afresh anyway.
+ */
+function carryEyes(before: RigState, ids: Set<string>, kWidth: number) {
+  const was = new Map(expandRig(before).bones.map((b) => [b.id, b]));
+  const now = new Map(expandRig(state.rig).bones.map((b) => [b.id, b]));
+  const len = (d: { start: V3; end: V3 }) => Math.max(new THREE.Vector3(...d.end).sub(new THREE.Vector3(...d.start)).length(), 1e-3);
+  for (const pair of state.eyes.pairs) {
+    if (!pair.at) continue;
+    // (kept in the left twin's frame)
+    const id = creature.eyeBones(pair).find((x) => x.def.sideSign !== -1)?.def.id;
+    const a = id && was.get(id), z = id && now.get(id);
+    if (!a || !z || !ids.has(a.baseId)) continue;
+    const { p, n } = carryOnBend(bendOf(a, len(a)), bendOf(z, len(z)), kWidth, new THREE.Vector3(...pair.at), new THREE.Vector3(...(pair.n ?? [0, 0, 1])));
+    pair.at = round4(p);
+    if (pair.n) pair.n = round4(n!);
+  }
+}
 
 /**
  * Put an eye where the pointer is on the creature (on whichever part is
