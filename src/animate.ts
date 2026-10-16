@@ -84,10 +84,26 @@ function shapeAt(kind: AnimKind, p: number): [number, number] {
   }
 }
 
+/** Whether a motion has a way round to reverse (Swing just goes back and forth; Breathe stays put). */
+export function canReverse(kind: AnimKind): boolean {
+  return kind !== 'swing' && kind !== 'breathe';
+}
+
+/**
+ * Where along its shape a part's motion is at `p`, the other way round if reversed.
+ * A reversed Half circle still lifts in the first half of the time round, so it
+ * stays in step with the other legs: it just runs each half backwards.
+ */
+function motionShape(a: PartAnim, p: number): [number, number] {
+  if (a.kind === 'breathe') return [0, 0];
+  if (!a.reverse || !canReverse(a.kind)) return shapeAt(a.kind, p);
+  return shapeAt(a.kind, a.kind === 'half' ? (p <= 0.5 ? 0.5 - p : 1.5 - p) : 1 - p);
+}
+
 /** The lean at `p` of one time round, in degrees (as stored: before any flip). */
 export function leanAt(a: PartAnim, p: number): [number, number] {
   if (a.kind === 'breathe') return [a.x, a.z];
-  const [u, v] = shapeAt(a.kind, a.reverse ? 1 - p : p);
+  const [u, v] = motionShape(a, p);
   const c = Math.cos(a.dir * D), s = Math.sin(a.dir * D);
   return [(u * c - v * s) * a.size + a.x, (u * s + v * c) * a.size + a.z];
 }
@@ -134,7 +150,7 @@ export function animOffset(a: PartAnim, t: number): { q: THREE.Quaternion; s: nu
  * it always lifts straight up.
  */
 export function reachAt(a: PartAnim, p: number, reachLen: number): THREE.Vector3 {
-  const [u, v] = a.kind === 'breathe' ? [0, 0] : shapeAt(a.kind, a.reverse ? 1 - p : p);
+  const [u, v] = motionShape(a, p);
   const k = reachLen * D;
   const { along, lift } = reachAxes(a);
   const out = new THREE.Vector3(a.x * k, 0, a.z * k).addScaledVector(along, u * a.size * k).addScaledVector(lift, v * a.size * k);

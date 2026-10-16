@@ -73,7 +73,7 @@ import {
 } from './materials';
 import { installScrollbars } from './scrollbars';
 import { applyPalette, GIFEncoder, quantize } from 'gifenc';
-import { ANIM_KINDS, animOffset, animP, defaultAnim, leanAt, leanOf, leanQuat, mirrorAnim, reachAt, reachRim, rimLean, orbitOut, STUFF_KINDS, stuffMove, stuffP, type PartAnim, type StuffAnim, type StuffKind } from './animate';
+import { ANIM_KINDS, animOffset, animP, canReverse, defaultAnim, leanAt, leanOf, leanQuat, mirrorAnim, reachAt, reachRim, rimLean, orbitOut, STUFF_KINDS, stuffMove, stuffP, type PartAnim, type StuffAnim, type StuffKind } from './animate';
 import { customTabs, gizmos, initLayout, setLayoutIdle, setLayoutTab, setSceneColors, type Tab } from './layout';
 import { installCursorPress } from './cursorPress';
 import { captureShortcut, hasCustomShortcuts, is, keyLabel, labelShortcuts, renderShortcutSheet, resetShortcuts, ridesSurface, stopListening } from './shortcuts';
@@ -8022,8 +8022,8 @@ function renderAnim() {
   const stuff = selStuff();
   if (stuff) return renderStuffAnim(stuff);
   const a = selAnim();
-  // every motion but Breathe has a way round
-  $('#anim-reverse-row').hidden = !a || a.kind === 'breathe';
+  // Swing only goes back and forth, and Breathe stays put: neither has a way round
+  $('#anim-reverse-row').hidden = !a || !canReverse(a.kind);
   $<HTMLInputElement>('#anim-reverse').checked = !!a?.reverse;
   $('#anim-kinds').replaceChildren(
     ...[{ kind: null, name: 'Still', icon: 'pause', title: 'No motion on this part' }, ...ANIM_KINDS].map((k) => {
@@ -8036,7 +8036,8 @@ function renderAnim() {
         // switching motion keeps its size, place and timing
         // a fresh motion on a part that bends a knee: a stride the leg can reach
         const fresh = k.kind ? { ...defaultAnim(k.kind), ...(k.kind !== 'breathe' && reachChain(creature, selected).length ? { size: 14 } : {}) } : null;
-        setAnim(k.kind ? (a ? { ...a, kind: k.kind, size: k.kind === 'breathe' || a.kind === 'breathe' ? fresh!.size : a.size } : fresh) : null);
+        // a motion with no way round drops Reverse, so it can't come back unseen later
+        setAnim(k.kind ? (a ? { ...a, kind: k.kind, size: k.kind === 'breathe' || a.kind === 'breathe' ? fresh!.size : a.size, reverse: canReverse(k.kind) ? a.reverse : undefined } : fresh) : null);
         renderAnim();
         commit();
       };
