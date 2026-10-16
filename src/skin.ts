@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { MeshBVH } from 'three-mesh-bvh';
-import { bvhFor, exactDistance, insideByRay, sharedNormals } from './distance';
+import { bvhFor, distanceGrid, exactDistance, insideByRay, sharedNormals, type DistanceGrid } from './distance';
 import { applyLumps, lumpFade } from './inflate';
 
 /**
@@ -42,6 +42,8 @@ export interface SkinOptions {
   eyes?: { x: number; y: number; z: number; r: number }[];
   /** polled between chunks: return true to abandon the build */
   shouldStop: () => boolean;
+  /** told how far along the build is (0..1), between chunks */
+  progress?: (done: number) => void;
   /**
    * Which parts (by index) flow into each other. Others in the group only
    * meet with a plain crease, however close they come (a tail curled up to
@@ -62,6 +64,8 @@ interface Prepared {
   facet?: number;
   geo: THREE.BufferGeometry;
   bvh: ReturnType<typeof bvhFor>;
+  /** the fine pass reads distances off this (see DistanceGrid) */
+  grid: DistanceGrid;
   normals: THREE.BufferAttribute;
   fromSkin: THREE.Matrix4;
   box: THREE.Box3; // skin space, padded
@@ -87,6 +91,8 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
   const kMax = Math.max(...parts.map((p) => p.k));
   // distances further than this don't matter for the surface
   const band = h * 4 * Math.sqrt(3) + kMax;
+  // the fine pass looks no further than a join plus a couple of cells (see reachP); the grid goes a little beyond
+  const gridBand = kMax + 4.5 * h;
 
   const prepared: Prepared[] = parts.map((p, index) => {
     p.geo.computeBoundingBox();
@@ -94,6 +100,7 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
     return {
       geo: p.geo,
       bvh: bvhFor(p.geo),
+      grid: distanceGrid(p.geo, h, gridBand),
       normals: sharedNormals(p.geo),
       fromSkin: p.toSkin.clone().invert(),
       box,
@@ -200,9 +207,30 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
   const breathe = async (): Promise<boolean> => {
     if ((++tick & 63) !== 0 && performance.now() - slice < 8) return false;
     if (performance.now() - slice < 8) return false;
+    opts.progress?.(done);
     await yieldFrame();
     slice = performance.now();
     return opts.shouldStop();
+  };
+
+  // How far along, for showing progress: each step gets its share of the
+  // work (as the last few builds took), counting only the steps this skin will take.
+  const shares: Record<Step, number> = { ...stepShares };
+  if (opts.lowPoly) shares.subdivide = 0;
+  if (!opts.keep) shares.keep = 0;
+  if (!opts.lumps) shares.lumps = 0;
+  if (!parts.every((p) => p.toRest)) shares.rest = 0;
+  const steps = {} as Record<Step, [number, number]>;
+  let sum = 0;
+  for (const v of Object.values(shares)) sum += v;
+  let from = 0;
+  for (const [k, v] of Object.entries(shares) as [Step, number][]) (steps[k] = [from / sum, v / sum]), (from += v);
+  let done = 0;
+  /** when each step started, to learn the shares from */
+  const began: [Step, number][] = [];
+  const reached = (step: Step, f: number) => {
+    if (began[began.length - 1]?.[0] !== step) began.push([step, performance.now()]);
+    done = steps[step][0] + steps[step][1] * Math.min(1, Math.max(0, f));
   };
 
   // node (i, j, k) is stored in block (i/C, j/C, k/C); cells likewise
@@ -238,6 +266,7 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
   const coarse = new Float32Array(cx * cy * cz);
   const reach = C * h * Math.sqrt(3) * 1.05;
   for (let k = 0; k < cz; k++) {
+    reached('coarse', k / cz);
     for (let j = 0; j < cy; j++) {
       for (let i = 0; i < cx; i++) {
         pt.set(origin.x + Math.min(i * C, nx - 1) * h, origin.y + Math.min(j * C, ny - 1) * h, origin.z + Math.min(k * C, nz - 1) * h);
@@ -257,8 +286,34 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
   /** the part is out of reach from every node in the block: its distance there is just ±reach */
   const relFar: boolean[] = [];
   const active: number[] = [];
+  /** smooth union at `p` over just the parts near this block (`rel`), off their grids or measured exactly */
+  const nodeField = (p: THREE.Vector3, exact: boolean): number => {
+    let f = Infinity;
+    for (let r = 0; r < rel.length; r++) {
+      const pp = rel[r];
+      q.copy(p).applyMatrix4(pp.fromSkin);
+      // only distances within the join size (plus a couple of cells) shape the surface
+      const reachP = pp.k + 2.5 * h;
+      let d = relFar[r] ? Infinity : exact ? exactDistance(pp.geo, pp.bvh, pp.normals, q, reachP, grad) : pp.grid.sample(q, reachP);
+      // beyond reach from this node: same side as the block centre
+      if (!Number.isFinite(d)) d = relSide[r] * reachP;
+      if (link) {
+        ids[r] = pp.index;
+        ds[r] = d;
+        continue;
+      }
+      if (!Number.isFinite(f)) {
+        f = d;
+        continue;
+      }
+      const t = Math.min(1, Math.max(0, 0.5 + (0.5 * (d - f)) / pp.k));
+      f = d * (1 - t) + f * t - pp.k * t * (1 - t);
+    }
+    return link ? combine(rel.length) : f;
+  };
   for (let bk = 0; bk < bz; bk++) {
     for (let bj = 0; bj < by; bj++) {
+      reached('fine', (bk * by + bj) / (bz * by));
       for (let bi = 0; bi < bx; bi++) {
         let near = false;
         for (let c = 0; c < 8 && !near; c++) {
@@ -296,29 +351,12 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
                 continue;
               }
               pt.set(origin.x + i * h, origin.y + j * h, origin.z + k * h);
-              // smooth union over just the parts near this block
-              let f = Infinity;
-              for (let r = 0; r < rel.length; r++) {
-                const pp = rel[r];
-                q.copy(pt).applyMatrix4(pp.fromSkin);
-                // only distances within the join size (plus a couple of cells) shape the surface
-                const reachP = pp.k + 2.5 * h;
-                let d = relFar[r] ? Infinity : exactDistance(pp.geo, pp.bvh, pp.normals, q, reachP, grad);
-                // beyond reach from this node: same side as the block centre
-                if (!Number.isFinite(d)) d = relSide[r] * reachP;
-                if (link) {
-                  ids[r] = pp.index;
-                  ds[r] = d;
-                  continue;
-                }
-                if (!Number.isFinite(f)) {
-                  f = d;
-                  continue;
-                }
-                const t = Math.min(1, Math.max(0, 0.5 + (0.5 * (d - f)) / pp.k));
-                f = d * (1 - t) + f * t - pp.k * t * (1 - t);
-              }
-              if (link) f = combine(rel.length);
+              // First off the parts' distance grids. Those are out by less than
+              // a cell, and only the points next to the surface (the ends of
+              // the cell edges it crosses) shape it: those are measured again
+              // exactly, so sharp tips finer than the grid stay as sharp.
+              let f = nodeField(pt, false);
+              if (Math.abs(f - grown) < 2.5 * h) f = nodeField(pt, true);
               setNode(i, j, k, f - grown);
             }
           }
@@ -352,6 +390,7 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
     [0, 4], [1, 5], [2, 6], [3, 7], // z
   ];
   for (let a = 0; a < active.length; a += 3) {
+    reached('nets', (0.5 * a) / active.length);
     const bi = active[a], bj = active[a + 1], bk = active[a + 2];
     loadBlock(bi, bj, bk);
     for (let lk = 0; lk < C; lk++) {
@@ -396,6 +435,7 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
     else index.push(a, b, c, a, c, d);
   };
   for (let a = 0; a < active.length; a += 3) {
+    reached('nets', 0.5 + (0.5 * a) / active.length);
     const bi = active[a], bj = active[a + 1], bk = active[a + 2];
     loadBlock(bi, bj, bk);
     for (let lk = 0; lk < C; lk++) {
@@ -566,6 +606,7 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
   };
   const unsettled = pos.slice();
   for (let v = 0; v < count; v++) {
+    reached('settle', v / count);
     settle(pt.fromArray(pos, v * 3));
     pt.toArray(pos, v * 3);
     if ((v & 1023) === 0 && (await breathe())) return null;
@@ -601,6 +642,7 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
     // edge key: both ends, smaller first
     const key = (a: number, b: number) => (a < b ? a * 4194304 + b : b * 4194304 + a);
     for (let round = 0; round < 2; round++) {
+      reached('subdivide', round / 2);
       const g0 = new THREE.BufferGeometry();
       g0.setAttribute('position', new THREE.Float32BufferAttribute(grow, 3));
       g0.setIndex(tris);
@@ -671,6 +713,7 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
     const kept: number[] = [];
     const c = new THREE.Vector3();
     for (let t = 0; t < tris.length; t += 3) {
+      reached('keep', t / tris.length);
       c.set(0, 0, 0);
       for (let e = 0; e < 3; e++) c.x += verts[tris[t + e] * 3], c.y += verts[tris[t + e] * 3 + 1], c.z += verts[tris[t + e] * 3 + 2];
       c.divideScalar(3);
@@ -700,6 +743,7 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
   geo.setIndex(tris);
   geo.computeVertexNormals();
   if (opts.lumps) {
+    reached('lumps', 0);
     // lumps are as big all over, which a thin point can't take (they'd make
     // it bulge and kink): cap them at a fraction of how thick the skin is there
     const thick = await thicknessOf(geo);
@@ -757,16 +801,18 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
     const rp = new Float32Array(P.count * 3), rn = new Float32Array(P.count * 3);
     const ds = new Float32Array(prepared.length);
     const acc = new THREE.Vector3(), accN = new THREE.Vector3(), tmp = new THREE.Vector3(), nv = new THREE.Vector3();
+    // measured once, out as far as painting the colors will want too (see fadeDistances)
+    const fade = await fadeDistances(geo, parts, 0, Math.max(band, fadeReach(opts.colorBlend > 0 ? 2 * opts.colorBlend : 0.1)), (f) => (reached('rest', 0.9 * f), breathe()));
+    if (!fade) return null;
     for (let v = 0; v < P.count; v++) {
       pt.fromBufferAttribute(P, v);
       nv.fromBufferAttribute(N, v);
       let dmin = Infinity, nearest = 0;
-      for (let i = 0; i < prepared.length; i++) {
-        const pp = prepared[i];
-        ds[i] = Infinity;
-        if (!pp.box.containsPoint(pt)) continue;
-        q.copy(pt).applyMatrix4(pp.fromSkin);
-        ds[i] = Math.abs(exactDistance(pp.geo, pp.bvh, pp.normals, q, band, grad));
+      ds.fill(Infinity);
+      for (let e = fade.start[v]; e < fade.start[v + 1]; e++) {
+        const i = fade.part[e];
+        if (fade.d[e] >= band) continue;
+        ds[i] = fade.d[e];
         if (ds[i] < dmin) {
           dmin = ds[i];
           nearest = i;
@@ -792,15 +838,35 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
       accN.normalize();
       rp.set([acc.x, acc.y, acc.z], v * 3);
       rn.set([accN.x, accN.y, accN.z], v * 3);
-      if ((v & 1023) === 0 && (await breathe())) return null;
     }
     geo.setAttribute('restPos', new THREE.BufferAttribute(rp, 3));
     geo.setAttribute('restNormal', new THREE.BufferAttribute(rn, 3));
   }
   geo.userData.painted = paintSkin(geo, parts, opts.colorBlend, opts.lowPoly);
+  learnShares(began, sum);
   geo.computeBoundingBox();
   geo.computeBoundingSphere();
   return geo;
+}
+
+type Step = 'coarse' | 'fine' | 'nets' | 'settle' | 'subdivide' | 'keep' | 'lumps' | 'rest';
+/** each step's share of a skin's build time (out of about 100), to start with as measured on a test creature */
+const stepShares: Record<Step, number> = { coarse: 4, fine: 36, nets: 6, settle: 19, subdivide: 10, keep: 2, lumps: 5, rest: 18 };
+
+/**
+ * After a build, move each step's share part way towards what it really
+ * took this time (`began`: when each step started), so the next build's
+ * progress runs evenly on this computer, for these creatures. `sum`: the
+ * shares of the steps it took, together.
+ */
+function learnShares(began: [Step, number][], sum: number) {
+  const end = performance.now();
+  const total = end - began[0]?.[1];
+  if (!(total > 50)) return;
+  began.forEach(([step, t], i) => {
+    const took = (began[i + 1]?.[1] ?? end) - t;
+    stepShares[step] += 0.4 * ((took / total) * sum - stepShares[step]);
+  });
 }
 
 /**
@@ -908,15 +974,36 @@ interface FadeDistances {
   d: Float32Array;
 }
 
+/** How far out fadeDistances measures for a fade of `need`: a bit wider, up to the fade slider's top. */
+const fadeReach = (need: number) => Math.max(need, Math.min(0.8, 2 * need));
+
 /**
  * Each skin vertex's distance to every part near it, remembered on the skin
- * (measured a bit wider than needed, up to the fade slider's top), so moving
- * the color-fade slider only redoes the colors, not the distance queries.
+ * (measured a bit wider than needed), so moving the color-fade slider only
+ * redoes the colors, not the distance queries. Distances are unsigned: a skin
+ * vertex is on or outside every part, give or take a lump. With `breathe`
+ * (while building a skin), it yields now and then, and null means abandoned.
  */
-function fadeDistances(geo: THREE.BufferGeometry, parts: SkinPart[], need: number): FadeDistances {
+function fadeDistances(geo: THREE.BufferGeometry, parts: SkinPart[], need: number): FadeDistances;
+function fadeDistances(geo: THREE.BufferGeometry, parts: SkinPart[], need: number, reach: number, breathe: (done: number) => Promise<boolean>): Promise<FadeDistances | null>;
+function fadeDistances(geo: THREE.BufferGeometry, parts: SkinPart[], need: number, reach?: number, breathe?: (done: number) => Promise<boolean>): FadeDistances | Promise<FadeDistances | null> {
   const cached = geo.userData.fade as FadeDistances | undefined;
-  if (cached && cached.reach >= need) return cached;
-  const reach = Math.max(need, Math.min(0.8, 2 * need));
+  if (!breathe) {
+    if (cached && cached.reach >= need) return cached;
+    const gen = measureFade(geo, parts, fadeReach(need));
+    for (let r = gen.next(); ; r = gen.next()) if (r.done) return r.value;
+  }
+  return (async () => {
+    const gen = measureFade(geo, parts, reach!);
+    for (let r = gen.next(); ; r = gen.next()) {
+      if (r.done) return r.value;
+      if (await breathe(r.value)) return null;
+    }
+  })();
+}
+
+/** fadeDistances' measuring, pausing every so often (yielding how far along it is). */
+function* measureFade(geo: THREE.BufferGeometry, parts: SkinPart[], reach: number): Generator<number, FadeDistances> {
   const pos = geo.getAttribute('position') as THREE.BufferAttribute;
   const prepared = parts.map((p) => ({
     p,
@@ -936,11 +1023,12 @@ function fadeDistances(geo: THREE.BufferGeometry, parts: SkinPart[], need: numbe
       const pp = prepared[i];
       if (!pp.box.containsPoint(pt)) continue;
       q.copy(pt).applyMatrix4(pp.fromSkin);
-      const d = exactDistance(pp.p.geo, pp.bvh, pp.normals, q, reach, grad);
+      const d = exactDistance(pp.p.geo, pp.bvh, pp.normals, q, reach, grad, false);
       if (!Number.isFinite(d)) continue;
       part.push(i);
       dist.push(d);
     }
+    if ((v & 1023) === 1023) yield v / pos.count;
   }
   start[pos.count] = part.length;
   const out = { reach, start, part: Uint16Array.from(part), d: Float32Array.from(dist) };

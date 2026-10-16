@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { bvhFor, exactDistance, sharedNormals } from './distance';
-import { buildSkin, paintSkin, type SkinPart } from './skin';
+import { paintSkin, type SkinPart } from './skin';
+import { buildSkinOff, laneOf } from './skinPool';
 import { bounds, buildInflatedGeometry, defaultOutline, getMeshDetail, lumpFade, type Solid, type Vec2 } from './inflate';
 import {
   castsShadow,
@@ -704,6 +705,18 @@ function restFrame(def: ExpandedBone) {
 
 const rootGeo = new THREE.BoxGeometry(0.07, 0.07, 0.07);
 
+/** Free skins for good: their materials, dressing and geometry. */
+function disposeSkins(skins: SkinEntry[]) {
+  for (const { mesh } of skins) {
+    mesh.removeFromParent();
+    mesh.traverse((o) => {
+      ((o as THREE.Mesh).material as THREE.Material | undefined)?.dispose();
+      if (o instanceof THREE.LineSegments) o.geometry.dispose();
+    });
+    mesh.geometry.dispose();
+  }
+}
+
 export class Creature {
   /** placement in the scene (floor position + facing); holds `group` */
   readonly root = new THREE.Group();
@@ -1007,6 +1020,8 @@ export class Creature {
       else if (m && !m.userData.shared) m.dispose();
     });
     for (const b of this.list) (b.mesh?.userData.mergeGeo as THREE.BufferGeometry | undefined)?.dispose();
+    for (const sks of this.skinCache.values()) disposeSkins(sks);
+    this.skinCache.clear();
   }
 
   sync() {
@@ -1607,7 +1622,36 @@ export class Creature {
   // as one continuous surface (see skin.ts); any change drops back to the fast
   // per-part merge above.
 
-  /** Drop the settled skin and show the individual parts again. */
+  /**
+   * Skins put aside by invalidateSkin, by the shape they were built for (see
+   * skinShapeKey), most recent last: undo, or a setting turned back, finds its
+   * skin here instead of building it again.
+   */
+  private skinCache = new Map<string, SkinEntry[]>();
+  /** the shape the current skins were built for */
+  private skinsKey = '';
+  /** the skins being built: how much work each is, and how far along */
+  private skinWork: { w: number; done: number; lane: number }[] = [];
+  /**
+   * How far along building the skins is (0..1). Skins on different workers
+   * build side by side, so it's the busiest worker that decides how long
+   * it all takes: how much of its work is left.
+   */
+  get skinProgress(): number {
+    const total = new Map<number, number>(), left = new Map<number, number>();
+    for (const j of this.skinWork) {
+      total.set(j.lane, (total.get(j.lane) ?? 0) + j.w);
+      left.set(j.lane, (left.get(j.lane) ?? 0) + j.w * (1 - j.done));
+    }
+    const most = Math.max(0, ...total.values());
+    return most > 0 ? 1 - Math.max(0, ...left.values()) / most : 0;
+  }
+  /** A skin for the shape as it is now is kept aside: settling costs nothing. */
+  get skinKept(): boolean {
+    return this.skinState === 'none' && this.skinCache.has(this.skinKey);
+  }
+
+  /** Drop the settled skin and show the individual parts again (it's kept aside for a while). */
   invalidateSkin() {
     this.skinVersion++;
     this.lastChange = performance.now();
@@ -1617,22 +1661,46 @@ export class Creature {
     this.mergeDirty = true;
     for (const { mesh, members } of this.skins) {
       mesh.removeFromParent();
-      mesh.traverse((o) => {
-        ((o as THREE.Mesh).material as THREE.Material | undefined)?.dispose();
-        if (o instanceof THREE.LineSegments) o.geometry.dispose();
-      });
-      mesh.geometry.dispose();
       for (const b of members) if (b.mesh) b.mesh.visible = true;
     }
+    this.skinCache.delete(this.skinsKey);
+    this.skinCache.set(this.skinsKey, this.skins);
     this.skins = [];
+    // a few skins, and not too big all together
+    const verts = (sks: SkinEntry[]) => sks.reduce((n, sk) => n + sk.mesh.geometry.getAttribute('position').count, 0);
+    let total = [...this.skinCache.values()].reduce((n, sks) => n + verts(sks), 0);
+    for (const [key, sks] of this.skinCache) {
+      if (this.skinCache.size <= 4 && total <= 1.5e6) break;
+      this.skinCache.delete(key);
+      total -= verts(sks);
+      disposeSkins(sks);
+    }
   }
 
   /** Build seamless skins for every merged group. Resolves false if interrupted. */
   async settle(): Promise<boolean> {
     const s = this.state;
     if (this.skinState !== 'none' || !(s.merge ?? true) || !seamlessOn(s) || this.drawFocus) return false;
+    const key = this.skinShapeKey();
+    // built for this very shape before: just put it back (if its parts are all still here)
+    const kept = this.skinCache.get(key);
+    if (kept) {
+      this.skinCache.delete(key);
+      if (kept.every((sk) => sk.owners.every((b) => this.list.includes(b) && b.mesh))) {
+        for (const sk of kept) {
+          this.group.add(sk.mesh);
+          this.dressSkin(sk);
+        }
+        this.skins = kept;
+        this.skinsKey = key;
+        this.skinState = 'ready';
+        return true;
+      }
+      disposeSkins(kept);
+    }
     const version = this.skinVersion;
     this.skinState = 'building';
+    this.skinWork = [];
     this.root.updateMatrixWorld(true);
     this.rootInv.copy(this.root.matrixWorld).invert();
     const toGroup = this.group.matrixWorld.clone().invert();
@@ -1661,6 +1729,7 @@ export class Creature {
     const crisp = (b: BoneRT) => (s.parts[b.src].kind ?? 'puffy') !== 'puffy';
 
     const built: SkinEntry[] = [];
+    const jobs: Promise<Omit<SkinEntry, 'mesh' | 'painted' | 'colorKey'> & { geo: THREE.BufferGeometry | null }>[] = [];
     for (const [, members] of groups) {
       // only parts that actually touch another part in the group
       const joined = members.filter((b) => !crisp(b) && members.some((o) => o !== b && !crisp(o) && this.blendable(b, o) && this.near(b, o, kMax)));
@@ -1729,33 +1798,50 @@ export class Creature {
               });
             })
           : undefined;
-        const geo = await buildSkin(parts, { h, colorBlend: kc, lowPoly, lumps, eyes, linked, keep, shouldStop: () => version !== this.skinVersion });
-        if (version !== this.skinVersion) {
-          // something changed meanwhile: it'll be retried once things settle again
-          geo?.dispose();
-          for (const bm of built) bm.mesh.geometry.dispose();
-          return false;
+        // every skin builds at once (on its own worker: see skinPool)
+        const lane = this.state.name + '|' + shown.map((b) => b.def.id).join();
+        // its share of the progress: about as much work as it has surface, in grid cells
+        const work = { w: 0, done: 0, lane: laneOf(lane) };
+        for (const p of parts) {
+          if (!p.geo.boundingBox) p.geo.computeBoundingBox();
+          const sz = p.geo.boundingBox!.getSize(new THREE.Vector3());
+          work.w += (2 * (sz.x * sz.y + sz.y * sz.z + sz.z * sz.x)) / (h * h);
         }
-        // this group couldn't be skinned: its parts just stay fast-merged (never retry
-        // in a loop; the skin is only attempted again after the next change)
-        if (!geo) continue;
-        const mesh = new THREE.Mesh(geo);
-        mesh.receiveShadow = true;
-        mesh.raycast = () => {}; // picking still goes to the (hidden) parts
-        mesh.userData.skin = true;
-        built.push({
-          mesh,
-          members: shown,
-          owners,
-          parts,
-          lowPoly,
-          peeled: bases.length > 0,
-          painted: !!geo.userData.painted,
-          colorKey: JSON.stringify([parts.map((p) => [p.color.getHex(), p.glow]), kc]),
-        });
+        this.skinWork.push(work);
+        const progress = (d: number) => (work.done = Math.max(work.done, d));
+        jobs.push(
+          buildSkinOff(parts, { h, colorBlend: kc, lowPoly, lumps, eyes, linked, keep, progress, shouldStop: () => version !== this.skinVersion }, lane).then((geo) => ((work.done = 1), {
+            geo,
+            members: shown,
+            owners,
+            parts,
+            lowPoly,
+            peeled: bases.length > 0,
+          })),
+        );
       }
     }
-    if (version !== this.skinVersion) return false;
+    const done = await Promise.all(jobs);
+    if (version !== this.skinVersion) {
+      // something changed meanwhile: it'll be retried once things settle again
+      for (const { geo } of done) geo?.dispose();
+      return false;
+    }
+    for (const { geo, ...sk } of done) {
+      // this group couldn't be skinned: its parts just stay fast-merged (never retry
+      // in a loop; the skin is only attempted again after the next change)
+      if (!geo) continue;
+      const mesh = new THREE.Mesh(geo);
+      mesh.receiveShadow = true;
+      mesh.raycast = () => {}; // picking still goes to the (hidden) parts
+      mesh.userData.skin = true;
+      built.push({
+        ...sk,
+        mesh,
+        painted: !!geo.userData.painted,
+        colorKey: JSON.stringify([sk.parts.map((p) => [p.color.getHex(), p.glow]), kc]),
+      });
+    }
 
     // swap: skins in (dressed in the current look), their parts out
     for (const sk of built) {
@@ -1763,6 +1849,7 @@ export class Creature {
       this.dressSkin(sk);
     }
     this.skins = built;
+    this.skinsKey = key;
     this.skinState = 'ready';
     return true;
   }
@@ -1780,13 +1867,15 @@ export class Creature {
       s.merge ?? true,
       seamlessOn(s),
       seamlessLowPoly,
+      // the skin's grid is as fine as the parts' meshes
+      getMeshDetail(),
       s.mergeRadius,
       blend,
       blendWithOf(s),
       s.rig,
       // eyes flatten clay lumps under them (on anything else they're only dressing)
       [...this.eyeSpots].filter(([id]) => this.bones.get(id)?.mesh?.userData.lumpyGeo).map(([id, spots]) => [id, spots.map((sp) => [sp.x, sp.y, sp.z, sp.r].map(r4))]),
-      this.group.position.toArray().map(r4),
+      // (not the root offset: the skin is built in the group's own space, so moving the whole creature leaves it as it is)
       this.list.map((b) => b.pivot.quaternion.toArray().map(r4)),
       [...this.puffed].map((m) => r4(m.scale.x)),
       Object.entries(s.parts).map(([id, p]) => {

@@ -546,6 +546,13 @@ body.ck-editing .panel.idle .idle-note { display: none; }
   background: rgba(47, 40, 51, .72); color: #fff; font-size: 12px; font-weight: var(--w-bold); pointer-events: none;
 }
 .settle-badge[hidden] { display: none; }
+.settle-badge { display: flex; align-items: center; gap: 6px; }
+/* fills as the skins build, like the hint's ring */
+.settle-ring { width: 14px; height: 14px; flex: none; transform: rotate(-90deg); }
+.settle-ring circle { fill: none; stroke-width: 2.5; }
+.settle-ring .track { stroke: rgba(255,255,255,.22); }
+.settle-ring .fill { stroke: #fff; stroke-linecap: round; stroke-dasharray: 1; stroke-dashoffset: 1; transition: stroke-dashoffset .25s linear; }
+.settle-pct { min-width: 3.5ch; text-align: right; font-variant-numeric: tabular-nums; opacity: .85; }
 
 .seamless-row { margin: 8px 0 0; font-size: 12px; }
 .seamless-row .muted { font-weight: var(--w-semi); }

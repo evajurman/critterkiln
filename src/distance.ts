@@ -53,6 +53,94 @@ export function bvhFor(geo: THREE.BufferGeometry): MeshBVH {
 
 const hitInfo = { point: new THREE.Vector3(), distance: 0, faceIndex: 0 };
 
+/**
+ * A part's signed distance sampled on a grid in its own space, for the
+ * seamless skin: posing only moves a part, never reshapes it, so once a grid
+ * point is measured it holds for every pose. Points are measured (exactly)
+ * the first time they're needed, kept in small blocks, so only the shell
+ * round the part's surface is ever filled in. Values beyond `band` are
+ * clamped to it.
+ */
+export class DistanceGrid {
+  private readonly blocks = new Map<number, Float32Array>();
+  private readonly ox: number;
+  private readonly oy: number;
+  private readonly oz: number;
+  /** nodes along each axis, and blocks along x and y */
+  private readonly nx: number;
+  private readonly ny: number;
+  private readonly nz: number;
+  private readonly bx: number;
+  private readonly by: number;
+  private readonly p = new THREE.Vector3();
+  private readonly g = new THREE.Vector3();
+  constructor(
+    private readonly geo: THREE.BufferGeometry,
+    private readonly bvh: MeshBVH,
+    private readonly normals: THREE.BufferAttribute,
+    readonly s: number,
+    readonly band: number,
+  ) {
+    if (!geo.boundingBox) geo.computeBoundingBox();
+    const box = geo.boundingBox!.clone().expandByScalar(band + 2 * s);
+    this.ox = box.min.x;
+    this.oy = box.min.y;
+    this.oz = box.min.z;
+    this.nx = Math.ceil((box.max.x - box.min.x) / s) + 1;
+    this.ny = Math.ceil((box.max.y - box.min.y) / s) + 1;
+    this.nz = Math.ceil((box.max.z - box.min.z) / s) + 1;
+    this.bx = (this.nx >> 3) + 1;
+    this.by = (this.ny >> 3) + 1;
+  }
+
+  /** node (i, j, k), measured now if it hasn't been */
+  private node(i: number, j: number, k: number): number {
+    const key = (i >> 3) + this.bx * ((j >> 3) + this.by * (k >> 3));
+    let b = this.blocks.get(key);
+    if (!b) this.blocks.set(key, (b = new Float32Array(512).fill(NaN)));
+    const at = (i & 7) + 8 * ((j & 7) + 8 * (k & 7));
+    const v = b[at];
+    if (v === v) return v;
+    this.p.set(this.ox + i * this.s, this.oy + j * this.s, this.oz + k * this.s);
+    let d = exactDistance(this.geo, this.bvh, this.normals, this.p, this.band, this.g);
+    if (!Number.isFinite(d)) d = insideByRay(this.geo, this.bvh, this.p) ? -this.band : this.band;
+    return (b[at] = d);
+  }
+
+  /**
+   * Signed distance at local point `q` (blended between the grid points
+   * round it), or Infinity when it's further than `maxD` from the surface,
+   * like exactDistance. `maxD` should be well inside the band.
+   */
+  sample(q: THREE.Vector3, maxD: number): number {
+    const fx = (q.x - this.ox) / this.s, fy = (q.y - this.oy) / this.s, fz = (q.z - this.oz) / this.s;
+    const i = Math.floor(fx), j = Math.floor(fy), k = Math.floor(fz);
+    // off the grid: further than the band, outside the part
+    if (i < 0 || j < 0 || k < 0 || i >= this.nx - 1 || j >= this.ny - 1 || k >= this.nz - 1) return Infinity;
+    const u = fx - i, v = fy - j, w = fz - k;
+    const c000 = this.node(i, j, k), c100 = this.node(i + 1, j, k), c010 = this.node(i, j + 1, k), c110 = this.node(i + 1, j + 1, k);
+    const c001 = this.node(i, j, k + 1), c101 = this.node(i + 1, j, k + 1), c011 = this.node(i, j + 1, k + 1), c111 = this.node(i + 1, j + 1, k + 1);
+    const d =
+      ((c000 * (1 - u) + c100 * u) * (1 - v) + (c010 * (1 - u) + c110 * u) * v) * (1 - w) +
+      ((c001 * (1 - u) + c101 * u) * (1 - v) + (c011 * (1 - u) + c111 * u) * v) * w;
+    return Math.abs(d) > maxD ? Infinity : d;
+  }
+}
+
+const gridCache = new WeakMap<THREE.BufferGeometry, DistanceGrid[]>();
+/** A part's distance grid with this spacing, at least this wide (made once, then reused for every pose). */
+export function distanceGrid(geo: THREE.BufferGeometry, s: number, band: number): DistanceGrid {
+  let list = gridCache.get(geo);
+  if (!list) gridCache.set(geo, (list = []));
+  const found = list.find((g) => Math.abs(g.s - s) < 1e-9 && g.band >= band && g.band < band * 1.5);
+  if (found) return found;
+  const grid = new DistanceGrid(geo, bvhFor(geo), sharedNormals(geo), s, band);
+  list.push(grid);
+  // a couple at most (the grid spacing follows the thinnest part in its group)
+  if (list.length > 2) list.shift();
+  return grid;
+}
+
 // one ray: if the first surface it meets faces away from us, we're inside
 // (an odd direction, so it doesn't run along a part's grid of vertices)
 const probe = new THREE.Ray(new THREE.Vector3(), new THREE.Vector3(0.577, 0.577, 0.577));
@@ -76,6 +164,8 @@ const bary = new THREE.Vector3(), nrm = new THREE.Vector3(), away = new THREE.Ve
  * Signed distance from local point `q` to a part's actual surface (negative
  * inside), with the outward direction written into `grad`. Returns Infinity
  * when the surface is further than `maxD` (nothing to blend there).
+ * `signed` false: just how far, never negative, and no gradient (which side
+ * a point is on can take a ray to settle).
  */
 export function exactDistance(
   geo: THREE.BufferGeometry,
@@ -84,9 +174,11 @@ export function exactDistance(
   q: THREE.Vector3,
   maxD: number,
   grad: THREE.Vector3,
+  signed = true,
 ): number {
   const hit = bvh.closestPointToPoint(q, hitInfo, 0, maxD);
   if (!hit) return Infinity;
+  if (!signed) return hit.distance;
   const tri = hit.faceIndex; // already the real triangle, even in indirect mode
   const index = geo.index;
   const i0 = index ? index.getX(tri * 3) : tri * 3;

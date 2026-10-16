@@ -7748,19 +7748,34 @@ function shadowsChanged(): boolean {
  * mid-drag, drawing, editing the rig or on the Stuff workbench.
  */
 const SETTLE_AFTER_MS = 600;
+/** how far along the badge last showed */
+let settleShown = 0;
+const settleRing = document.querySelector<SVGCircleElement>('#settle-badge .settle-ring .fill')!;
 function settleWhenIdle(now: number) {
   // a playing loop changes the shape every frame: skins wait till it's paused
   const busy = !!drawState || !!drag || gizmo.dragging || mode === 'stuff' || animMoving() || !!animRendering;
   let building = false;
   for (const c of creatures) {
     if (c.skinState === 'building') building = true;
-    else if (!busy && c.skinState === 'none' && now - c.lastChange > SETTLE_AFTER_MS) {
+    // (a skin kept aside for this very shape comes straight back)
+    else if (!busy && c.skinState === 'none' && (now - c.lastChange > SETTLE_AFTER_MS || c.skinKept)) {
       void c.settle();
       // settle() flips the state synchronously before its first await
       building ||= (c.skinState as string) === 'building';
     }
   }
   $('#settle-badge').hidden = !building;
+  if (building) {
+    // how far along, across every creature still building
+    const going = creatures.filter((c) => c.skinState === 'building');
+    // (never backwards while it's showing: another creature starting late would pull the average down)
+    const done = (settleShown = Math.max(settleShown, going.reduce((n, c) => n + c.skinProgress, 0) / Math.max(1, going.length)));
+    settleRing.style.strokeDashoffset = String(1 - done);
+    $('#settle-pct').textContent = `${Math.floor(done * 100)}%`;
+  } else {
+    settleShown = 0;
+    settleRing.style.strokeDashoffset = '1';
+  }
 }
 
 let lastSkins = '';
