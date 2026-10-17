@@ -13,6 +13,7 @@ import Module from 'manifold-3d';
 import wasmUrl from 'manifold-3d/manifold.wasm?url';
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { bvhFor, exactDistance, sharedNormals } from './distance';
+import { applyLumps, lumpFade } from './inflate';
 import { buildSkin, paintSkin, type SkinOptions, type SkinPart } from './skin';
 
 type Wasm = Awaited<ReturnType<typeof Module>>;
@@ -38,6 +39,9 @@ export async function buildJoin(parts: SkinPart[], opts: SkinOptions): Promise<T
 export interface FilletOptions {
   colorBlend: number;
   lowPoly: boolean;
+  /** clay lump strength to put back on (the parts are joined smooth), and the eyes it stays clear of */
+  lumps?: number;
+  eyes?: { x: number; y: number; z: number; r: number }[];
   /** which parts (by index) blend; leave out for every pair */
   linked?: (a: number, b: number) => boolean;
   shouldStop: () => boolean;
@@ -136,6 +140,14 @@ export async function filletSkin(parts: SkinPart[], opts: FilletOptions): Promis
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   geo.setIndex(tris);
   geo.computeVertexNormals();
+  if (opts.lumps) {
+    // clay lumps back on, as the grid skin does, but not under the eyes
+    const P = geo.getAttribute('position') as THREE.BufferAttribute;
+    const cap = new Float32Array(P.count).fill(Infinity);
+    for (let i = 0; i < P.count; i++) for (const e of opts.eyes ?? []) cap[i] = Math.min(cap[i], opts.lumps * 4 * lumpFade(Math.hypot(P.getX(i) - e.x, P.getY(i) - e.y, P.getZ(i) - e.z), e.r));
+    applyLumps(geo, opts.lumps, opts.eyes?.length ? cap : undefined);
+    geo.computeVertexNormals();
+  }
   if (await breathe(0.9)) return null;
   // 5. textures laid out in the rest pose, and colors (as the grid skin does)
   if (parts.every((pp) => pp.toRest)) setRest(geo, tris, owner, band, reach, parts, reachMax);
