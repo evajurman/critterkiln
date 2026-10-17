@@ -299,6 +299,11 @@ export function setSeamlessMode(m: SeamlessMode) {
   seamlessMode = m;
 }
 /** Seamless skins for low-poly too (off by default: re-faceting a skin changes the low-poly look) */
+/** how seamless skins join the parts (see SkinOptions.method) */
+let seamlessMethod: 'grid' | 'fillet' = 'fillet';
+export function setSeamlessMethod(m: 'grid' | 'fillet') {
+  seamlessMethod = m;
+}
 let seamlessLowPoly = false;
 export function setSeamlessLowPoly(on: boolean) {
   seamlessLowPoly = on;
@@ -1803,7 +1808,8 @@ export class Creature {
       // keep apart would fuse anyway: the one reaching in is peeled off into a
       // skin of its own (built with the parts it blends into: the one it grows
       // from, and with Neighbors any its base sits in).
-      const peels = onlyConnected ? this.peelsFor(joined, h) : [];
+      // (fillets don't need it: the parts are joined as they are, and ones that don't blend just meet in a crease)
+      const peels = onlyConnected && (seamlessMethod !== 'fillet' || lowPoly) ? this.peelsFor(joined, h) : [];
       const peeled = new Set(peels.flat());
       const rest = joined.filter((b) => !peeled.has(b));
       const sets: { members: BoneRT[]; bases: BoneRT[] }[] = [
@@ -1859,7 +1865,7 @@ export class Creature {
         this.skinWork.push(work);
         const progress = (d: number) => (work.done = Math.max(work.done, d));
         jobs.push(
-          buildSkinOff(parts, { h, colorBlend: kc, lowPoly, lumps, eyes, linked, keep, progress, shouldStop: () => version !== this.skinVersion }, lane).then((geo) => ((work.done = 1), {
+          buildSkinOff(parts, { h, colorBlend: kc, lowPoly, lumps, eyes, linked, keep, method: seamlessMethod, progress, shouldStop: () => version !== this.skinVersion }, lane).then((geo) => ((work.done = 1), {
             geo,
             members: shown,
             owners,
@@ -1916,6 +1922,7 @@ export class Creature {
       s.merge ?? true,
       seamlessOn(s),
       seamlessLowPoly,
+      seamlessMethod,
       // the skin's grid is as fine as the parts' meshes
       getMeshDetail(),
       s.mergeRadius,

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { buildSkin, type SkinOptions, type SkinPart } from './skin';
+import { type SkinOptions, type SkinPart } from './skin';
+import { buildJoin } from './filletSkin';
 
 /**
  * Seamless skins built on worker threads (see skinWorker): the page stays
@@ -88,7 +89,7 @@ function laneFor(key: string): Lane | undefined {
 /** Build a skin (see buildSkin) on the worker for `lane`, or here if there are no workers. */
 export async function buildSkinOff(parts: SkinPart[], opts: SkinOptions, lane: string): Promise<THREE.BufferGeometry | null> {
   const l = laneFor(lane);
-  if (!l) return buildSkin(parts, opts);
+  if (!l) return buildJoin(parts, opts);
   let reply = await send(l, parts, opts);
   if (reply.error?.includes('no shape')) {
     // the worker let some shapes go meanwhile: send them all again
@@ -138,7 +139,7 @@ function send(l: Lane, parts: SkinPart[], opts: SkinOptions): Promise<SkinReply>
       facet: p.facet,
     })),
     geos,
-    opts: { h: opts.h, colorBlend: opts.colorBlend, lowPoly: opts.lowPoly, lumps: opts.lumps, eyes: opts.eyes, keep: opts.keep, linked },
+    opts: { h: opts.h, colorBlend: opts.colorBlend, lowPoly: opts.lowPoly, lumps: opts.lumps, eyes: opts.eyes, keep: opts.keep, method: opts.method, linked },
   };
   return new Promise<SkinReply>((resolve) => {
     l.waiting.set(id, resolve);

@@ -57,6 +57,8 @@ export interface SkinOptions {
    * Leave out to show every part.
    */
   keep?: number[];
+  /** how the parts are joined: one skin off a grid (buildSkin), or each part as drawn with fillets at the seams (filletSkin) */
+  method?: 'grid' | 'fillet';
 }
 
 interface Prepared {
@@ -858,60 +860,69 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
   // (and bend with the pose) rather than being projected onto today's pose.
   // Near a joint the parts' answers are blended, like skinning in reverse.
   if (parts.every((p) => p.toRest)) {
-    const P = geo.getAttribute('position') as THREE.BufferAttribute;
-    const N = geo.getAttribute('normal') as THREE.BufferAttribute;
-    const toRest = parts.map((p) => p.toRest!.clone().multiply(p.toSkin.clone().invert()));
-    const turn = toRest.map((m) => new THREE.Matrix3().setFromMatrix4(m));
-    const blendW = Math.max(kMax, 2 * h);
-    const rp = new Float32Array(P.count * 3), rn = new Float32Array(P.count * 3);
-    const ds = new Float32Array(prepared.length);
-    const acc = new THREE.Vector3(), accN = new THREE.Vector3(), tmp = new THREE.Vector3(), nv = new THREE.Vector3();
     // measured once, out as far as painting the colors will want too (see fadeDistances)
     const fade = await fadeDistances(geo, parts, 0, Math.min(gridBand - 2 * h, Math.max(band, fadeReach(opts.colorBlend > 0 ? 2 * opts.colorBlend : 0.1))), (f) => (reached('rest', 0.9 * f), breathe()), { s: h, band: gridBand });
     if (!fade) return null;
-    for (let v = 0; v < P.count; v++) {
-      pt.fromBufferAttribute(P, v);
-      nv.fromBufferAttribute(N, v);
-      let dmin = Infinity, nearest = 0;
-      ds.fill(Infinity);
-      for (let e = fade.start[v]; e < fade.start[v + 1]; e++) {
-        const i = fade.part[e];
-        if (fade.d[e] >= band) continue;
-        ds[i] = fade.d[e];
-        if (ds[i] < dmin) {
-          dmin = ds[i];
-          nearest = i;
-        }
-      }
-      acc.set(0, 0, 0);
-      accN.set(0, 0, 0);
-      let wsum = 0;
-      for (let i = 0; i < prepared.length; i++) {
-        if (!Number.isFinite(ds[i])) continue;
-        const w = Math.max(0, 1 - (ds[i] - dmin) / blendW) ** 2;
-        if (w <= 0) continue;
-        acc.addScaledVector(tmp.copy(pt).applyMatrix4(toRest[i]), w);
-        accN.addScaledVector(tmp.copy(nv).applyMatrix3(turn[i]), w);
-        wsum += w;
-      }
-      if (wsum <= 0) {
-        acc.copy(pt).applyMatrix4(toRest[nearest]);
-        accN.copy(nv).applyMatrix3(turn[nearest]);
-        wsum = 1;
-      }
-      acc.divideScalar(wsum);
-      accN.normalize();
-      rp.set([acc.x, acc.y, acc.z], v * 3);
-      rn.set([accN.x, accN.y, accN.z], v * 3);
-    }
-    geo.setAttribute('restPos', new THREE.BufferAttribute(rp, 3));
-    geo.setAttribute('restNormal', new THREE.BufferAttribute(rn, 3));
+    setRestPositions(geo, parts, fade, band, Math.max(kMax, 2 * h));
   }
   geo.userData.painted = paintSkin(geo, parts, opts.colorBlend, opts.lowPoly);
   learnShares(began, sum);
   geo.computeBoundingBox();
   geo.computeBoundingSphere();
   return geo;
+}
+
+/**
+ * Where each vertex of a skin sat in the rest pose (restPos / restNormal), so
+ * textures are laid out there and bend with the pose. Near a joint the parts'
+ * answers are blended (over `blendW`), like skinning in reverse. `fade`: each
+ * vertex's distances to the parts, out to `band` (see fadeDistances).
+ */
+export function setRestPositions(geo: THREE.BufferGeometry, parts: SkinPart[], fade: FadeDistances, band: number, blendW: number) {
+  const P = geo.getAttribute('position') as THREE.BufferAttribute;
+  const N = geo.getAttribute('normal') as THREE.BufferAttribute;
+  const toRest = parts.map((p) => p.toRest!.clone().multiply(p.toSkin.clone().invert()));
+  const turn = toRest.map((m) => new THREE.Matrix3().setFromMatrix4(m));
+  const rp = new Float32Array(P.count * 3), rn = new Float32Array(P.count * 3);
+  const ds = new Float32Array(parts.length);
+  const pt = new THREE.Vector3(), acc = new THREE.Vector3(), accN = new THREE.Vector3(), tmp = new THREE.Vector3(), nv = new THREE.Vector3();
+  for (let v = 0; v < P.count; v++) {
+    pt.fromBufferAttribute(P, v);
+    nv.fromBufferAttribute(N, v);
+    let dmin = Infinity, nearest = 0;
+    ds.fill(Infinity);
+    for (let e = fade.start[v]; e < fade.start[v + 1]; e++) {
+      const i = fade.part[e];
+      if (fade.d[e] >= band) continue;
+      ds[i] = fade.d[e];
+      if (ds[i] < dmin) {
+        dmin = ds[i];
+        nearest = i;
+      }
+    }
+    acc.set(0, 0, 0);
+    accN.set(0, 0, 0);
+    let wsum = 0;
+    for (let i = 0; i < parts.length; i++) {
+      if (!Number.isFinite(ds[i])) continue;
+      const w = Math.max(0, 1 - (ds[i] - dmin) / blendW) ** 2;
+      if (w <= 0) continue;
+      acc.addScaledVector(tmp.copy(pt).applyMatrix4(toRest[i]), w);
+      accN.addScaledVector(tmp.copy(nv).applyMatrix3(turn[i]), w);
+      wsum += w;
+    }
+    if (wsum <= 0) {
+      acc.copy(pt).applyMatrix4(toRest[nearest]);
+      accN.copy(nv).applyMatrix3(turn[nearest]);
+      wsum = 1;
+    }
+    acc.divideScalar(wsum);
+    accN.normalize();
+    rp.set([acc.x, acc.y, acc.z], v * 3);
+    rn.set([accN.x, accN.y, accN.z], v * 3);
+  }
+  geo.setAttribute('restPos', new THREE.BufferAttribute(rp, 3));
+  geo.setAttribute('restNormal', new THREE.BufferAttribute(rn, 3));
 }
 
 type Step = 'coarse' | 'fine' | 'nets' | 'settle' | 'subdivide' | 'keep' | 'lumps' | 'rest';

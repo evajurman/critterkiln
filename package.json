@@ -11,6 +11,7 @@
   "dependencies": {
     "delaunator": "^5.1.0",
     "gifenc": "^1.0.3",
+    "manifold-3d": "^3.5.3",
     "three": "^0.186.1",
     "three-mesh-bvh": "^0.9.15"
   },

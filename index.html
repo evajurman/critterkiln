@@ -589,6 +589,10 @@
             <button data-seamless="off" title="No creature: blended parts stay as fast joins">Off</button>
             <button data-seamless="creature" title="Choose for each creature, under the parts list">Per creature</button>
           </div>
+          <div class="seg" id="set-join-method" title="How the parts are joined">
+            <button data-method="fillet" title="Each part exactly as drawn, with smooth fillets where parts meet">Fillets</button>
+            <button data-method="grid" title="One skin rebuilt over every part (rounds off thin points)">Grid</button>
+          </div>
           <label class="check" id="set-seamless-lp-row" title="Low-poly parts look their best faceted on their own; a seamless skin re-facets them as one"><input id="set-seamless-lp" type="checkbox" /> Also apply to low-poly material</label>
           <p class="muted small">Seamless joins rebuild blended parts as one skin while you're not changing anything.</p>
           <div class="pop-sub">Performance</div>

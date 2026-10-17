@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { loadGrids, saveGrids } from './gridStore';
-import { buildSkin, skinGrids, type SkinPart } from './skin';
+import { skinGrids, type SkinPart } from './skin';
+import { buildJoin } from './filletSkin';
 import type { SkinJob, SkinProgress, SkinReply } from './skinPool';
 
 /**
@@ -55,13 +56,14 @@ self.onmessage = async (e: MessageEvent<SkinJob | { cancel: number }>) => {
     const grids = skinGrids(parts, opts.h);
     const shapes = parts.map((p) => p.geo);
     await loadGrids(shapes, grids.s, grids.band);
-    const geo = await buildSkin(parts, {
+    const geo = await buildJoin(parts, {
       h: opts.h,
       colorBlend: opts.colorBlend,
       lowPoly: opts.lowPoly,
       lumps: opts.lumps,
       eyes: opts.eyes,
       keep: opts.keep,
+      method: opts.method,
       linked: link ? (a, b) => link[a * n + b] === 1 : undefined,
       shouldStop: () => cancelled.has(id),
       // how far along, now and then
