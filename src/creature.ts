@@ -1481,14 +1481,17 @@ export class Creature {
     this.state.rootOffset = this.group.position.toArray() as V3;
   }
 
-  /** Where a bone is now, posed, in the skeleton's coordinates: its base, and the end of its straight line. */
-  posedEnds(id: string): { start: V3; end: V3 } | undefined {
+  /** Where a bone is now, posed, in the skeleton's coordinates: its base, the end of its straight line, and (bent) the curve between. */
+  posedEnds(id: string): { start: V3; end: V3; path?: V3[] } | undefined {
     const b = this.bones.get(id);
     if (!b) return undefined;
     this.group.updateMatrixWorld(true);
     const m = this.group.matrixWorld.clone().invert().multiply(b.pivot.matrixWorld);
     const at = (y: number) => new THREE.Vector3(0, y, 0).applyMatrix4(m).toArray() as V3;
-    return { start: at(0), end: at(b.length) };
+    // a bent part: the curve it follows, too (a base in its sag is in it)
+    const bd = bendOf(b.def, b.length);
+    const path = isBent(bd) ? bonePoints(bd).map((p) => p.applyMatrix4(m).toArray() as V3) : undefined;
+    return { start: at(0), end: at(b.length), path };
   }
 
   /**

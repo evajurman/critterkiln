@@ -872,12 +872,13 @@ export function reattachBone(rig: RigState, sceneId: string): PartCopy[] {
  * from its bone (`w`, evenly spaced) from `from` to `to` along it (as a
  * share of the bone's length: a drawing can run past either end), and where
  * the bone is now, posed (its base, and the end of its straight line): what's
- * measured, as that's what you see. Undefined falls back to the bone's
- * default widths, base to tip, and its rest pose.
+ * measured, as that's what you see; a bent bone's `path` is its curve,
+ * base to tip, at evenly spaced heights along it. Undefined falls back to
+ * the bone's default widths, base to tip, and its rest pose (straight).
  */
 export interface PartSizes {
   profile(sceneId: string): { from: number; to: number; w: number[] } | undefined;
-  at?(sceneId: string): { start: V3; end: V3 } | undefined;
+  at?(sceneId: string): { start: V3; end: V3; path?: V3[] } | undefined;
 }
 
 /** Hang a bone off another: the part its base sits on. */
@@ -902,6 +903,33 @@ function segDist(px: number, py: number, ax: number, ay: number, bx: number, by:
 }
 
 /**
+ * Where a point is beside a part: how far along it (`y`, from where its bone
+ * starts; negative behind it, past `L` beyond its tip) and out from its
+ * middle line (`x`). Along the curve of a bent one, as it's drawn round it.
+ */
+function besidePart(p: V3, c: ExpandedBone, sizes?: PartSizes): { y: number; x: number; L: number } {
+  const ends = sizes?.at?.(c.id);
+  const { start, end } = ends ?? c;
+  const L = Math.max(len3(sub3(end, start)), 1e-6);
+  const path = ends?.path && ends.path.length > 1 ? ends.path : [start, end];
+  const n = path.length - 1;
+  let best = { y: 0, x: Infinity, L };
+  for (let i = 0; i < n; i++) {
+    const a = path[i], seg = sub3(path[i + 1], a);
+    const sl = Math.max(len3(seg), 1e-9);
+    const u = scale3(seg, 1 / sl);
+    const rel = sub3(p, a);
+    // past either end it carries on straight
+    let t = rel[0] * u[0] + rel[1] * u[1] + rel[2] * u[2];
+    t = Math.min(i === n - 1 ? Infinity : sl, Math.max(i === 0 ? -Infinity : 0, t));
+    const x = len3(sub3(rel, scale3(u, t)));
+    // (heights along it are its straight length's, as the drawing's are)
+    if (x < best.x) best = { y: ((i + t / sl) / n) * L, x, L };
+  }
+  return best;
+}
+
+/**
  * How well a point sits on a part, as a base: 1 + its distance from the
  * part's outline (negative inside), as a share of the part's thickness at its
  * widest. So 1 is on the surface, under 1 inside it, 0 in the middle of its
@@ -912,15 +940,10 @@ function segDist(px: number, py: number, ax: number, ay: number, bx: number, by:
  * part (nothing else holds that end).
  */
 function seat(p: V3, c: ExpandedBone, sizes?: PartSizes): number {
-  const { start, end } = sizes?.at?.(c.id) ?? c;
+  const { end } = sizes?.at?.(c.id) ?? c;
   if (len3(sub3(p, end)) < TIP_SNAP) return -1e3;
-  const axis = sub3(end, start);
-  const L = Math.max(len3(axis), 1e-6);
-  const u = scale3(axis, 1 / L);
-  const rel = sub3(p, start);
   // where the point is beside the part: along it, and out from its middle line
-  const y = rel[0] * u[0] + rel[1] * u[1] + rel[2] * u[2];
-  const x = len3(sub3(rel, scale3(u, y)));
+  const { y, x, L } = besidePart(p, c, sizes);
   const prof = sizes?.profile(c.id) ?? { from: 0, to: 1, w: [c.width / 2, (c.widthEnd ?? c.width) / 2] };
   const y0 = prof.from * L, y1 = prof.to * L, n = prof.w.length - 1;
   const at = (k: number) => y0 + ((y1 - y0) * k) / n;
@@ -938,11 +961,8 @@ function seat(p: V3, c: ExpandedBone, sizes?: PartSizes): number {
 
 /** How far along a part a point is: 0 where its bone starts, 1 at its tip. */
 function along(p: V3, c: ExpandedBone, sizes?: PartSizes): number {
-  const { start, end } = sizes?.at?.(c.id) ?? c;
-  const axis = sub3(end, start);
-  const l2 = Math.max(axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2], 1e-12);
-  const rel = sub3(p, start);
-  return (rel[0] * axis[0] + rel[1] * axis[1] + rel[2] * axis[2]) / l2;
+  const { y, L } = besidePart(p, c, sizes);
+  return y / L;
 }
 
 /**
@@ -994,7 +1014,10 @@ export function nearestParent(rig: RigState, sceneId: string, sizes?: PartSizes)
   const other = (pair && sizes?.at?.(me.baseId + 'R')?.start) || mirrorV(base);
   const skip = (c: ExpandedBone) => own.has(c.baseId) || (pair && c.sideSign === -1);
   // a middle part only holds a pair if both sides sit on it
-  const score = (c: ExpandedBone) => (pair && c.sideSign === 0 ? Math.max(seat(base, c, sizes), seat(other, c, sizes)) : seat(base, c, sizes));
+  // (the other side as it is, or where it'd be as this side's mirror image: hanging off a part bent or
+  // posed off to one side throws a pair's sides apart, and that's no reason to keep it there)
+  const score = (c: ExpandedBone) =>
+    pair && c.sideSign === 0 ? Math.max(seat(base, c, sizes), Math.min(seat(other, c, sizes), seat(mirrorV(base), c, sizes))) : seat(base, c, sizes);
   const scores = new Map<ExpandedBone, number>();
   for (const c of bones) if (!skip(c)) scores.set(c, score(c));
   let best: ExpandedBone | null = null, bestScore = Infinity;
