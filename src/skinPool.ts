@@ -22,6 +22,8 @@ export interface SkinReply {
   id: number;
   geo: { attrs: Record<string, { array: Float32Array; itemSize: number }>; index: Uint32Array | null } | null;
   painted?: boolean;
+  /** how it was built (see buildJoin) */
+  method?: string;
   fade?: { reach: number; start: Int32Array; part: Uint16Array; d: Float32Array };
   error?: string;
 }
@@ -102,6 +104,7 @@ export async function buildSkinOff(parts: SkinPart[], opts: SkinOptions, lane: s
   for (const [name, a] of Object.entries(reply.geo.attrs)) geo.setAttribute(name, new THREE.BufferAttribute(a.array, a.itemSize));
   if (reply.geo.index) geo.setIndex(new THREE.BufferAttribute(reply.geo.index, 1));
   geo.userData.painted = reply.painted;
+  geo.userData.method = reply.method;
   // each vertex's distances to the parts, so a color change repaints without measuring again
   if (reply.fade) geo.userData.fade = reply.fade;
   geo.computeBoundingBox();
@@ -139,7 +142,7 @@ function send(l: Lane, parts: SkinPart[], opts: SkinOptions): Promise<SkinReply>
       facet: p.facet,
     })),
     geos,
-    opts: { h: opts.h, colorBlend: opts.colorBlend, lowPoly: opts.lowPoly, lumps: opts.lumps, eyes: opts.eyes, keep: opts.keep, method: opts.method, linked },
+    opts: { h: opts.h, colorBlend: opts.colorBlend, lowPoly: opts.lowPoly, lumps: opts.lumps, eyes: opts.eyes, keep: opts.keep, linked },
   };
   return new Promise<SkinReply>((resolve) => {
     l.waiting.set(id, resolve);

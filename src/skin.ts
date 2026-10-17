@@ -57,8 +57,6 @@ export interface SkinOptions {
    * Leave out to show every part.
    */
   keep?: number[];
-  /** how the parts are joined: one skin off a grid (buildSkin), or each part as drawn with fillets at the seams (filletSkin) */
-  method?: 'grid' | 'fillet';
 }
 
 interface Prepared {

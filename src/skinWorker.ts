@@ -63,7 +63,6 @@ self.onmessage = async (e: MessageEvent<SkinJob | { cancel: number }>) => {
       lumps: opts.lumps,
       eyes: opts.eyes,
       keep: opts.keep,
-      method: opts.method,
       linked: link ? (a, b) => link[a * n + b] === 1 : undefined,
       shouldStop: () => cancelled.has(id),
       // how far along, now and then
@@ -83,7 +82,7 @@ self.onmessage = async (e: MessageEvent<SkinJob | { cancel: number }>) => {
     for (const [name, a] of Object.entries(geo.attributes)) attrs[name] = { array: (a as THREE.BufferAttribute).array as Float32Array, itemSize: a.itemSize };
     const index = geo.index ? Uint32Array.from(geo.index.array) : null;
     const fade = geo.userData.fade as SkinReply['fade'];
-    const out: SkinReply = { id, geo: { attrs, index }, painted: !!geo.userData.painted, fade };
+    const out: SkinReply = { id, geo: { attrs, index }, painted: !!geo.userData.painted, method: geo.userData.method, fade };
     const transfer: Transferable[] = Object.values(attrs).map((a) => a.array.buffer as ArrayBuffer);
     if (index) transfer.push(index.buffer);
     if (fade) transfer.push(fade.start.buffer, fade.part.buffer, fade.d.buffer);

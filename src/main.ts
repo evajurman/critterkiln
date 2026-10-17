@@ -21,7 +21,6 @@ import {
   partShapes,
   setPartShapes,
   setSeamlessLowPoly,
-  setSeamlessMethod,
   setSeamlessMode,
   type Attachment,
   type BlendWith,
@@ -6746,8 +6745,8 @@ function hint(text: string, ms = 2000, warn = false) {
 
 const SETTINGS_KEY = 'creature-creator/settings';
 type Theme = 'light' | 'dark' | 'color';
-const settings: { numbers: boolean; plainText: boolean; theme: Theme; seamless: SeamlessMode; seamlessLowPoly: boolean; joinMethod: 'grid' | 'fillet'; quality: Quality } = (() => {
-  const defaults = { numbers: false, plainText: false, theme: 'light' as Theme, seamless: 'on' as SeamlessMode, seamlessLowPoly: false, joinMethod: 'fillet' as 'grid' | 'fillet', quality };
+const settings: { numbers: boolean; plainText: boolean; theme: Theme; seamless: SeamlessMode; seamlessLowPoly: boolean; quality: Quality } = (() => {
+  const defaults = { numbers: false, plainText: false, theme: 'light' as Theme, seamless: 'on' as SeamlessMode, seamlessLowPoly: false, quality };
   try {
     return { ...defaults, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') };
   } catch {
@@ -6756,7 +6755,6 @@ const settings: { numbers: boolean; plainText: boolean; theme: Theme; seamless: 
 })();
 setSeamlessMode(settings.seamless);
 setSeamlessLowPoly(settings.seamlessLowPoly);
-setSeamlessMethod(settings.joinMethod);
 
 function saveSettings() {
   try {
@@ -6777,10 +6775,6 @@ function renderSettings() {
   document.querySelector('meta[name=theme-color]')?.setAttribute('content', getComputedStyle(document.documentElement).getPropertyValue('--bg').trim());
   document.querySelectorAll<HTMLButtonElement>('#set-seamless button').forEach((b) => b.classList.toggle('active', b.dataset.seamless === settings.seamless));
   $<HTMLInputElement>('#set-seamless-lp').checked = settings.seamlessLowPoly;
-  document.querySelectorAll<HTMLButtonElement>('#set-join-method button').forEach((b) => {
-    b.classList.toggle('active', b.dataset.method === settings.joinMethod);
-    b.disabled = settings.seamless === 'off';
-  });
   // nothing to apply it to while seamless joins are off
   $<HTMLInputElement>('#set-seamless-lp').disabled = settings.seamless === 'off';
   $('#set-seamless-lp-row').style.opacity = settings.seamless === 'off' ? '.45' : '1';
@@ -6883,16 +6877,6 @@ function shortcutsChanged() {
   drawHint();
 }
 labelShortcuts();
-document.querySelectorAll<HTMLButtonElement>('#set-join-method button').forEach((b) => {
-  b.onclick = () => {
-    settings.joinMethod = b.dataset.method as 'grid' | 'fillet';
-    setSeamlessMethod(settings.joinMethod);
-    // every skin is built again the other way
-    for (const c of creatures) c.markMergeDirty();
-    saveSettings();
-    renderSettings();
-  };
-});
 $<HTMLInputElement>('#set-seamless-lp').onchange = (e) => {
   settings.seamlessLowPoly = (e.target as HTMLInputElement).checked;
   setSeamlessLowPoly(settings.seamlessLowPoly);

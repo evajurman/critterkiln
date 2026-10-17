@@ -24,16 +24,19 @@ function manifold(): Promise<Wasm> {
 }
 
 /**
- * Join the parts the way `opts.method` asks: with fillets where that can be
- * done (not a skin over just some of its parts, nor low-poly, nor a part that
- * isn't a closed mesh), or else one skin off a grid.
+ * Join the parts: with fillets where that can be done, or else (a skin over
+ * just some of its parts, low-poly, or a part that isn't a closed mesh) one
+ * skin off a grid (buildSkin).
  */
 export async function buildJoin(parts: SkinPart[], opts: SkinOptions): Promise<THREE.BufferGeometry | null> {
-  if (opts.method === 'fillet' && !opts.keep && !opts.lowPoly) {
+  if (!opts.keep && !opts.lowPoly) {
     const geo = await filletSkin(parts, opts);
+    if (geo) geo.userData.method = 'fillet';
     if (geo || opts.shouldStop()) return geo;
   }
-  return buildSkin(parts, opts);
+  const geo = await buildSkin(parts, opts);
+  if (geo) geo.userData.method = 'grid';
+  return geo;
 }
 
 export interface FilletOptions {
