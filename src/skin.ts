@@ -647,7 +647,11 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
    * the far side, or just `limit` past it (only thin places matter; finite, so
    * it can still be scaled down, as lumps are under the eyes). Stepped
    * through the blended field rather than cast at the mesh: inside, the field
-   * says how far the nearest surface is, so each step can go that far.
+   * says how far the nearest surface is, so each step can go that far. Off
+   * the grids, except where they never find the inside: a point thinner than
+   * they can hold (a horn's or a claw's) is rounded off in them, so from its
+   * very end it'd count as thick and get no more vertices, just where it
+   * needs them most. There the parts are measured exactly.
    */
   const inward = new THREE.Vector3(), probe = new THREE.Vector3(), probeGrad = new THREE.Vector3();
   const thicknessOf = async (mesh: THREE.BufferGeometry, limit: number): Promise<Float32Array | null> => {
@@ -655,35 +659,39 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
     const N = mesh.getAttribute('normal') as THREE.BufferAttribute;
     const out = new Float32Array(P.count).fill(limit);
     const least = 0.02 * h;
-    for (let v = 0; v < P.count; v++) {
-      inward.fromBufferAttribute(N, v).negate();
-      pt.fromBufferAttribute(P, v);
+    /** straight in from `pt` to the far side (or `limit`), and whether it got inside at all */
+    const through = (exact: boolean): { d: number; inside: boolean } => {
       // (the point itself can sit a hair outside the field read straight off the
       // grids, which rounds things a little small: the far side only counts once inside)
       let t = least, tWas = 0, fWas = 0, inside = false;
       for (let it = 0; it < 48 && t <= limit; it++) {
-        const f = fieldGrad(probe.copy(pt).addScaledVector(inward, t), probeGrad);
+        const f = fieldGrad(probe.copy(pt).addScaledVector(inward, t), probeGrad, exact);
         if (!Number.isFinite(f)) break;
-        if (f > 0 && inside) {
-          // out the far side: between the last two steps
-          out[v] = tWas + ((t - tWas) * -fWas) / (f - fWas || 1);
-          break;
-        }
+        // out the far side: between the last two steps
+        if (f > 0 && inside) return { d: tWas + ((t - tWas) * -fWas) / (f - fWas || 1), inside };
         if (f <= 0) inside = true;
         tWas = t;
         fWas = f;
         // (still outside: across briskly, not creeping up on the surface in ever smaller steps)
         t += inside ? Math.max(-f, least) : Math.max(f, 0.1 * h);
       }
+      return { d: limit, inside };
+    };
+    for (let v = 0; v < P.count; v++) {
+      inward.fromBufferAttribute(N, v).negate();
+      pt.fromBufferAttribute(P, v);
+      const off = through(false);
+      out[v] = off.inside ? off.d : through(true).d;
       if ((v & 4095) === 0 && (await breathe())) return null;
     }
     return out;
   };
 
   // 4d. where the skin is thin for its grid (a horn's point, a claw) there are
-  // only a few vertices round it, so it looks faceted and lumpy: split the
-  // edges there and settle the new points on the surface, twice at most.
-  // (Low-poly is re-faceted anyway.)
+  // only a few vertices round it, so it looks faceted and lumpy; and where it
+  // bends tightly (a curled tail) it's faceted too: split the edges there and
+  // settle the new points on the surface, twice at most. (Low-poly is
+  // re-faceted anyway.)
   let verts: ArrayLike<number> = pos;
   let tris = index;
   if (!opts.lowPoly) {
@@ -698,15 +706,20 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
       g0.computeVertexNormals();
       // (edges are split where they're long next to the thickness: that's a few cells at most)
       const thick = await thicknessOf(g0, 8 * h);
+      const nrm = (g0.getAttribute('normal') as THREE.BufferAttribute).array;
       g0.dispose();
       if (!thick) return null;
+      /** how far the surface turns along an edge (the cosine between its ends' normals) */
+      const turn = (a: number, b: number) => nrm[a * 3] * nrm[b * 3] + nrm[a * 3 + 1] * nrm[b * 3 + 1] + nrm[a * 3 + 2] * nrm[b * 3 + 2];
       const split = new Map<number, number>();
       const len = (a: number, b: number) => Math.hypot(grow[a * 3] - grow[b * 3], grow[a * 3 + 1] - grow[b * 3 + 1], grow[a * 3 + 2] - grow[b * 3 + 2]);
-      // about ten edges round anything thin; never finer than a sixth of a cell
+      // about ten edges round anything thin, and an edge every ~25 degrees round
+      // a bend; never finer than a sixth of a cell (a third, for bends)
       for (let t = 0; t < tris.length; t += 3) {
         for (let e = 0; e < 3; e++) {
           const a = tris[t + e], b = tris[t + ((e + 1) % 3)];
-          if (len(a, b) > Math.max(0.3 * Math.min(thick[a], thick[b]), h / 6)) split.set(key(a, b), -1);
+          const l = len(a, b);
+          if (l > Math.max(0.3 * Math.min(thick[a], thick[b]), h / 6) || (l > h / 3 && turn(a, b) < BEND_SPLIT)) split.set(key(a, b), -1);
         }
       }
       if (!split.size) break;
@@ -734,7 +747,8 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
         // the body) too fine for the grid, where settling just crumples it: it
         // stays flat. Unless the crease is where two parts that don't blend
         // meet: flat, it would fill the crease in like a fillet.
-        if (fieldGrad(pt, g) < 0 || unblended(pt)) settle(pt);
+        // (the grids round a thin point off a little small: there, ask the parts themselves)
+        if (fieldGrad(pt, g) < 0 || fieldGrad(pt, g, true) < 0 || unblended(pt)) settle(pt);
         split.set(k, grow.length / 3);
         grow.push(pt.x, pt.y, pt.z);
         if ((++made & 1023) === 0 && (await breathe())) return null;
@@ -901,6 +915,9 @@ export async function buildSkin(parts: SkinPart[], opts: SkinOptions): Promise<T
 }
 
 type Step = 'coarse' | 'fine' | 'nets' | 'settle' | 'subdivide' | 'keep' | 'lumps' | 'rest';
+/** the cosine of the turn across an edge (~25 degrees) past which a bend gets more vertices (see 4d) */
+const BEND_SPLIT = Math.cos((25 * Math.PI) / 180);
+
 /** each step's share of a skin's build time (out of about 100), to start with as measured on a test creature */
 const stepShares: Record<Step, number> = { coarse: 4, fine: 36, nets: 6, settle: 19, subdivide: 10, keep: 2, lumps: 5, rest: 18 };
 

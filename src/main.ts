@@ -1768,6 +1768,14 @@ controls.maxDistance = 14;
 controls.maxPolarAngle = Math.PI * 0.53;
 controls.autoRotateSpeed = 2.5;
 controls.update();
+/** the view's been moved by hand since the page opened (the open creation's saved view is only put back before that) */
+let viewMoved = false;
+controls.addEventListener('start', () => (viewMoved = true));
+controls.addEventListener('end', () => viewChanged());
+/** The view is kept with the open creation (see SceneLook): save it there once it's settled. */
+function viewChanged() {
+  if (opened.keep && mode !== 'stuff') queueCreationSave();
+}
 
 function setRay(clientX: number, clientY: number) {
   const r = canvas.getBoundingClientRect();
@@ -1976,7 +1984,8 @@ function creatureBox(precise = false): THREE.Box3 {
 const THREE_QUARTER = new THREE.Vector3(0.62, 0.32, 0.72).normalize();
 
 /** Frame every creature in the scene, keeping the current viewing angle. */
-function frameAll() {
+/** Fly to frame every creature, from the current angle or (`fresh`) the usual three-quarter one. */
+function frameAll(fresh = false) {
   const box = new THREE.Box3();
   for (const c of creatures) {
     c.root.updateMatrixWorld(true);
@@ -1985,9 +1994,23 @@ function frameAll() {
   if (box.isEmpty()) return;
   const center = box.getCenter(new THREE.Vector3());
   const radius = box.getSize(new THREE.Vector3()).length() / 2;
-  const dir = camera.position.clone().sub(controls.target).normalize();
+  const dir = fresh ? THREE_QUARTER.clone().normalize() : camera.position.clone().sub(controls.target).normalize();
   const dist = (radius * 0.95) / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
   flyTo(center.clone().addScaledVector(dir, Math.max(dist, 2)), center);
+}
+
+/** A scene that kept no view of its own (saved before views were): seen afresh, not from the last scene's angle. */
+function freshView() {
+  if (sceneOrtho) {
+    sceneOrtho = false;
+    try {
+      localStorage.setItem(ORTHO_KEY, '0');
+    } catch {
+      /* ignore */
+    }
+    if (mode !== 'stuff') setOrtho(false);
+  }
+  frameAll(true);
 }
 
 /** Fly to frame the creature, keeping the current angle unless a view direction is given. */
@@ -4675,6 +4698,8 @@ interface SceneLook {
   floor: typeof floorPrefs;
   light: number;
   dof: typeof dof;
+  /** where the view was: the camera, the spot it orbits, and whether it was flat (ortho) */
+  camera?: { pos: V3; target: V3; ortho?: boolean };
 }
 
 /** What a save holds. Older files (.scene, .stuff, .collection, single creatures) are read into one too. */
@@ -4688,7 +4713,13 @@ interface Bundle {
 }
 
 function currentLook(): SceneLook {
-  return { backdrop, floor: { ...floorPrefs }, light: lightTurn, dof: { ...dof } };
+  const look: SceneLook = { backdrop, floor: { ...floorPrefs }, light: lightTurn, dof: { ...dof } };
+  // (the workbench has a view of its own; mid-flight, where it's flying to)
+  if (mode !== 'stuff') {
+    const r4 = (v: THREE.Vector3) => v.toArray().map((x) => Math.round(x * 1e4) / 1e4) as V3;
+    look.camera = { pos: r4(tween?.p1 ?? camera.position), target: r4(tween?.t1v ?? controls.target), ortho: sceneOrtho };
+  }
+  return look;
 }
 
 function saveBundle(b: Bundle, name: string) {
@@ -4795,7 +4826,8 @@ function loadBundle(b: Bundle, pick: LoadChoice, replace: boolean) {
     beginCreation(null, true);
   }
   // after the old scene is saved, so it keeps its own backdrop
-  if (pick.look && b.look) applyLook(b.look);
+  // (the file's view only when it's the whole scene: added creatures are framed where they land)
+  const viewed = pick.look && b.look ? applyLook(b.look, replace && incoming.length > 0) : false;
   keepInCollection(incoming, things);
   if (incoming.length && !replace) {
     // keep the file's own arrangement, shifted to free floor on the right
@@ -4812,7 +4844,10 @@ function loadBundle(b: Bundle, pick: LoadChoice, replace: boolean) {
   renderUI();
   renderCollection();
   renderRigs();
-  if (incoming.length && mode !== 'stuff') frameAll();
+  if (incoming.length && mode !== 'stuff' && !viewed) {
+    if (replace) freshView();
+    else frameAll();
+  }
 
   const bits = [
     incoming.length === 1 ? incoming[0].name || 'a creature' : incoming.length ? `${incoming.length} creatures` : '',
@@ -4823,7 +4858,8 @@ function loadBundle(b: Bundle, pick: LoadChoice, replace: boolean) {
   hint(`${replace && incoming.length ? 'Opened' : 'Added'} ${bits.join(', ').replace(/, ([^,]*)$/, ' and $1')}`, 2400);
 }
 
-function applyLook(l: SceneLook) {
+/** Put a saved look back; with `view`, its camera too. Whether the view was put back (else it wants framing). */
+function applyLook(l: SceneLook, view = true): boolean {
   setBackdrop(l.backdrop);
   Object.assign(floorPrefs, l.floor);
   saveFloor();
@@ -4839,6 +4875,27 @@ function applyLook(l: SceneLook) {
   saveDof();
   applyDof();
   renderBackdropUI();
+  if (!view || !l.camera) return false;
+  putView(l.camera, true);
+  return true;
+}
+
+/** Look at a scene the way it was saved: flown to, or (not `fly`) straight there. */
+function putView(v: NonNullable<SceneLook['camera']>, fly: boolean) {
+  sceneOrtho = !!v.ortho;
+  try {
+    localStorage.setItem(ORTHO_KEY, sceneOrtho ? '1' : '0');
+  } catch {
+    /* ignore */
+  }
+  if (mode !== 'stuff') setOrtho(sceneOrtho);
+  const pos = new THREE.Vector3(...v.pos), target = new THREE.Vector3(...v.target);
+  if (fly) return flyTo(pos, target);
+  tween = null;
+  camera.position.copy(pos);
+  controls.target.copy(target);
+  controls.update();
+  invalidate();
 }
 
 /** The "what do you want from this file?" picker. */
@@ -4913,7 +4970,7 @@ function showLoadPicker(b: Bundle, title: string) {
   }
   if (b.look) {
     group('Scene');
-    row(`<i class="load-dot" style="background:${b.look.backdrop}"></i>`, 'Backdrop & lighting', () => pick.look, (v) => (pick.look = v));
+    row(`<i class="load-dot" style="background:${b.look.backdrop}"></i>`, b.look.camera ? 'Backdrop, lighting & view' : 'Backdrop & lighting', () => pick.look, (v) => (pick.look = v));
   }
   $<HTMLInputElement>('#load-all').onchange = (e) => {
     const on = (e.target as HTMLInputElement).checked;
@@ -5138,13 +5195,14 @@ async function openCreation(id: string) {
   replaceWorld({ creatures: list, active: Math.min(Math.max(0, c.data.active ?? 0), list.length - 1), name: c.name }, c.data.stuff ?? []);
   // and whatever its creatures wear (creations from before each kept its own stuff)
   keepInCollection(list);
-  if (c.data.look) applyLook(c.data.look);
+  const viewed = c.data.look ? applyLook(c.data.look) : false;
   beginCreation(c.id, true, c);
   commit();
   // opening it isn't a change
   opened.savedJson = JSON.stringify(creationData());
   renderUI();
-  frameAll();
+  // as it was last seen (older creations kept no view: framed afresh)
+  if (!viewed) freshView();
   hint(`Opened ${creationName(c)}`, 1800);
 }
 
@@ -7826,7 +7884,10 @@ function loop(now: number) {
     const k = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
     camera.position.lerpVectors(tween.p0, tween.p1, k);
     controls.target.lerpVectors(tween.t0v, tween.t1v, k);
-    if (t >= 1) tween = null;
+    if (t >= 1) {
+      tween = null;
+      viewChanged();
+    }
     invalidate(2);
   }
   // true while damping or auto-rotating
@@ -8647,6 +8708,9 @@ if (opened.id) {
       opened.created ||= c.created;
       opened.thumb ??= c.thumb;
       opened.savedJson ||= JSON.stringify(c.data);
+      // and seen as it was left (unless the view's already been moved)
+      const v = c.data.look?.camera;
+      if (v && !viewMoved && mode !== 'stuff') putView(v, false);
     })
     .catch(() => {});
 } else if (loadedWorld && JSON.stringify(loadedWorld.creatures) !== JSON.stringify(freshWorld().creatures)) {
