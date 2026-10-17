@@ -2172,18 +2172,27 @@ export class Creature {
     if (!row) this.baseTouch.set(a, (row = new Map()));
     const known = row.get(b);
     if (known !== undefined) return known;
-    // with half its thickness to spare: a base resting on a part's surface counts
-    const touches = this.reachAt(a, b) < 1.5 * Math.max(0, -this.reachAt(a, a));
+    // with half its thickness to spare: a base resting on a part's surface counts. Its thickness a
+    // little way up it: right at the bone's start it's only as thick as the rounded end there
+    const bd = bendOf(a.def, a.length);
+    const thick = Math.max(
+      0,
+      ...[0, 0.1, 0.2].map((f) => {
+        const [x, y, z] = bendPoint(bd, 0, a.length * f, 0);
+        return -this.reachAt(a.pivot.localToWorld(new THREE.Vector3(x, y, z)), a);
+      }),
+    );
+    const touches = this.reachAt(a.pivot.getWorldPosition(new THREE.Vector3()), b) < 1.5 * thick;
     row.set(b, touches);
     return touches;
   }
 
-  /** How far part `a`'s base is from part `b`'s surface, in creature units (negative inside, Infinity when far). */
-  private reachAt(a: BoneRT, b: BoneRT): number {
+  /** How far a point (in the scene) is from part `b`'s surface, in creature units (negative inside, Infinity when far). */
+  private reachAt(at: THREE.Vector3, b: BoneRT): number {
     const geo = b.mesh?.userData.baseGeo as THREE.BufferGeometry | undefined;
     if (!geo) return Infinity;
     this.group.updateMatrixWorld(true);
-    const q = a.pivot.getWorldPosition(new THREE.Vector3()).applyMatrix4(b.mesh!.matrixWorld.clone().invert());
+    const q = at.clone().applyMatrix4(b.mesh!.matrixWorld.clone().invert());
     const sc = new THREE.Vector3().setFromMatrixScale(this.group.matrixWorld.clone().invert().multiply(b.mesh!.matrixWorld));
     const scale = (sc.x + sc.y + sc.z) / 3;
     return exactDistance(geo, bvhFor(geo), sharedNormals(geo), q, 1 / scale, new THREE.Vector3()) * scale;
