@@ -13,11 +13,13 @@ import {
   makeStrayHairs,
   setGlow,
   setOpacity,
+  setTextureSpace,
   styleSettings,
   type GlowFollow,
   type StyleId,
   type StyleSettings,
 } from './materials';
+import { applyMarkings, setPictures, shownMarkings, type Marking } from './markings';
 
 /**
  * "Stuff": props made of drawn pieces (a sword, a shield, glasses...) that
@@ -56,6 +58,8 @@ export interface Piece {
   style: StyleId;
   /** layer offset along Z (in front of / behind other pieces) */
   z: number;
+  /** patterns over its material, its own (see src/markings.ts) */
+  markings?: Marking[];
   /**
    * 3D: where this piece's drawing plane sits in the thing, tilted or lifted
    * off the board. Absent = flat on the board like it was drawn.
@@ -97,6 +101,10 @@ export interface Thing {
   wrapSmooth?: number;
   /** worn with Wrap on: 0..1, how far it's pressed onto the body (0 = flat as drawn) */
   wrapStrength?: number;
+  /** markings on every piece (each can be turned off on some pieces), under the pieces' own */
+  markings?: Marking[];
+  /** pictures its markings show, by id */
+  pictures?: Record<string, string>;
 }
 
 export type BendMode = 'axis' | 'radial';
@@ -254,6 +262,7 @@ export function pieceLook(thing: Thing, p: Piece, wearer: Wearer): { style: Styl
  */
 export function buildThing(thing: Thing, wearer: Wearer, unit = 1, wrap?: WrapSurface): THREE.Group {
   const group = new THREE.Group();
+  setPictures(thing.pictures);
   const looks = thing.pieces.map((raw) => {
     const { style, k } = pieceLook(thing, raw, wearer);
     // low-poly and clay shape the mesh itself
@@ -267,6 +276,9 @@ export function buildThing(thing: Thing, wearer: Wearer, unit = 1, wrap?: WrapSu
   looks.forEach(({ p, style, k }, i) => {
     const { geo, painted } = shapes[i];
     const mesh = new THREE.Mesh(geo, makeMaterial(style, p.color, k));
+    // markings are laid out in the thing's own space, so they run on from piece to piece
+    const marks = shownMarkings(thing.markings, p.markings, p.id);
+    applyMarkings(mesh.material as THREE.Material, marks);
     // soft (VSM) shadows draw receivers into the shadow map too: a glass jar
     // would block the light from whatever's inside it
     mesh.castShadow = mesh.receiveShadow = castsShadow(style);
@@ -280,7 +292,11 @@ export function buildThing(thing: Thing, wearer: Wearer, unit = 1, wrap?: WrapSu
     }
     if (style === 'felt') {
 
-      for (const shell of makeFuzzShells(geo, p.color, k, 8, unit)) mesh.add(shell);
+      for (const shell of makeFuzzShells(geo, p.color, k, 8, unit)) {
+        // the fuzz takes the markings too, or it would hide them
+        applyMarkings(shell.material as THREE.Material, marks);
+        mesh.add(shell);
+      }
       if (k.hairs > 0) mesh.add(makeStrayHairs(geo, p.color, 7, k.hairs * 0.6, false, unit, k.fuzz));
     }
     if (painted) {
@@ -294,6 +310,7 @@ export function buildThing(thing: Thing, wearer: Wearer, unit = 1, wrap?: WrapSu
         m.needsUpdate = true;
       }
     }
+    if (marks.length) setTextureSpace(mesh, placeMatrix(p));
     setOpacity(mesh, p.opacity ?? 1);
     setGlow(mesh, p.color, p.glow ?? 0, { painted, follow: p.glowFollow });
     if (p.place) {
@@ -681,7 +698,7 @@ interface BlendLink {
   fade: number;
 }
 
-const placeMatrix = (p: Piece) =>
+export const placeMatrix = (p: Piece) =>
   p.place
     ? new THREE.Matrix4().compose(new THREE.Vector3(...p.place.position), new THREE.Quaternion(...p.place.quaternion), new THREE.Vector3(1, 1, 1))
     : new THREE.Matrix4();

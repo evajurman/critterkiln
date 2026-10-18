@@ -85,6 +85,15 @@ export const MARKINGS: { type: MarkingType; name: string; title: string; base: P
   { type: 'paint', name: 'Paint', title: 'Paint on it with a brush', base: {} },
 ];
 
+/**
+ * The markings one part (or stuff piece) shows: the whole creature's (or
+ * item's), but those turned off on it, then its own, the last on top.
+ */
+export function shownMarkings(whole: Marking[] | undefined, own: Marking[] | undefined, id: string): Marking[] {
+  const all = (whole ?? []).filter((m) => !m.skip?.includes(id));
+  return all.length ? [...all, ...(own ?? [])] : (own ?? []);
+}
+
 /** stuck on from one side (placed with the gizmo), rather than a pattern all over */
 export const STICKERS: MarkingType[] = ['picture', 'text'];
 /** what each kind of marking has settings for */

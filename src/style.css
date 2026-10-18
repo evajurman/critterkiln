@@ -249,6 +249,7 @@ input[type=range] { accent-color: var(--accent); width: 100%; }
 .mark-row.off .mark-pick img { opacity: .4; filter: grayscale(1); }
 .mark-row.off .mark-pick > span { opacity: .6; }
 .mark-where { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; font-size: 12px; font-weight: var(--w-bold); color: var(--muted); }
+.piece-marks-title { margin-top: 12px; }
 .mark-add { align-self: flex-start; padding: 4px 10px; font-size: 12px; }
 .mark-kinds { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px; }
 .mark-kinds button {
@@ -259,6 +260,7 @@ input[type=range] { accent-color: var(--accent); width: 100%; }
 .mark-none { display: grid; place-items: center; border: 2px dashed var(--line); }
 .mark-color { display: flex; align-items: center; gap: 8px; margin: 8px 0; font-size: 13px; font-weight: var(--w-bold); }
 .mark-color input[type="color"]:disabled { opacity: .35; }
+.mark-color[hidden] { display: none; }
 .mark-place { display: flex; align-items: center; gap: 8px; }
 .mark-place .seg { flex: 1; margin-bottom: 0; }
 .mark-place .seg button { white-space: nowrap; padding: 6px 4px; }

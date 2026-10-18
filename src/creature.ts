@@ -26,7 +26,7 @@ import {
 } from './materials';
 import { MAX_BEND, bendCurve, expandRig, onCurve, type BendCurve, type ExpandedBone, type ExpandedRig, type RigState, type V3 } from './rigs';
 import type { PartAnim, StuffAnim } from './animate';
-import { MAX_LAYERS, applyMarkings, markingKey, markingsKey, setPictures, type Marking } from './markings';
+import { MAX_LAYERS, applyMarkings, markingKey, markingsKey, setPictures, shownMarkings, type Marking } from './markings';
 import { buildThing, disposeThing, partPieceGeometry, type Thing, type WrapSurface } from './stuff';
 
 /** One drawn shape of a part, puffed up on its own: drawn from the front (the default) or from the side. */
@@ -68,9 +68,7 @@ export type PartKind = 'puffy' | 'flat' | 'turned';
  * it), then its own, the last on top.
  */
 export function markingsOf(s: CreatureState, id: string): Marking[] {
-  const own = s.parts[id]?.markings ?? [];
-  const all = (s.markings ?? []).filter((m) => !m.skip?.includes(id));
-  return all.length ? [...all, ...own] : own;
+  return shownMarkings(s.markings, s.parts[id]?.markings, id);
 }
 
 /**
@@ -1265,7 +1263,7 @@ export class Creature {
       const unit = sized ? Math.round(Math.cbrt(Math.abs(a.scale[0] * a.scale[1] * a.scale[2])) * 20) / 20 || 1 : 1;
       // a wrapped item follows the creature under it: moving, posing or reshaping either reshapes it
       const wrapKey = a.wrap ? [a.thing.wrapSmooth, a.thing.wrapStrength, a.position, a.quaternion, a.scale, this.state.pose, this.list.map((b) => [b.meshKey, b.mesh?.scale.toArray()])] : 0;
-      const key = JSON.stringify([a.thing.pieces, a.thing.ownMaterial, a.thing.inherit, a.thing.materialSettings, a.thing.bend, a.thing.bendMode, a.bone, twinBone?.def.id, this.state.materialSettings, wearer.style, unit, getMeshDetail(), wrapKey]);
+      const key = JSON.stringify([a.thing.pieces, a.thing.markings, a.thing.pictures, a.thing.ownMaterial, a.thing.inherit, a.thing.materialSettings, a.thing.bend, a.thing.bendMode, a.bone, twinBone?.def.id, this.state.materialSettings, wearer.style, unit, getMeshDetail(), wrapKey]);
       let rec = this.attached.get(a.id);
       if (!rec || rec.key !== key) {
         const settings = wearer;
