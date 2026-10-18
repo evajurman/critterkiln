@@ -255,7 +255,6 @@ input[type=range] { accent-color: var(--accent); width: 100%; }
 .mark-color { display: flex; align-items: center; gap: 8px; margin: 8px 0; font-size: 13px; font-weight: var(--w-bold); }
 .mark-color input[type="color"]:disabled { opacity: .35; }
 .styles b { display: block; font-size: 13px; }
-.styles small { display: block; font-size: 10px; color: var(--muted); line-height: 1.2; }
 .ball { width: 26px; height: 26px; border-radius: 50%; flex: none; }
 .ball.clay { background: radial-gradient(circle at 35% 30%, #f3b7a3, #c96f55 70%); }
 .ball.felt { background: radial-gradient(circle at 35% 30%, #d5f0e4, #6fb697 75%); box-shadow: inset 0 0 0 2px rgba(255,255,255,.35); }
@@ -466,7 +465,6 @@ button.primary.slim { width: auto; flex: 1; padding: 8px 10px; font-size: 14px; 
 .saved-badge.warn { color: var(--warn-ink); }
 /* three icons share a narrow card */
 .creation-actions.thing-card-actions .piece-icon { height: 24px; }
-.inherit-note { margin: 4px 0 8px; }
 .viewport.space-pan, .viewport.space-pan canvas { cursor: var(--cursor-grab); }
 
 /* top middle: Attach stuff can sit in any corner (or the sidebar), so it opens clear of them all */
@@ -533,10 +531,15 @@ button.primary.slim { width: auto; flex: 1; padding: 8px 10px; font-size: 14px; 
 .parts-fold .fa-chevron-down { font-size: 11px; transition: transform .15s; transform: rotate(-90deg); }
 .parts-fold.open .fa-chevron-down { transform: none; }
 .part-rows { display: flex; flex-direction: column; gap: 1px; margin: 0 0 4px 24px; }
-.part-row {
-  display: flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 8px; text-align: left;
+.part-row { display: flex; align-items: center; border-radius: 8px; }
+/* each step deeper hangs off the part above it */
+.part-pick {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; padding: 3px 8px 3px calc(8px + var(--depth, 0) * 12px); text-align: left;
   border: 0; background: none; color: inherit; font-size: 12px; font-weight: var(--w-bold); cursor: var(--cursor-click);
 }
+.part-row .piece-icon { width: 24px; height: 22px; font-size: 11px; color: inherit; opacity: .45; }
+.part-row .piece-icon:hover:not(:disabled) { opacity: 1; }
+.part-row .piece-icon:disabled { opacity: .15; }
 .part-row:hover { background: var(--accent-soft); }
 .part-row.active { background: var(--ink); color: var(--on-ink); }
 .part-row i:not([class]) { width: 10px; height: 10px; border-radius: 50%; display: inline-block; border: 1px solid rgba(0,0,0,.15); flex: none; }
@@ -544,6 +547,7 @@ button.primary.slim { width: auto; flex: 1; padding: 8px 10px; font-size: 14px; 
 .part-mark { flex: none; font-size: 11px; opacity: .75; }
 .creature-row .piece-pick { min-width: 0; }
 .creature-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.part-row .chip-name { flex: 1; min-width: 0; padding: 1px 6px; font-weight: var(--w-bold); font-size: 12px; border: 1.5px solid var(--accent); border-radius: 6px; }
 .creature-row .chip-name { flex: 1; min-width: 0; padding: 4px 8px; font-weight: var(--w-heavy); font-size: 13px; border: 1.5px solid var(--accent); border-radius: 8px; }
 .piece-icon:disabled { opacity: .25; background: none; }
 .creature-new { margin-top: 6px; padding: 4px 10px; font-size: 12px; }
@@ -916,11 +920,12 @@ button.piece-icon { padding: 0; border: 0; background: transparent; }
   .sheet-grip:active::before { background: var(--muted); }
 
   /* bigger targets for fingers */
-  .part-row { padding: 6px 10px; font-size: 14px; }
+  .part-pick { padding: 6px 10px 6px calc(10px + var(--depth, 0) * 14px); font-size: 14px; }
+  .part-row .piece-icon { width: 32px; height: 32px; font-size: 13px; }
   .eye-pairs button { padding: 6px 12px; }
   .check input { width: 20px; height: 20px; }
   /* iOS zooms the page into any text box under 16px */
-  input.text, .creature-row .chip-name, .slider input.num, .bar-slider input.num { font-size: 16px; }
+  input.text, .creature-row .chip-name, .part-row .chip-name, .slider input.num, .bar-slider input.num { font-size: 16px; }
   #stuff-panel .thing-list { grid-template-columns: repeat(3, 1fr); }
 
   /* keyboard shortcut labels are noise on a phone */
@@ -1096,6 +1101,8 @@ html.theme-color .ck-ic, :is(.ck-picker, .ck-head, .ck-tab-row) .ck-ic { --fa-se
 .ck-side .ck-tool[data-kind="pill"] { flex: 0 1 auto; display: flex; flex-wrap: wrap; gap: 6px; margin: 3px 0; }
 .ck-side .ck-tool[data-kind="own"] { margin: 3px 0; }
 .ck-side .ck-tool > .primary { margin-top: 2px; }
+/* room between Draw shape and the Puffy / Flat / Turned choice under it */
+.ck-side .ck-tool[data-tool="draw"] { margin-bottom: 8px; }
 .ck-side .eyes-card { width: auto; max-height: none; box-shadow: none; background: var(--card); }
 .ck-side .view-bar { box-shadow: none; justify-content: space-between; }
 .ck-tool[data-tool="eyes"] { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
@@ -1292,3 +1299,27 @@ html.theme-color[data-mode="custom"] {
 #anim-render.recording { color: #e5484d; }
 /* rows like .check set their own display, which would beat [hidden] */
 .ck-tool[data-tool="anim"] [hidden], .ck-tool[data-tool="anim-play"] [hidden] { display: none !important; }
+
+/* ---------- tooltips (src/tooltip.ts): our own bubble, never the browser's ---------- */
+.ck-tooltip {
+  position: fixed; left: 0; top: 0; z-index: 6000; pointer-events: none;
+  max-width: 260px; width: max-content; padding: 6px 10px; border-radius: 9px;
+  background: var(--ink); color: var(--on-ink); box-shadow: 0 4px 16px rgba(0,0,0,.18);
+  font-size: 12.5px; font-weight: var(--w-semi); line-height: 1.35; text-align: left;
+  opacity: 0; visibility: hidden; translate: 0 -3px;
+  transition: opacity .12s ease-out, translate .12s ease-out, visibility .12s;
+}
+.ck-tooltip.above { translate: 0 3px; }
+.ck-tooltip.show { opacity: 1; visibility: visible; translate: none; }
+/* a little point toward what it's about */
+.ck-tooltip::before {
+  content: ''; position: absolute; left: var(--arrow, 50%); top: -4px; width: 8px; height: 8px;
+  background: inherit; transform: translateX(-50%) rotate(45deg); border-radius: 2px;
+}
+.ck-tooltip.above::before { top: auto; bottom: -4px; }
+.ck-tooltip kbd {
+  font: inherit; font-size: 11px; font-weight: var(--w-bold); padding: 0 5px; border-radius: 4px;
+  background: color-mix(in srgb, var(--on-ink) 18%, transparent); white-space: nowrap;
+}
+/* the help that used to sit under a heading, now behind this */
+.tip-i { color: var(--muted); font-size: .85em; margin-left: 4px; cursor: help; }

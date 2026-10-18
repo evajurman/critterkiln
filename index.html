@@ -90,7 +90,7 @@
           </div>
           <div class="ck-tool" data-tool="blend">
             <label class="slider wide-label" title="How smoothly touching parts of the same material flow into each other. 0 keeps them separate.">
-              <span>Blend parts</span><input id="merge-radius" type="range" min="0" max="0.25" step="0.005" />
+              <span>Blend shape</span><input id="merge-radius" type="range" min="0" max="0.25" step="0.005" />
               <span class="ends"><em>off</em><em>smooth</em></span></label>
           </div>
           <div class="ck-tool" data-tool="opacity">
@@ -100,7 +100,7 @@
           </div>
           <div class="ck-tool" data-tool="seamless">
             <div class="seamless-row" id="seamless-row">
-              <span><i class="fa-slab-duo fa-regular fa-wand-magic-sparkles" aria-hidden="true"></i> Seamless joins <span class="muted" id="seamless-note">(smooths blended parts when idle)</span></span>
+              <span id="seamless-label"><i class="fa-slab-duo fa-regular fa-wand-magic-sparkles" aria-hidden="true"></i> Seamless joins <span class="muted" id="seamless-note"></span></span>
               <div class="seg" id="blend-with" title="Which touching parts blend into each other">
                 <button data-with="none" title="For this creature: blended parts stay as quick joins, never rebuilt as one skin">None</button>
                 <button data-with="all" title="Every part blends into every part it touches">All</button>
@@ -117,11 +117,9 @@
           </div>
           <div class="ck-tool" data-tool="name">
             <input id="rig-title" class="text wide card-title-input" type="text" maxlength="40" placeholder="Part name" title="Rename this part" />
-            <p class="muted small" id="rig-pair-note"></p>
           </div>
           <div class="ck-tool" data-tool="draw">
-            <button id="draw" class="primary" data-shortcut="draw"><i class="fa-slab-duo fa-regular fa-pencil" aria-hidden="true"></i> Draw shape <kbd>D</kbd></button>
-            <p class="muted small">Or <span class="mouse-only">double-click</span><span class="touch-only">double-tap</span> a part. Draw a closed outline; it puffs up like a balloon.</p>
+            <button id="draw" class="primary" data-shortcut="draw" title="Draw a closed outline and it puffs up like a balloon. Or double-click a part to redraw it (D)"><i class="fa-slab-duo fa-regular fa-pencil" aria-hidden="true"></i> Draw shape <kbd>D</kbd></button>
           </div>
           <div class="ck-tool" data-tool="thickness">
             <div class="seg" id="part-kind" title="How the drawing becomes 3D">
@@ -137,23 +135,21 @@
           </div>
           <div class="ck-tool" data-tool="width0"><label class="slider" id="rig-w0-row"><span>Base width</span><input id="rig-w0" type="range" min="0.02" max="1.2" step="0.005" /></label></div>
           <div class="ck-tool" data-tool="width1"><label class="slider" id="rig-w1-row"><span>Tip width</span><input id="rig-w1" type="range" min="0.02" max="1.2" step="0.005" /></label></div>
-          <div class="ck-tool" data-tool="reset-shape"><button id="reset-shape" class="ghost">Reset shape</button></div>
+          <div class="ck-tool" data-tool="reset-shape"><button id="reset-shape" class="ghost" title="Throw away this part's drawing: back to its plain shape">Reset shape</button></div>
           <div class="ck-tool" data-tool="bone"><button id="rig-bone" class="ghost" title="Sprout a single piece from the side of this part"><i class="fa-duotone fa-regular fa-bone" aria-hidden="true"></i> Bone</button></div>
           <div class="ck-tool" data-tool="extend"><button id="rig-extend" class="ghost" title="Add a segment on the end of this part"><i class="fa-duotone fa-regular fa-arrow-up-right" aria-hidden="true"></i> Extend</button></div>
           <div class="ck-tool" data-tool="split"><button id="rig-split" class="ghost" title="Split this part in the middle into two jointed halves"><i class="fa-slab-duo fa-regular fa-scissors" aria-hidden="true"></i> Split</button></div>
           <div class="ck-tool" data-tool="detach"><button id="rig-detach" class="ghost"></button></div>
           <div class="ck-tool" data-tool="parent">
             <label class="check" title="Each part hangs off whatever its base sits on, checked whenever the creature changes or loads. A part stays on its part while its base is still on it, and nothing jumps when one changes. Off: parts keep their parent until you Set parent.">
-              <input id="auto-parent" type="checkbox" checked /> <span>Auto parent <span class="muted">(hangs off what its base is on)</span></span>
+              <input id="auto-parent" type="checkbox" checked /> <span>Auto parent</span>
             </label>
             <div class="parent-row">
               <span class="muted small" id="parent-name"></span>
               <button id="set-parent" class="ghost" title="Then click the part this one should hang off (a pair picks the matching side)"><i class="fa-duotone fa-regular fa-crosshairs" aria-hidden="true"></i> Set parent</button>
             </div>
           </div>
-          <div class="ck-tool" data-tool="dup"><button id="rig-dup" class="ghost" title="Copy this limb and everything attached to it"><i class="fa-slab-duo fa-regular fa-copy" aria-hidden="true"></i> Copy</button></div>
-          <div class="ck-tool" data-tool="del"><button id="rig-del" class="ghost" data-shortcut="delete" title="Remove this part and everything attached to it (Backspace)"><i class="fa-slab-duo fa-regular fa-trash" aria-hidden="true"></i> Delete</button></div>
-          <div class="ck-tool" data-tool="stand"><button id="reset-pose" class="ghost" title="Straighten every joint back out"><i class="fa-duotone fa-regular fa-person" aria-hidden="true"></i> Stand up straight</button></div>
+          <div class="ck-tool" data-tool="stand"><button id="reset-pose" class="ghost" title="Straighten every joint back out"><i class="fa-duotone fa-regular fa-person" aria-hidden="true"></i> Reset pose</button></div>
           <div class="ck-tool" data-tool="floor"><button id="drop-floor" class="ghost" title="Move the whole creature so its lowest point touches the floor"><i class="fa-slab-duo fa-regular fa-arrow-down-to-line" aria-hidden="true"></i> Floor</button></div>
           <div class="ck-tool" data-tool="keep-floor"><label class="check" title="After you bend or resize something, the creature settles back onto the floor (if it was standing on it)"><input id="keep-floor" type="checkbox" checked /> Keep feet on the floor</label></div>
           <div class="ck-tool" data-tool="custom-color"><label class="color-pick"><input id="color" type="color" /> Custom</label></div>
@@ -202,7 +198,7 @@
             </label>
           </div>
           <div class="ck-tool" data-tool="mirror">
-            <label id="mirror-pill" class="pill-toggle" data-shortcut="mirror" title="Both sides change together: shaping and posing (M)">
+            <label id="mirror-pill" class="pill-toggle" data-shortcut="mirror" title="Mirror: both sides of a pair change together, shaping and posing (M)">
               <input id="rig-sym" type="checkbox" checked /> <i class="fa-slab-duo fa-regular fa-arrow-right-arrow-left" aria-hidden="true"></i> Mirror <kbd>M</kbd>
             </label>
             <button id="rig-mirror" class="pill-toggle" hidden></button>
@@ -273,7 +269,7 @@
                       <span class="ends"><em>cup</em><em>arch</em></span></label>
                     <label class="slider" title="Lean the eyes: inner corners up, or down toward the nose"><span>Tilt</span><input id="eye-tilt" type="range" min="-1" max="1" step="0.01" />
                       <span class="ends"><em>worried</em><em>angry</em></span></label>
-                    <button id="eye-shape-reset" class="ghost" title="Back to round, open eyes"><i class="fa-slab-duo fa-regular fa-circle" aria-hidden="true"></i> Round eyes</button>
+                    <button id="eye-shape-reset" class="ghost" title="Back to round, open eyes"><i class="fa-slab-duo fa-regular fa-circle" aria-hidden="true"></i> Reset expression</button>
                   </div>
                 </div>
               </div>
@@ -293,8 +289,8 @@
               <label class="slider" title="Start later in the motion: shift parts against each other, like feet"><span>Timing</span><input id="anim-phase" type="range" min="0" max="1" step="0.01" />
                 <span class="ends"><em>0</em><em>a whole time round</em></span></label>
               <label class="check" id="anim-reverse-row" hidden title="Go round the other way"><input id="anim-reverse" type="checkbox" /> Reverse</label>
-              <label class="check" id="anim-reach-row" title="The tip follows the path for real and the part above bends to reach it, like a knee (so a foot can lift). Off: it just swings from its base"><input id="anim-reach" type="checkbox" /> Bend the part above <span class="muted">(knee)</span></label>
-              <label class="check" id="anim-opposite-row" title="With Mirror on, the other side runs half a time round behind: left foot, right foot"><input id="anim-opposite" type="checkbox" /> Other side opposite <span class="muted">(walking)</span></label>
+              <label class="check" id="anim-reach-row" title="Like a knee: the tip follows the path for real and the part above bends to reach it (so a foot can lift). Off: it just swings from its base"><input id="anim-reach" type="checkbox" /> Bend the part above</label>
+              <label class="check" id="anim-opposite-row" title="For walking: with Mirror on, the other side runs half a time round behind, left foot, right foot"><input id="anim-opposite" type="checkbox" /> Other side opposite</label>
             </div>
           </div>
           <div class="ck-tool" data-tool="anim-play">
@@ -324,7 +320,7 @@
             <div class="seg" id="floor-mode">
               <button data-floor="none" title="No floor: the creature floats">None</button>
               <button data-floor="shadow" title="Invisible floor that only shows shadows">Backdrop</button>
-              <button data-floor="mirror" title="Reflective floor">Mirror</button>
+              <button data-floor="mirror" title="A shiny floor that reflects the scene">Reflective</button>
               <button data-floor="material" title="A real floor in one of the materials">Material</button>
             </div>
             <div id="floor-mirror-opts" hidden>
@@ -356,7 +352,7 @@
               <label class="slider dof-slider"><span>Blur</span><input id="dof-blur" type="range" min="0" max="1" step="0.01" /></label>
               <div class="row">
                 <button id="dof-pick" class="ghost" title="Then click the spot that should be sharp"><i class="fa-duotone fa-regular fa-crosshairs" aria-hidden="true"></i> Click to focus</button>
-                <button id="dof-reset" class="link" title="Focus on the orbit centre">Reset</button>
+                <button id="dof-reset" class="link" title="Focus on the orbit centre">Reset focus</button>
               </div>
             </div>
           </div>
@@ -380,14 +376,12 @@
         </div>
 
         <section id="stuff-panel" hidden>
-          <h3>My stuff</h3>
-          <p class="muted small">Everything you make here is saved as you go. Pick something to change it.</p>
+          <h3>My stuff <i class="fa-duotone fa-regular fa-circle-info tip-i" title="Everything you make here is saved as you go. Pick something to change it."></i></h3>
           <div id="thing-list" class="thing-list"></div>
 
           <h3 class="editing-head">Editing <span id="thing-saved" class="saved-badge"></span></h3>
           <input id="thing-name" class="text wide" type="text" placeholder="Name this thing" maxlength="40" />
-          <button id="piece-draw" class="primary" data-shortcut="draw"><i class="fa-slab-duo fa-regular fa-pencil" aria-hidden="true"></i> Draw a piece <kbd>D</kbd></button>
-          <p class="muted small">Draw on the board; the blue crosshair is where it attaches to a body part. <span class="mouse-only">Right-drag or hold <kbd>Space</kbd> to pan.</span><span class="touch-only">Two fingers move the view.</span></p>
+          <button id="piece-draw" class="primary" data-shortcut="draw" title="Draw on the board; the blue crosshair is where it attaches to a body part. Right-drag or hold Space to pan (D)"><i class="fa-slab-duo fa-regular fa-pencil" aria-hidden="true"></i> Draw a piece <kbd>D</kbd></button>
           <div id="pieces" class="parts"></div>
           <div class="card thing-bend" id="thing-bend-card">
             <div class="sub-title">Bend the whole thing</div>
@@ -399,8 +393,7 @@
               <span class="ends"><em>edges forward</em><em>edges back</em></span></label>
           </div>
           <div class="card thing-bend" id="thing-wrap-card">
-            <div class="sub-title">Wrap onto the body</div>
-            <p class="muted small">When it's worn with <i class="fa-slab-duo fa-regular fa-map" aria-hidden="true"></i> Wrap on, it's pressed onto the creature instead of bent.</p>
+            <div class="sub-title">Wrap onto the body <i class="fa-duotone fa-regular fa-circle-info tip-i" title="When it's worn with Wrap on, it's pressed onto the creature instead of bent."></i></div>
             <label class="slider" title="How widely the body's surface is evened out first: low follows every dip and rib, high just the overall shape"><span>Smoothness</span><input id="thing-wrap-smooth" type="range" min="0" max="1" step="0.01" />
               <span class="ends"><em>every dip</em><em>overall shape</em></span></label>
             <label class="slider" title="How far it's pressed onto the body: part way keeps some of its flat shape"><span>Strength</span><input id="thing-wrap-strength" type="range" min="0" max="1" step="0.01" />
@@ -421,8 +414,8 @@
             <label class="slider" id="piece-round-row"><span>Rounded</span><input id="piece-round" type="range" min="0" max="1" step="0.01" /></label>
             <label class="slider"><span>Layer</span><input id="piece-z" type="range" min="-0.2" max="0.2" step="0.002" /></label>
             <label class="slider"><span>Opacity</span><input id="piece-opacity" type="range" min="0.05" max="1" step="0.01" /></label>
-            <label class="slider" title="Fuse into the pieces this one touches with a smooth fillet"><span>Blend shape</span><input id="piece-blend-shape" type="range" min="0" max="1" step="0.01" /></label>
-            <label class="slider" title="Fade into the colors of the pieces this one touches"><span>Blend color</span><input id="piece-blend-color" type="range" min="0" max="1" step="0.01" /></label>
+            <label class="slider" title="Fuse into the pieces this one touches with a smooth fillet. 0 keeps them separate."><span>Blend shape</span><input id="piece-blend-shape" type="range" min="0" max="1" step="0.01" /></label>
+            <label class="slider" title="Fade into the colors of the pieces this one touches. 0 keeps colors apart."><span>Blend colors</span><input id="piece-blend-color" type="range" min="0" max="1" step="0.01" /></label>
             <div class="paint-row">
               <label class="color-pick"><input id="piece-color" type="color" /> Custom</label>
               <div class="seg scope-seg" id="piece-color-scope">
@@ -480,7 +473,7 @@
           <button data-place="rotate" class="seg-btn" data-shortcut="rotate" title="Turn any way, even tip over (E)"><i class="fa-duotone fa-regular fa-rotate" aria-hidden="true"></i> Rotate</button>
           <button data-place="scale" class="seg-btn" data-shortcut="scale" title="Make the whole creature bigger or smaller (R)"><i class="fa-slab-duo fa-regular fa-expand" aria-hidden="true"></i> Scale</button>
           <button id="place-floor" class="seg-btn" title="Lower (or raise) it so it rests on the floor"><i class="fa-slab-duo fa-regular fa-arrow-down-to-line" aria-hidden="true"></i> Floor</button>
-          <button id="place-reset" class="seg-btn" title="Stand it upright on the floor at its normal size"><i class="fa-duotone fa-regular fa-rotate-left" aria-hidden="true"></i> Reset</button>
+          <button id="place-reset" class="seg-btn" title="Stand it upright on the floor at its normal size"><i class="fa-duotone fa-regular fa-rotate-left" aria-hidden="true"></i> Reset placement</button>
           <button id="place-done">Done</button>
         </div>
 
@@ -493,8 +486,8 @@
             <button data-dim="2d" class="seg-btn" title="Keep the piece flat on the board">2D</button>
             <button data-dim="3d" class="seg-btn" title="Lift the piece off the board and tilt it any way">3D</button>
           </span>
-          <label id="piece-mirror-label" class="pill-toggle" data-shortcut="mirror" title="Both sides: a mirror image of this piece on the other side, that moves, turns and changes with it">
-            <input id="piece-mirror" type="checkbox" /> <i class="fa-slab-duo fa-regular fa-arrow-right-arrow-left" aria-hidden="true"></i> Both sides
+          <label id="piece-mirror-label" class="pill-toggle" data-shortcut="mirror" title="Mirror: a mirror image of this piece on the other side, that moves, turns and changes with it (M)">
+            <input id="piece-mirror" type="checkbox" /> <i class="fa-slab-duo fa-regular fa-arrow-right-arrow-left" aria-hidden="true"></i> Mirror
           </label>
           <button id="piece-flat" class="seg-btn" title="Put this piece back down flat on the board" hidden><i class="fa-slab-duo fa-regular fa-arrow-down-to-line" aria-hidden="true"></i> Lay flat</button>
         </div>
@@ -503,8 +496,8 @@
           <button data-gizmo="translate" class="seg-btn" data-shortcut="move" title="Move (W)"><i class="fa-duotone fa-regular fa-arrows-up-down-left-right" aria-hidden="true"></i> Move</button>
           <button data-gizmo="rotate" class="seg-btn" data-shortcut="rotate" title="Rotate (E)"><i class="fa-duotone fa-regular fa-rotate" aria-hidden="true"></i> Rotate</button>
           <button data-gizmo="scale" class="seg-btn" data-shortcut="scale" title="Scale (R)"><i class="fa-slab-duo fa-regular fa-expand" aria-hidden="true"></i> Scale</button>
-          <label id="attach-mirror-label" class="pill-toggle" title="Show a mirrored copy on the other side">
-            <input id="attach-mirror" type="checkbox" /> <i class="fa-slab-duo fa-regular fa-arrow-right-arrow-left" aria-hidden="true"></i> Both sides
+          <label id="attach-mirror-label" class="pill-toggle" title="Mirror: a mirrored copy on the other side">
+            <input id="attach-mirror" type="checkbox" /> <i class="fa-slab-duo fa-regular fa-arrow-right-arrow-left" aria-hidden="true"></i> Mirror
           </label>
           <label id="attach-wrap-label" class="pill-toggle" title="Shrink wrap: press the item onto the body part's surface, following its curve (used instead of the item's own Bend)">
             <input id="attach-wrap" type="checkbox" /> <i class="fa-slab-duo fa-regular fa-map" aria-hidden="true"></i> Wrap
@@ -563,7 +556,6 @@
           <button id="file-save" class="ghost wide" title="Everything: your creatures, your stuff, body plans and the backdrop"><i class="fa-duotone fa-regular fa-floppy-disk" aria-hidden="true"></i> Save (.creature)</button>
           <button id="file-open" class="ghost wide" title="Pick what to bring in from a save"><i class="fa-duotone fa-regular fa-folder-open" aria-hidden="true"></i> Open…</button>
           <button id="export" class="ghost wide" title="Every creature in the scene as a 3D model"><i class="fa-duotone fa-regular fa-download" aria-hidden="true"></i> Download 3D model (.glb)</button>
-          <p class="muted small">A save holds everything. When you open one, you choose what to bring in.</p>
           <input id="file-input" type="file" accept=".creature,.scene,.stuff,.collection,.json" hidden />
         </div>
         <div id="load-pop" class="popover load-pop" hidden>
@@ -586,21 +578,19 @@
             <button data-theme="color" title="Colorful icons, and each mode tints the panels">Color</button>
           </div>
           <label class="check" title="Simpler, easier-to-read lettering everywhere"><input id="set-plain" type="checkbox" /> Plain text</label>
-          <div class="pop-sub">Seamless joins</div>
+          <div class="pop-sub">Seamless joins <i class="fa-duotone fa-regular fa-circle-info tip-i" title="Seamless joins rebuild blended parts as one skin while you're not changing anything."></i></div>
           <div class="seg" id="set-seamless">
             <button data-seamless="on" title="Every creature">On</button>
             <button data-seamless="off" title="No creature: blended parts stay as fast joins">Off</button>
             <button data-seamless="creature" title="Choose for each creature, under the parts list">Per creature</button>
           </div>
           <label class="check" id="set-seamless-lp-row" title="Low-poly parts look their best faceted on their own; a seamless skin re-facets them as one"><input id="set-seamless-lp" type="checkbox" /> Also apply to low-poly material</label>
-          <p class="muted small">Seamless joins rebuild blended parts as one skin while you're not changing anything.</p>
-          <div class="pop-sub">Performance</div>
+          <div class="pop-sub">Performance <i class="fa-duotone fa-regular fa-circle-info tip-i" title="If dragging and posing feel slow or jumpy, try Fast."></i></div>
           <div class="seg" id="set-quality">
             <button data-quality="high">High</button>
             <button data-quality="balanced">Balanced</button>
             <button data-quality="fast">Fast</button>
           </div>
-          <p class="muted small">If dragging and posing feel slow or jumpy, try Fast.</p>
           <button id="set-keys" class="ghost wide" title="See every keyboard shortcut, and change them" data-shortcut="help"><i class="fa-slab-duo fa-regular fa-sliders" aria-hidden="true"></i> Keyboard shortcuts</button>
         </div>
         <div id="keys-pop" class="popover keys-pop" hidden>
@@ -615,8 +605,8 @@
             <button data-view="front" class="seg-btn" title="Draw the part as seen from the front"><i class="fa-duotone fa-regular fa-user" aria-hidden="true"></i> Front</button>
             <button data-view="side" class="seg-btn" title="Draw the part's side profile; it puffs out to both sides (V)"><i class="fa-duotone fa-regular fa-person-walking" aria-hidden="true"></i> Side <kbd>V</kbd></button>
           </span>
-          <label id="sym-label" class="pill-toggle" data-shortcut="mirror" title="Mirror across the part's centre line (M)">
-            <input id="sym" type="checkbox" /> <i class="fa-slab-duo fa-regular fa-arrow-right-arrow-left" aria-hidden="true"></i> Symmetry <kbd>M</kbd>
+          <label id="sym-label" class="pill-toggle" data-shortcut="mirror" title="Mirror: draw one half, and it's copied across the dashed centre line (M)">
+            <input id="sym" type="checkbox" /> <i class="fa-slab-duo fa-regular fa-arrow-right-arrow-left" aria-hidden="true"></i> Mirror <kbd>M</kbd>
           </label>
           <label class="bar-slider" title="Steadies the pen while drawing and smooths the finished outline">
             Smoothing <input id="smooth" type="range" min="0" max="1" step="0.05" />
@@ -633,7 +623,7 @@
             <button data-shape="triangle" class="seg-btn" title="Triangle"><i class="fa-slab-duo fa-regular fa-triangle" aria-hidden="true"></i></button>
             <button data-shape="circle" class="seg-btn" title="Circle"><i class="fa-slab-duo fa-regular fa-circle" aria-hidden="true"></i></button>
           </span>
-          <button id="reset-draw" class="seg-btn" title="Clear the shape and start again"><i class="fa-duotone fa-regular fa-rotate-left" aria-hidden="true"></i> Reset</button>
+          <button id="reset-draw" class="seg-btn" title="Clear the shape and start again"><i class="fa-duotone fa-regular fa-eraser" aria-hidden="true"></i> Clear</button>
           <button id="cancel-draw">Cancel <kbd>Esc</kbd></button>
           <button id="done-draw" class="done" title="Use this shape (Enter)"><i class="fa-slab-duo fa-regular fa-check" aria-hidden="true"></i> Done <kbd>↵</kbd></button>
         </div>

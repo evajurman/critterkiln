@@ -81,6 +81,7 @@ import { applyPalette, GIFEncoder, quantize } from 'gifenc';
 import { ANIM_KINDS, animOffset, animP, canReverse, defaultAnim, leanAt, leanOf, leanQuat, mirrorAnim, reachAt, reachRim, rimLean, orbitOut, STUFF_KINDS, stuffMove, stuffP, type PartAnim, type StuffAnim, type StuffKind } from './animate';
 import { customTabs, gizmos, initLayout, setLayoutIdle, setLayoutTab, setSceneColors, type Tab } from './layout';
 import { installCursorPress } from './cursorPress';
+import { installTooltips } from './tooltip';
 import { captureShortcut, hasCustomShortcuts, is, keyLabel, labelShortcuts, renderShortcutSheet, resetShortcuts, ridesSurface, stopListening } from './shortcuts';
 import { deleteCreation, getCreation, keepStorage, listCreations, markSaved, putCreation, type Creation, type SavedHow } from './library';
 import {
@@ -3264,7 +3265,7 @@ function refreshPieceGizmo() {
   mesh.position.set(-c.x, -c.y, 0);
   mesh.quaternion.identity();
   piecePivot = pivot;
-  // Both sides: the other side follows the gizmo, mirrored, while it's dragged
+  // Mirror: the other side follows the gizmo, mirrored, while it's dragged
   const tw = twinOf(p);
   const twinMesh = tw && bench!.children.find((m) => m.userData.pieceId === tw.id);
   if (twinMesh) {
@@ -3381,7 +3382,7 @@ function layPieceFlat() {
   hint('Back flat on the board', 1500);
 }
 
-// ---- Both sides: a piece and its mirror image, kept in step ----
+// ---- Mirror: a piece and its mirror image, kept in step ----
 
 /** A piece's other side, if it has one. */
 function twinOf(p: Piece): Piece | undefined {
@@ -3411,8 +3412,8 @@ function pieceMiddleX(p: Piece): number {
   return v.x;
 }
 
-/** Both sides on: a mirror image of the picked piece on the other side. Off: the two go their own ways. */
-function setPieceBothSides(on: boolean) {
+/** Mirror on: a mirror image of the picked piece on the other side. Off: the two go their own ways. */
+function setPieceMirror(on: boolean) {
   const p = piece();
   if (!p || drawState || on === !!twinOf(p)) return;
   const wb = workbench();
@@ -3436,7 +3437,7 @@ function setPieceBothSides(on: boolean) {
   renderStuffPanel();
   autosaveThing();
 }
-$<HTMLInputElement>('#piece-mirror').onchange = (e) => setPieceBothSides((e.target as HTMLInputElement).checked);
+$<HTMLInputElement>('#piece-mirror').onchange = (e) => setPieceMirror((e.target as HTMLInputElement).checked);
 
 const MIRROR_X = new THREE.Matrix4().makeScale(-1, 1, 1);
 /** While a piece is dragged: put its other side where the same change, mirrored, takes it. */
@@ -3555,7 +3556,7 @@ function focusOnBoard() {
 function addPieces(shapes: { outline: Vec2[]; holes: Vec2[][] }[]) {
   const wb = workbench();
   const made = shapes.map((sh) => ({ ...newPiece(sh.outline, piece()), holes: sh.holes }));
-  // drawn with symmetry on, a mirrored pair stays one: Both sides
+  // drawn with Mirror on, a mirrored pair stays one: Mirror
   if (symOn()) {
     for (const a of made) {
       const b = made.find((q) => q !== a && !q.twin && !a.twin && mirrorPair(a, q));
@@ -3592,7 +3593,7 @@ function replacePiece(id: string, shapes: { outline: Vec2[]; holes: Vec2[][] }[]
   }
   const old = wb.pieces[i];
   const next: Piece[] = shapes.map((sh, k) => ({ ...structuredClone(old), outline: sh.outline, holes: sh.holes, id: k ? uid() : old.id }));
-  // Both sides: the other side follows a redraw, unless it came out as several pieces
+  // Mirror: the other side follows a redraw, unless it came out as several pieces
   if (next.length > 1 && old.twin) {
     const t = twinOf(old);
     if (t) delete t.twin;
@@ -3691,7 +3692,7 @@ function renderStuffPanel() {
     pick.insertAdjacentHTML('beforeend', p.kind === 'flat' ? fa('rectangle-wide') : p.kind === 'turned' ? faClassic('jar') : fa('cloud'));
     pick.append(` Piece ${i + 1}${p.holes.length ? ` (${p.holes.length} hole${p.holes.length > 1 ? 's' : ''})` : ''}`);
     const t = twinOf(p);
-    if (t) pick.insertAdjacentHTML('beforeend', ` <span class="piece-twin" title="Both sides: mirror image of Piece ${wb.pieces.indexOf(t) + 1}">${fa('arrow-right-arrow-left')}</span>`);
+    if (t) pick.insertAdjacentHTML('beforeend', ` <span class="piece-twin" title="Mirror image of Piece ${wb.pieces.indexOf(t) + 1}">${fa('arrow-right-arrow-left')}</span>`);
     pick.onclick = () => {
       selectedPiece = p.id;
       flashPart();
@@ -3772,6 +3773,7 @@ function renderStuffPanel() {
       b.innerHTML = `<span class="ball ${s.id}"></span>`;
       b.append(s.name);
       b.classList.toggle('active', s.id === p.style);
+      b.title = s.desc;
       b.onclick = () => updatePiece((q) => (q.style = s.id));
       st.append(b);
     }
@@ -3867,11 +3869,11 @@ function copyPiece(id: string) {
 function deletePiece(id: string) {
   if (drawState) exitDraw();
   const wb = workbench();
-  // Both sides go together
+  // a mirrored pair goes together
   const other = wb.pieces.find((p) => p.id === id)?.twin;
   wb.pieces = wb.pieces.filter((p) => p.id !== id && p.id !== other);
   if (selectedPiece === id || selectedPiece === other) selectedPiece = '';
-  if (other) hint('Deleted both sides (turn off Both sides to delete just one)', 2400);
+  if (other) hint('Deleted both sides (turn off Mirror to delete just one)', 2400);
   syncWorkbench();
   commit();
   renderStuffPanel();
@@ -4266,38 +4268,118 @@ function renderCreatureBar() {
   });
 }
 
-/** One row per part of creature `i` (a pair is one row): its color, name and motion; clicking one picks it. */
+/**
+ * One row per part of creature `i` (a pair is one row), each under the part it hangs off and
+ * indented a step deeper: its color, name and motion; clicking one picks it, and its icons copy
+ * or delete it (with everything on it).
+ */
 function partRows(i: number): HTMLElement {
   const s = world.creatures[i];
   const c = creatures[i];
   const list = document.createElement('div');
   list.className = 'part-rows';
   const picked = i === world.active && !idle ? creature.bones.get(selected)?.src : undefined;
+  // a pair is listed by its left twin, so a part on the right twin hangs off that row too
+  const row = (b: BoneRT) => (b.def.mirrorOf ? (c.bones.get(b.def.mirrorOf) ?? b) : b);
+  const kids = new Map<BoneRT | null, BoneRT[]>();
   for (const b of c.list.filter((o) => !o.def.mirrorOf)) {
-    const p = s.parts[b.src];
-    if (!p) continue;
-    const twin = c.list.find((o) => o.def.mirrorOf === b.def.id);
-    const anim = s.anims?.[b.def.id] ?? (twin && s.anims?.[twin.def.id]);
-    const kind = anim && ANIM_KINDS.find((k) => k.kind === anim.kind);
-    const btn = document.createElement('button');
-    btn.className = 'part-row' + (b.src === picked ? ' active' : '');
-    const name = b.def.sideSign !== 0 ? b.def.name.replace(/ \((L|R)\)$/, '') : b.def.name;
-    btn.innerHTML =
-      `<i style="background:${p.color}"></i><span class="part-name">${name}${twin ? ' ×2' : ''}</span>` +
-      (p.outline ? `<span class="part-mark" title="Drawn">${fa('check')}</span>` : '') +
-      (kind ? `<span class="part-mark" title="Moves: ${kind.name}"><i class="fa-duotone fa-regular fa-${kind.icon}" aria-hidden="true"></i></span>` : '');
-    btn.title = kind ? `${name}: moves (${kind.name})` : name;
-    btn.onclick = () => {
-      if (i !== world.active || idle) {
-        idle = false;
-        activate(i);
-      }
-      selectPart(b.def.id);
-      save();
-    };
-    list.append(btn);
+    const up = b.parent ? row(b.parent) : null;
+    kids.set(up, [...(kids.get(up) ?? []), b]);
   }
+  const pickIt = (id: string) => {
+    if (i !== world.active || idle) {
+      idle = false;
+      activate(i);
+    }
+    selectPart(id);
+  };
+  const add = (b: BoneRT, depth: number) => {
+    const p = s.parts[b.src];
+    if (p) list.append(partRow(i, b, p, depth, b.src === picked, pickIt));
+    for (const k of kids.get(b) ?? []) add(k, depth + 1);
+  };
+  for (const b of kids.get(null) ?? []) add(b, 0);
   return list;
+}
+
+function partRow(i: number, b: BoneRT, p: PartState, depth: number, active: boolean, pickIt: (id: string) => void): HTMLElement {
+  const s = world.creatures[i];
+  const c = creatures[i];
+  const twin = c.list.find((o) => o.def.mirrorOf === b.def.id);
+  const anim = s.anims?.[b.def.id] ?? (twin && s.anims?.[twin.def.id]);
+  const kind = anim && ANIM_KINDS.find((k) => k.kind === anim.kind);
+  const name = b.def.sideSign !== 0 ? b.def.name.replace(/ \((L|R)\)$/, '') : b.def.name;
+  const row = document.createElement('div');
+  row.className = 'part-row' + (active ? ' active' : '');
+  row.style.setProperty('--depth', String(depth));
+  row.dataset.bone = b.def.id;
+  const btn = document.createElement('button');
+  btn.className = 'part-pick';
+  btn.innerHTML =
+    `<i style="background:${p.color}"></i><span class="part-name">${name}${twin ? ' ×2' : ''}</span>` +
+    (p.outline ? `<span class="part-mark" title="Drawn">${fa('check')}</span>` : '') +
+    (kind ? `<span class="part-mark" title="Moves: ${kind.name}"><i class="fa-duotone fa-regular fa-${kind.icon}" aria-hidden="true"></i></span>` : '');
+  btn.title = (kind ? `${name}: moves (${kind.name})` : name) + ' · double-click to rename';
+  btn.onclick = () => {
+    // picking re-draws the list, so a double click lands on a new row: tell it by the time between
+    const again = lastPartClick.id === b.def.id && performance.now() - lastPartClick.at < 450;
+    lastPartClick = { id: b.def.id, at: again ? 0 : performance.now() };
+    pickIt(b.def.id);
+    save();
+    if (again) renamePartRow(b.def.id);
+  };
+  // the first part holds everything else: it can't be copied or removed
+  const isRoot = !b.parent;
+  const dup = document.createElement('button');
+  dup.className = 'piece-icon';
+  dup.innerHTML = fa('copy');
+  dup.title = isRoot ? "The first part holds everything else, so it can't be copied" : `Copy ${name} and everything attached to it`;
+  dup.disabled = isRoot;
+  dup.onclick = () => {
+    pickIt(b.def.id);
+    rigEdit((rig) => duplicateLimb(rig, selected), true);
+  };
+  const del = document.createElement('button');
+  del.className = 'piece-icon';
+  del.innerHTML = fa('trash');
+  del.title = isRoot ? "The first part holds everything else, so it can't be removed" : `Remove ${name} and everything attached to it`;
+  del.disabled = isRoot;
+  del.onclick = () => {
+    pickIt(b.def.id);
+    removePart();
+  };
+  row.append(btn, dup, del);
+  return row;
+}
+
+let lastPartClick = { id: '', at: 0 };
+
+/** Turns the picked part's row (in the creature bar) into a name box: Enter or clicking away keeps it, Escape doesn't. */
+function renamePartRow(id: string) {
+  const row = [...document.querySelectorAll<HTMLElement>('#creature-rows .part-row')].find((r) => r.dataset.bone === id);
+  const label = row?.querySelector('.part-name');
+  if (!row || !label) return;
+  const input = document.createElement('input');
+  input.className = 'text chip-name';
+  input.maxLength = 60;
+  input.value = partName();
+  label.replaceWith(input);
+  input.onclick = (e) => e.stopPropagation(); // clicking in the box doesn't pick the part again
+  input.focus();
+  input.select();
+  let done = false;
+  const finish = (keep: boolean) => {
+    if (done) return;
+    done = true;
+    if (keep && input.value.trim() && input.value.trim() !== partName()) setPartName(input.value, true);
+    else renderCreatureBar();
+  };
+  input.onkeydown = (e) => {
+    e.stopPropagation(); // typing a name isn't a shortcut (Backspace would delete the part)
+    if (e.key === 'Enter') finish(true);
+    else if (e.key === 'Escape') finish(false);
+  };
+  input.onblur = () => finish(true);
 }
 
 /** Turns the active creature's row into a name box: Enter or clicking away keeps it, Escape doesn't. */
@@ -5895,7 +5977,8 @@ function renderStyles() {
   el.innerHTML = '';
   for (const s of STYLES) {
     const btn = document.createElement('button');
-    btn.innerHTML = `<span class="ball ${s.id}"></span><span><b>${s.name}</b><small>${s.desc}</small></span>`;
+    btn.innerHTML = `<span class="ball ${s.id}"></span><b>${s.name}</b>`;
+    btn.title = s.desc;
     btn.classList.toggle('active', s.id === current);
     btn.onclick = () => setStyle(s.id);
     el.append(btn);
@@ -5941,12 +6024,9 @@ function renderThingMaterial(thing: Thing, styles: StyleId[], el: HTMLElement, w
   row.append(box, ' Inherits material');
   el.append(row);
   const styleName = STYLES.find((s) => s.id === wearerStyle)?.name ?? wearerStyle;
-  if (thing.inherit) {
-    const note = document.createElement('p');
-    note.className = 'muted small inherit-note';
-    note.textContent = `Made of ${styleName}, like the ${mode === 'stuff' ? 'creature' : 'part it’s on'}. Change it in Build › Material.`;
-    el.append(note);
-  }
+  row.title = thing.inherit
+    ? `Made of ${styleName}, like the ${mode === 'stuff' ? 'creature' : 'part it’s on'}. Change it in Look › Material.`
+    : `Off: its pieces keep their own materials. On: it’s made of whatever the ${mode === 'stuff' ? 'creature' : 'part it’s on'} is made of`;
   const scaleRow = document.createElement('label');
   scaleRow.className = 'check';
   scaleRow.title = 'On: fuzz keeps the same real length when the item is scaled. Off: it grows and shrinks with the item.';
@@ -6602,8 +6682,6 @@ function renderRigPanel() {
   title.disabled = !b;
   const isRoot = !b?.parent;
   const paired = !!b && b.def.sideSign !== 0;
-  $<HTMLButtonElement>('#rig-dup').disabled = !b || isRoot;
-  $<HTMLButtonElement>('#rig-del').disabled = !b || isRoot;
   // beside Mirror, on a mirrored pair (a one-sided part gets Mirror part there instead)
   const unlink = $<HTMLButtonElement>('#rig-unlink');
   unlink.hidden = !paired || idle;
@@ -6614,7 +6692,7 @@ function renderRigPanel() {
   const mirrorBtn = $<HTMLButtonElement>('#rig-mirror');
   mirrorBtn.hidden = !lone;
   if (lone) {
-    iconLabel(mirrorBtn, faClassic(lone.other ? 'link' : 'clone'), lone.other ? 'Re-link' : 'Mirror part');
+    iconLabel(mirrorBtn, faClassic(lone.other ? 'link' : 'clone'), lone.other ? 'Relink pair' : 'Mirror part');
     mirrorBtn.title = lone.other
       ? 'Join this side back up with the other: the other side becomes its mirror image again'
       : 'Copy this part onto the other side, as a mirrored pair';
@@ -6638,7 +6716,7 @@ function renderRigPanel() {
   setP.hidden = rigPrefs.autoParent;
   setP.disabled = !b || isRoot;
   if (pickingParent && (!b || isRoot)) setPickingParent(false);
-  $('#rig-pair-note').textContent = paired ? 'Mirrored pair: both sides move together.' : '';
+  title.title = paired ? 'Rename this pair: both sides share one name' : 'Rename this part';
   $<HTMLInputElement>('#rig-sym').checked = rigLocked();
   $<HTMLInputElement>('#keep-floor').checked = state.keepFloor !== false;
   $('#mirror-pill').classList.toggle('on', rigLocked());
@@ -6876,9 +6954,18 @@ $<HTMLInputElement>('#rig-w1').oninput = (e) => editBone((d) => (d.widthEnd = ro
 for (const id of ['#rig-w0', '#rig-w1']) $<HTMLInputElement>(id).onchange = () => commitBoneEdit();
 // ---- naming a bone ----
 function renameBone(commitIt: boolean) {
+  setPartName($<HTMLInputElement>('#rig-title').value, commitIt);
+}
+/** The picked part's name (a pair shares one). */
+function partName() {
+  const b = creature.bones.get(selected);
+  return (b && state.rig.bones.find((d) => d.id === b.def.baseId)?.name) ?? '';
+}
+/** Names the picked part (both of a pair); a blank name is ignored. */
+function setPartName(raw: string, commitIt: boolean) {
   const b = creature.bones.get(selected);
   const def = b && state.rig.bones.find((d) => d.id === b.def.baseId);
-  const name = $<HTMLInputElement>('#rig-title').value.trim();
+  const name = raw.trim();
   if (!def || !name) return;
   def.name = name;
   // re-seat so the bones pick up the new name (it's shown on every part list)
@@ -6902,7 +6989,6 @@ $('#rig-detach').onclick = () => {
   rigEdit((rig) => (loose ? reattachBone : detachBone)(rig, selected), false);
   hint(loose ? 'Back on the tip' : 'Detached: drag the purple grip at its base to move it', 2200);
 };
-$('#rig-dup').onclick = () => rigEdit((rig) => duplicateLimb(rig, selected), true);
 $('#rig-unlink').onclick = () => rigEdit((rig) => unlinkPair(rig, selected), true);
 /**
  * Give a one-sided part a mirror image on the other side, as a linked pair. Half
@@ -6956,7 +7042,6 @@ function mirrorPart() {
 }
 $('#rig-mirror').onclick = () => mirrorPart();
 
-$('#rig-del').onclick = () => removePart();
 /** Delete the picked part and everything on it (the creature's root part stays). */
 function removePart() {
   if (!creature.bones.get(selected)?.parent) {
@@ -7299,6 +7384,7 @@ requestAnimationFrame(() => requestAnimationFrame(() => $('.modes').classList.ad
 document.fonts.ready.then(fitTopbar); // the icon font and the text font change the buttons' widths
 installScrollbars();
 installCursorPress();
+installTooltips();
 initLayout({
   onGizmos: updateSkeletonVisibility,
   // a tab made, renamed or deleted: the bar's widths changed (and maybe the open tab's color)
@@ -7465,6 +7551,7 @@ function renderFloorUI() {
     b.innerHTML = `<span class="ball ${s.id}"></span>`;
     b.append(s.name);
     b.classList.toggle('active', s.id === floorPrefs.style);
+    b.title = s.desc;
     b.onclick = () => updateFloor(() => (floorPrefs.style = s.id));
     styles.append(b);
   }
@@ -7673,7 +7760,10 @@ function renderMerge() {
   // rest also shape the quick joins, so they're there even with seamless joins off
   const perCreature = settings.seamless === 'creature';
   const shown = perCreature && state.seamless === false ? 'none' : blendWithOf(state);
-  $('#seamless-note').textContent = settings.seamless === 'off' ? '(off in Settings: picks what the quick joins blend)' : '(smooths blended parts when idle)';
+  $('#seamless-note').textContent = settings.seamless === 'off' ? '(off in Settings)' : '';
+  $('#seamless-label').title = settings.seamless === 'off'
+    ? 'Off in Settings, so this just picks which parts the quick joins blend'
+    : 'Smooths blended parts into one skin while you’re not changing anything';
   document.querySelectorAll<HTMLButtonElement>('#blend-with button').forEach((b) => {
     b.hidden = b.dataset.with === 'none' && !perCreature;
     b.classList.toggle('active', b.dataset.with === shown);
@@ -7822,7 +7912,7 @@ $('#reset-pose').onclick = () => {
   creature.resetPose();
   settleOnFloor();
   commit();
-  hint('Standing up straight', 1400);
+  hint('Pose reset', 1400);
 };
 $('#drop-floor').onclick = () => dropToFloor();
 $<HTMLInputElement>('#keep-floor').onchange = (e) => {
@@ -8043,7 +8133,7 @@ window.addEventListener('keydown', (e) => {
   else if (is(e, 'draw') && !idle) enterDraw();
   else if (is(e, 'stuff')) setMode('stuff');
   else if (is(e, 'mirror') && mode === 'stuff') {
-    if (piece()) setPieceBothSides(!piece()!.twin);
+    if (piece()) setPieceMirror(!piece()!.twin);
   } else if (is(e, 'mirror')) setMirror(!rigLock);
   else if (is(e, 'delete') && !drawState) {
     // picked stuff goes first: its part is picked too, and mustn't go with it

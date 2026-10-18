@@ -45,7 +45,7 @@ const duo = (n: string) => `fa-duotone fa-regular fa-${n}`;
 
 const TOOLS: Record<string, ToolDef> = {
   plan: { name: 'Body plans', icon: duo('bone'), kind: 'wide' },
-  blend: { name: 'Blend parts', icon: duo('sliders'), kind: 'wide' },
+  blend: { name: 'Blend shape', icon: duo('sliders'), kind: 'wide' },
   opacity: { name: 'Opacity', icon: duo('sliders'), kind: 'wide' },
   seamless: { name: 'Seamless joins', icon: slab('wand-magic-sparkles'), kind: 'wide' },
   worn: { name: 'Stuff on this creature', icon: slab('paperclip'), kind: 'wide' },
@@ -60,9 +60,7 @@ const TOOLS: Record<string, ToolDef> = {
   split: { name: 'Split', icon: slab('scissors'), kind: 'button' },
   detach: { name: 'Detach / Reattach', icon: duo('link-slash'), kind: 'button' },
   parent: { name: 'Parent part', icon: duo('sitemap'), kind: 'wide' },
-  dup: { name: 'Copy part', icon: slab('copy'), kind: 'button' },
-  del: { name: 'Delete part', icon: slab('trash'), kind: 'button' },
-  stand: { name: 'Stand up straight', icon: duo('person'), kind: 'button' },
+  stand: { name: 'Reset pose', icon: duo('person'), kind: 'button' },
   floor: { name: 'Floor', icon: slab('arrow-down-to-line'), kind: 'button' },
   'keep-floor': { name: 'Keep feet on the floor', icon: duo('square-check'), kind: 'wide' },
   swatches: { name: 'Colors', icon: slab('palette'), kind: 'wide' },
@@ -150,7 +148,7 @@ const SECTIONS: Omit<Sec, 'place'>[] = [
   { id: 'plan', name: 'Body plan', icon: 'hand', color: '#c98f5a', tools: ['plan'] },
   { id: 'parts', name: 'Parts', icon: 'square', color: '#f07a32', tools: ['blend', 'seamless', 'worn'] },
   { id: 'part', name: 'This part', icon: 'pencil', color: '#e5823a', tools: ['name', 'draw', 'thickness', 'width0', 'width1', 'reset-shape'] },
-  { id: 'grow', name: 'Grow', icon: 'scissors', color: '#d0486a', tools: ['bone', 'extend', 'split', 'detach', 'dup', 'del', 'parent'] },
+  { id: 'grow', name: 'Grow', icon: 'scissors', color: '#d0486a', tools: ['bone', 'extend', 'split', 'detach', 'parent'] },
   { id: 'pose', name: 'Pose', icon: 'face-smile', color: '#e9a51f', tools: ['stand', 'floor', 'keep-floor'] },
   { id: 'color', name: 'Color', icon: 'palette', color: '#a66ad6', tools: ['custom-color', 'paint-all', 'swatches', 'scene-colors', 'glow', 'color-blend', 'opacity'] },
   { id: 'material', name: 'Material', icon: 'cloud', color: '#5fa0d8', tools: ['style-part', 'materials', 'material-params'] },
