@@ -32,6 +32,7 @@ import {
   type PartShape,
   type PartState,
   type Placement,
+  type Planted,
   type SeamlessMode,
 } from './creature';
 import { bump, checkScene, collect, reach, renderTrophies, setTrophyHandlers, unlock } from './achievements';
@@ -1034,12 +1035,13 @@ const touchScreen = () => matchMedia('(pointer: coarse)').matches;
 // the last tap on the 3D view, to spot a double tap
 let lastTap = { t: 0, x: 0, y: 0 };
 let lastDoubleTap = 0;
-type DragKind = 'root' | 'start' | 'end' | 'bend' | 'roll';
+type DragKind = 'body' | 'start' | 'end' | 'bend' | 'roll';
 let drag: {
   id: string;
   kind: DragKind;
   plane: THREE.Plane;
-  offset: THREE.Vector3;
+  /** the body's base grip: where the creature was, and the feet it keeps planted as the body moves */
+  body?: { from: THREE.Vector3; feet: Planted[] };
   startHit: THREE.Vector3;
   /** rig mode: skeleton at the start of the drag, so each move re-applies from scratch */
   rigBase?: string;
@@ -1304,16 +1306,6 @@ function resetJoint(id: string) {
   hint('Joint straightened', 1400);
 }
 
-/** Double-clicking the root grip: the creature back where it was placed, feet on the floor. */
-function resetRoot() {
-  creature.group.position.set(0, 0, 0);
-  creature.capturePose();
-  setKeepFloor(true);
-  settleOnFloor();
-  commit();
-  hint('Back in place, feet on the floor', 1600);
-}
-
 /** Where a point in a bone's own space lands on screen, in client pixels. */
 function toScreen(obj: THREE.Object3D, local: THREE.Vector3): THREE.Vector2 {
   const r = canvas.getBoundingClientRect();
@@ -1371,16 +1363,15 @@ canvas.addEventListener('pointerdown', (e) => {
   canvas.setPointerCapture(e.pointerId);
   const pos = h.getWorldPosition(new THREE.Vector3());
   const id = h.userData.handle as string;
-  const normal =
-    id === 'root' ? new THREE.Vector3(0, 1, 0) : camera.getWorldDirection(new THREE.Vector3()).negate();
-  const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, pos);
-  // the root offset lives inside the creature's placement, so work in its local space
-  const offset = id === 'root' ? creature.group.position.clone().sub(creature.root.worldToLocal(pos.clone())) : new THREE.Vector3();
-  const kind: DragKind = id === 'root' ? 'root' : (h.userData.kind as DragKind);
-  // bending is posing; sliding, curving and resizing reshape the skeleton itself
-  const reshape = kind !== 'root' && kind !== 'end';
-  let toDef: THREE.Matrix3 | undefined;
+  const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(camera.getWorldDirection(new THREE.Vector3()).negate(), pos);
   const b = creature.bones.get(id);
+  // the body's base grip poses: the body moves, the legs bend to keep their feet where they are
+  const feet = b && !b.parent && h.userData.kind === 'start' ? creature.plantedFeet(b) : [];
+  const body = feet.length ? { from: creature.group.position.clone(), feet } : undefined;
+  const kind = body ? 'body' : (h.userData.kind as DragKind);
+  // bending is posing; sliding, curving and resizing reshape the skeleton itself
+  const reshape = kind !== 'end' && kind !== 'body';
+  let toDef: THREE.Matrix3 | undefined;
   if (reshape && b) {
     b.pivot.updateMatrixWorld(true);
     // where the bone would be in the scene if it weren't bent itself
@@ -1402,9 +1393,8 @@ canvas.addEventListener('pointerdown', (e) => {
     creature.rolling = true;
     roll = { start: new THREE.Vector2(e.clientX, e.clientY), dir, pxPerRad: visible ? pxPerRad : 120, rest, pose: structuredClone(state.pose), eyes: structuredClone(state.eyes) };
   }
-  if (kind === 'root') gapBefore = floorGap();
   const stretch = kind === 'end' ? { base: JSON.stringify(state.rig), k: 1, kY: new Map<string, number>() } : undefined;
-  drag = { id, kind, plane, offset, stretch, startHit: pos, moved: false, rigBase: reshape ? JSON.stringify(state.rig) : undefined, toDef, roll, node: h.userData.node as number | undefined, gap: h.userData.gap === undefined ? undefined : { at: h.userData.gap as number, pos: h.position.clone() } };
+  drag = { id, kind, plane, body, stretch, startHit: pos, moved: false, rigBase: reshape ? JSON.stringify(state.rig) : undefined, toDef, roll, node: h.userData.node as number | undefined, gap: h.userData.gap === undefined ? undefined : { at: h.userData.gap as number, pos: h.position.clone() } };
 });
 
 canvas.addEventListener('pointermove', (e) => {
@@ -1418,7 +1408,13 @@ canvas.addEventListener('pointermove', (e) => {
     const hit = raycaster.ray.intersectPlane(drag.plane, new THREE.Vector3());
     if (!hit) return;
     drag.moved = drag.moved || pointer.moved;
-    if (drag.rigBase && drag.kind === 'bend') {
+    if (drag.body) {
+      if (!drag.moved) return;
+      // the move in the creature's own space (it may be turned or resized)
+      const d = creature.root.worldToLocal(hit.clone()).sub(creature.root.worldToLocal(drag.startHit.clone()));
+      creature.moveBodyOver(drag.body.feet, drag.body.from, d);
+      hintOnce('Moving the body: its feet stay planted', 2200);
+    } else if (drag.rigBase && drag.kind === 'bend') {
       // a green diamond: its bend point goes where the pointer is
       if (!drag.moved) return;
       const b = creature.bones.get(drag.id);
@@ -1479,9 +1475,6 @@ canvas.addEventListener('pointermove', (e) => {
       state.rig = JSON.parse(drag.rigBase) as RigState;
       moveJoint(state.rig, drag.id, 'start', d.toArray() as V3, rigLocked());
       creature.relayout(state.rig);
-    } else if (drag.id === 'root') {
-      creature.group.position.copy(creature.root.worldToLocal(hit).add(drag.offset));
-      creature.group.position.y = Math.max(creature.group.position.y, -1);
     } else if (drag.kind === 'end') {
       drag.last = new THREE.Vector2(e.clientX, e.clientY);
       dragTipTo(drag.id, hit);
@@ -1575,7 +1568,7 @@ $('#viewport').addEventListener(
     const kind = h?.userData.kind;
     const step = e.deltaY < 0 ? 1 : -1;
     if (kind === 'bend' && h!.userData.used) roundBend(h!.userData.handle as string, h!.userData.node as number | undefined, step);
-    else if ((kind === 'start' || kind === 'end') && h!.userData.handle !== 'root') widenJoint(h!.userData.handle as string, kind, step);
+    else if ((kind === 'start' || kind === 'end')) widenJoint(h!.userData.handle as string, kind, step);
     else return;
     e.preventDefault();
     e.stopPropagation();
@@ -1650,12 +1643,8 @@ canvas.addEventListener('pointerup', (e) => {
     }
     // a double tap on the grip resets it (see onDoubleClick)
     if (!d.moved && doubleTapped(e)) return;
-    if (d.moved) {
-      // lifting the whole creature up means it's meant to float
-      if (d.kind === 'root') {
-        if (lifted()) setKeepFloor(false, true);
-      } else settleOnFloor();
-    }
+    // (the body stays where its grip was let go, even off the floor)
+    if (d.moved && d.kind !== 'body') settleOnFloor();
     commit();
     return;
   }
@@ -1726,10 +1715,6 @@ function onDoubleClick(x: number, y: number) {
     }
     if (h?.userData.kind === 'bend') {
       resetBend(h.userData.handle as string, h.userData.node as number | undefined, !!h.userData.used);
-      return;
-    }
-    if (h?.userData.handle === 'root') {
-      resetRoot();
       return;
     }
     if (h?.userData.kind === 'end') {

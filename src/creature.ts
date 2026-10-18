@@ -229,6 +229,12 @@ export interface Placement {
 }
 
 /** A settled seamless skin and what it was built from. */
+/** a foot the body stands on (see plantedFeet): the parts from it up to the body, and where it rests */
+export interface Planted {
+  chain: BoneRT[];
+  at: THREE.Vector3;
+}
+
 interface SkinEntry {
   mesh: THREE.Mesh;
   members: BoneRT[];
@@ -340,7 +346,6 @@ function cachedGeometry(key: string, make: () => THREE.BufferGeometry) {
 
 const tipMat = new THREE.MeshBasicMaterial({ color: 0xff6b4a, depthTest: false, transparent: true });
 const tipHoverMat = new THREE.MeshBasicMaterial({ color: 0xffd23f, depthTest: false, transparent: true });
-const rootMat = new THREE.MeshBasicMaterial({ color: 0x3b82f6, depthTest: false, transparent: true });
 const lineMat = new THREE.LineBasicMaterial({ color: 0x3a3340, depthTest: false, transparent: true, opacity: 0.55 });
 const outlineLineMat = new THREE.LineBasicMaterial({ color: 0xff6b4a, depthTest: false, transparent: true, opacity: 0.9 });
 const planeMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide });
@@ -353,7 +358,7 @@ const bendDotMat = new THREE.LineDashedMaterial({ color: 0x16a34a, depthTest: fa
 // the roll ring round the selected part, and the axis it turns the part about
 const rollMat = new THREE.MeshBasicMaterial({ color: 0x14b8a6, depthTest: false, transparent: true });
 const rollLineMat = new THREE.LineDashedMaterial({ color: 0x14b8a6, depthTest: false, transparent: true, opacity: 0.8, dashSize: 0.035, gapSize: 0.025 });
-for (const m of [tipMat, tipHoverMat, rootMat, lineMat, outlineLineMat, planeMat, startMat, bendMat, bendGhostMat, bendDotMat, rollMat, rollLineMat]) m.userData.shared = true;
+for (const m of [tipMat, tipHoverMat, lineMat, outlineLineMat, planeMat, startMat, bendMat, bendGhostMat, bendDotMat, rollMat, rollLineMat]) m.userData.shared = true;
 const tipGeo = new THREE.SphereGeometry(0.032, 16, 12);
 const startGeo = new THREE.BoxGeometry(0.055, 0.055, 0.055);
 const bendGeo = new THREE.OctahedronGeometry(0.042);
@@ -748,7 +753,6 @@ function restFrame(def: ExpandedBone) {
   return { length, world: new THREE.Matrix4().makeBasis(side, dir, normal).setPosition(start) };
 }
 
-const rootGeo = new THREE.BoxGeometry(0.07, 0.07, 0.07);
 
 /** Free skins for good: their materials, dressing and geometry. */
 function disposeSkins(skins: SkinEntry[]) {
@@ -770,7 +774,6 @@ export class Creature {
   rig: ExpandedRig;
   readonly bones = new Map<string, BoneRT>();
   readonly list: BoneRT[] = [];
-  readonly rootHandle: THREE.Mesh;
   /** one group of eyes per part that has some */
   private eyes: THREE.Group[] = [];
   private eyesKey = '';
@@ -824,11 +827,6 @@ export class Creature {
     this.rig = expandRig(state.rig);
     this.ensureParts();
     this.buildSkeleton();
-    this.rootHandle = new THREE.Mesh(rootGeo, rootMat);
-    this.rootHandle.renderOrder = 1000;
-    this.rootHandle.userData.handle = 'root';
-    this.list[0].pivot.parent!.add(this.rootHandle);
-    this.rootHandle.position.copy(this.list[0].pivot.position);
     // (its hoop is sized to the part in updateRollRing)
     this.rollRing = new THREE.Mesh(new THREE.BufferGeometry(), rollMat);
     this.rollRing.renderOrder = 1000;
@@ -1004,7 +1002,6 @@ export class Creature {
       b.line.geometry.dispose();
       b.line.geometry = new THREE.BufferGeometry().setFromPoints(bonePoints(bd));
     }
-    this.rootHandle.position.copy(this.list[0].pivot.position);
     this.updateRestFrames();
     // reshaping keeps the pose: bones stay bent the way they were
     this.applyPose();
@@ -2791,11 +2788,10 @@ export class Creature {
       b.tip.visible = show;
       b.line.visible = show;
       // the slide and bend grips only on the selected bone (the twin follows by symmetry)
-      b.startHandle.visible = v && b === sel && b.attach;
+      // (on the body it moves the body over the feet it stands on, so only when it stands on any)
+      b.startHandle.visible = v && b === sel && b.attach && (!!b.parent || this.plantedFeet(b).length > 0);
       this.showBendGrips(b, v && b === sel);
     }
-    // the move-everything square belongs to the first part
-    this.rootHandle.visible = v && (!only || !sel!.parent);
     this.updateRollRing();
   }
 
@@ -2891,13 +2887,13 @@ export class Creature {
     }
     this.rollRing.material = this.rollRing === obj ? tipHoverMat : rollMat;
     // whatever's under the pointer swells a little, so it's clear what you'll grab (the ring just lights up)
-    for (const h of [this.rootHandle, this.rollRing, ...this.list.flatMap((b) => [b.tip, b.startHandle, ...b.bendHandles])]) h.scale.setScalar(h === obj && h.userData.ring === undefined ? 1.45 : 1);
+    for (const h of [this.rollRing, ...this.list.flatMap((b) => [b.tip, b.startHandle, ...b.bendHandles])]) h.scale.setScalar(h === obj && h.userData.ring === undefined ? 1.45 : 1);
     this.rollAxis.visible = this.rolling || obj?.userData.kind === 'roll';
   }
 
   handles(): THREE.Object3D[] {
     // (the roll ring only while it's shown)
-    return [...(this.rollGizmo.visible ? [this.rollRing] : []), ...this.list.flatMap((b) => b.bendHandles), ...this.list.map((b) => b.startHandle), this.rootHandle, ...this.list.map((b) => b.tip)];
+    return [...(this.rollGizmo.visible ? [this.rollRing] : []), ...this.list.flatMap((b) => b.bendHandles), ...this.list.map((b) => b.startHandle), ...this.list.map((b) => b.tip)];
   }
 
   meshes(): THREE.Object3D[] {
@@ -3019,6 +3015,53 @@ export class Creature {
       break;
     }
     return chain;
+  }
+
+  /**
+   * The limbs a body stands on: each with the parts from its foot (its lowest
+   * tip, as posed) up to the body, and where that foot is now. Moving the body
+   * and then reaching them back (reachFeet) keeps the feet planted.
+   */
+  plantedFeet(body: BoneRT): Planted[] {
+    const at = (o: THREE.Object3D) => o.getWorldPosition(new THREE.Vector3());
+    const hangsFrom = (o: BoneRT, leg: BoneRT) => {
+      for (let p: BoneRT | null = o; p; p = p.parent) if (p === leg) return true;
+      return false;
+    };
+    const feet = this.list
+      .filter((c) => c.parent === body && this.reachesFloor(c))
+      .map((leg) => {
+        const foot = this.list.filter((o) => hangsFrom(o, leg)).reduce((a, o) => (at(o.tip).y < at(a.tip).y ? o : a));
+        const chain: BoneRT[] = [];
+        for (let p: BoneRT | null = foot; p && p !== body; p = p.parent) chain.push(p);
+        return { chain, at: at(foot.tip) };
+      });
+    // a leg posed up off the floor (kicking, stepping) isn't stood on: it rides along
+    const low = Math.min(...feet.map((f) => f.at.y));
+    const near = low + (at(body.pivot).y - low) * 0.15;
+    return feet.filter((f) => f.at.y <= near);
+  }
+
+  /** The body's base grip: the creature moved by `d` (in its own space) from `from`, and the legs bent back to their feet. */
+  moveBodyOver(feet: Planted[], from: THREE.Vector3, d: THREE.Vector3) {
+    this.group.position.copy(from).add(d);
+    this.group.updateMatrixWorld(true);
+    this.reachFeet(feet);
+  }
+
+  /** Bend each limb (CCD, as dragTip) so its foot is back where it was planted. */
+  reachFeet(feet: Planted[]) {
+    this.mergeDirty = true;
+    const tipPos = new THREE.Vector3();
+    for (const { chain, at } of feet) {
+      const foot = chain[0];
+      for (let it = 0; it < Math.max(12, chain.length * 4); it++) {
+        for (const j of chain) {
+          foot.tip.getWorldPosition(tipPos);
+          this.aimBone(j, tipPos, at);
+        }
+      }
+    }
   }
 
   /** A limb that (as drawn) reaches down to the floor, itself or through the parts hanging off it. */
