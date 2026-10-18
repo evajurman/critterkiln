@@ -11,8 +11,8 @@ export const STYLES: { id: StyleId; name: string; desc: string }[] = [
   { id: 'glass', name: 'Glass', desc: 'Clear or frosted, refracts' },
   { id: 'patchwork', name: 'Patchwork', desc: 'Stitched fabric patches' },
   { id: 'knit', name: 'Knitted', desc: 'Cosy knitted yarn' },
-  { id: 'metal', name: 'Metal', desc: 'Polished, hammered or rusty' },
-  { id: 'stone', name: 'Stone', desc: 'Carved, speckled, cracked' },
+  { id: 'metal', name: 'Metal', desc: 'Polished, hammered or brushed' },
+  { id: 'stone', name: 'Stone', desc: 'Carved, speckled, pitted' },
 ];
 
 /** Materials whose textures are laid out on the creature's rest pose. */
@@ -44,10 +44,6 @@ export const STYLE_PARAMS: Record<StyleId, StyleParam[]> = {
     // (the key is from when this was an amount, so saved creatures keep their look)
     { key: 'hairs', label: 'Stray hair length', min: 0, max: 3, step: 0.05, value: 0.3 },
     { key: 'glow', label: 'Edge glow', min: 0, max: 1.5, step: 0.01, value: 0.76 },
-    // a second wool color in patches (tortoiseshell, calico...), made from the part's own color
-    { key: 'patches', label: 'Patches', min: 0, max: 1, step: 0.01, value: 0 },
-    { key: 'patchHue', label: 'Patch hue', min: -0.5, max: 0.5, step: 0.01, value: 0 },
-    { key: 'patchShade', label: 'Patch shade', min: -1, max: 1, step: 0.01, value: -0.75 },
   ],
   lowpoly: [
     { key: 'facets', label: 'Facet size', min: 0.4, max: 2.5, step: 0.05, value: 1, geometry: true },
@@ -75,20 +71,15 @@ export const STYLE_PARAMS: Record<StyleId, StyleParam[]> = {
   knit: [
     { key: 'size', label: 'Stitch size', min: 0.3, max: 4, step: 0.05, value: 1 },
     { key: 'puff', label: 'Yarn depth', min: 0, max: 3, step: 0.05, value: 1 },
-    { key: 'stripes', label: 'Stripes', min: 0, max: 1, step: 0.01, value: 0 },
     { key: 'fluff', label: 'Fluffiness', min: 0, max: 1.5, step: 0.01, value: 0.45 },
   ],
   metal: [
     { key: 'polish', label: 'Polish', min: 0, max: 1, step: 0.01, value: 0.75 },
     { key: 'hammer', label: 'Hammered', min: 0, max: 1, step: 0.01, value: 0 },
     { key: 'brush', label: 'Brushed', min: 0, max: 1, step: 0.01, value: 0 },
-    { key: 'patina', label: 'Patina', min: 0, max: 1, step: 0.01, value: 0 },
-    { key: 'tone', label: 'Rust → verdigris', min: 0, max: 1, step: 0.01, value: 0 },
   ],
   stone: [
     { key: 'speckle', label: 'Speckles', min: 0, max: 1, step: 0.01, value: 0.45 },
-    { key: 'veins', label: 'Veins', min: 0, max: 1, step: 0.01, value: 0 },
-    { key: 'cracks', label: 'Cracks', min: 0, max: 1, step: 0.01, value: 0.3 },
     { key: 'pits', label: 'Pitting', min: 0, max: 1, step: 0.01, value: 0.5 },
     { key: 'rugged', label: 'Ruggedness', min: 0, max: 3, step: 0.05, value: 1, geometry: true },
     { key: 'polish', label: 'Polish', min: 0, max: 1, step: 0.01, value: 0.1 },
@@ -303,10 +294,9 @@ function normalize01(v: Float32Array): Float32Array {
   return v;
 }
 
-let metalTex: { bump: THREE.Texture; patina: THREE.Texture } | null = null;
+let metalTex: { bump: THREE.Texture } | null = null;
 /**
- * Metal: a bump texture holding hammer dents (R) and brushed streaks (G), and
- * a patina texture holding where tarnish creeps in first (R) and its mottling (G).
+ * Metal: a bump texture holding hammer dents (R) and brushed streaks (G).
  */
 function getMetalTex() {
   if (metalTex) return metalTex;
@@ -344,10 +334,7 @@ function getMetalTex() {
     for (let x = 0; x < size; x++) streaks[y * size + x] = 0.5 + (v - 0.5) * (0.4 + 0.6 * fade[y * size + x]);
   }
 
-  // patina: big blotches (where it starts) and fine mottling inside them
-  const where = normalize01(tileNoise(size, 4, 6, 67));
-  const mottle = normalize01(tileNoise(size, 28, 3, 71));
-  metalTex = { bump: channelTexture(size, dents, streaks), patina: channelTexture(size, where, mottle) };
+  metalTex = { bump: channelTexture(size, dents, streaks) };
   return metalTex;
 }
 
@@ -356,9 +343,10 @@ let stoneTex: { data: THREE.Texture; bump: THREE.Texture } | null = null;
  * Stone: a color texture holding broad mottling (R), speckles around mid-grey (G)
  * and marble veins (B), and a bump texture holding pits around mid-grey (R),
  * cracks (G) and fine grain (B). Each crack is painted at its own level, so the
- * Cracks slider can reveal more of them rather than just darken a fixed set.
+ * Cracks marking's threshold can reveal more of them rather than just darken a
+ * fixed set. (The veins and cracks are drawn by markings, on any material.)
  */
-function getStoneTex() {
+export function getStoneTex() {
   if (stoneTex) return stoneTex;
   const size = 1024;
   const r = rng(83);
@@ -483,7 +471,7 @@ function getStoneTex() {
 }
 type Vec2d = [number, number];
 
-let feltTex: { map: THREE.Texture; bump: THREE.Texture; hair: THREE.Texture; patch: THREE.Texture } | null = null;
+let feltTex: { map: THREE.Texture; bump: THREE.Texture; hair: THREE.Texture } | null = null;
 
 /** Draw one curly wool fibre (a wandering, spiralling stroke), wrapped for tiling. */
 function curl(ctx: CanvasRenderingContext2D, size: number, r: () => number, len: number, turn: number) {
@@ -567,16 +555,7 @@ function getFelt() {
     curl(hctx, hs, r, 14 + r() * 36, 1.1);
   }
   const hair = wrapTexture(hc);
-
-  // where the second color goes: broad blotches broken up by smaller ones, so
-  // it comes out mottled like a tortoiseshell cat (R), and finer mottling (G)
-  // that frays their edges like fibres of both colors mixing
-  const broad = tileNoise(size, 3, 3, 9);
-  const small = tileNoise(size, 12, 3, 11);
-  const blotch = normalize01(broad.map((v, i) => v * 0.55 + small[i] * 0.45));
-  const fray = normalize01(tileNoise(size, 40, 2, 13));
-  const patch = channelTexture(size, blotch, fray);
-  feltTex = { map, bump, hair, patch };
+  feltTex = { map, bump, hair };
   return feltTex;
 }
 
@@ -762,16 +741,13 @@ function getPatchwork(variety: number, prints: number, stitches: number) {
 
 // Knitted: rows of V-shaped stockinette stitches. Like patchwork, the color
 // map is a gain around mid-grey, so the yarn takes the part's own color.
-const knitTex = new Map<string, { map: THREE.Texture; bump: THREE.Texture }>();
+let knitTex: { map: THREE.Texture; bump: THREE.Texture } | null = null;
 
-function getKnit(stripes: number) {
-  const key = stripes.toFixed(2);
-  const hit = knitTex.get(key);
-  if (hit) return hit;
-  if (knitTex.size > 8) knitTex.clear();
+function getKnit() {
+  if (knitTex) return knitTex;
   const size = 512;
   const cols = 16;
-  const rows = 24; // stripes come in bands of 3 rows, so this still tiles
+  const rows = 24;
   const w = size / cols, h = size / rows;
   const bumpC = document.createElement('canvas');
   bumpC.width = bumpC.height = size;
@@ -837,25 +813,22 @@ function getKnit(stripes: number) {
   }
   b.putImageData(bi, 0, 0);
 
-  // color gain: yarn tops a touch lighter, the gaps between stitches darker;
-  // stripes lighten every other band of three rows
+  // color gain: yarn tops a touch lighter, the gaps between stitches darker
   const mapC = document.createElement('canvas');
   mapC.width = mapC.height = size;
   const m = mapC.getContext('2d')!;
   const mi = m.createImageData(size, size);
   for (let y = 0; y < size; y++) {
-    const band = Math.floor(y / h / 3) % 2 === 1 ? 1 + 0.55 * stripes : 1;
     for (let x = 0; x < size; x++) {
       const k = (y * size + x) * 4;
-      const gain = (0.55 + 0.55 * (bi.data[k] / 255)) * band;
+      const gain = 0.55 + 0.55 * (bi.data[k] / 255);
       mi.data[k] = mi.data[k + 1] = mi.data[k + 2] = Math.min(255, Math.round(gain * 127.5));
       mi.data[k + 3] = 255;
     }
   }
   m.putImageData(mi, 0, 0);
-  const out = { map: wrapTexture(mapC), bump: wrapTexture(bumpC) };
-  knitTex.set(key, out);
-  return out;
+  knitTex = { map: wrapTexture(mapC), bump: wrapTexture(bumpC) };
+  return knitTex;
 }
 
 const toonGradients = new Map<string, THREE.DataTexture>();
@@ -1255,7 +1228,7 @@ export function makeMaterial(style: StyleId, color: string, settings: StyleSetti
           sheenRoughness: 0.35,
           sheenColor: c.clone().lerp(new THREE.Color('#ffffff'), 0.6),
         }),
-        { tiling: 2.2, rim: k.glow, custom: feltPatches(k) },
+        { tiling: 2.2, rim: k.glow },
       );
     }
     case 'lowpoly':
@@ -1292,8 +1265,6 @@ export function makeMaterial(style: StyleId, color: string, settings: StyleSetti
     }
     case 'metal': {
       const t = getMetalTex();
-      // tarnish: dull rust brown through to copper's blue-green verdigris
-      const patinaColor = new THREE.Color('#4a200d').lerp(new THREE.Color('#3f7f6c'), k.tone);
       return triplanar(
         new THREE.MeshPhysicalMaterial({
           color: c,
@@ -1309,36 +1280,11 @@ export function makeMaterial(style: StyleId, color: string, settings: StyleSetti
         {
           tiling: 1.5,
           bumpMix: new THREE.Vector3(k.hammer * 2.2, k.brush * 0.9, 0),
-          custom: {
-            id: 'metal',
-            uniforms: {
-              patinaMap: { value: t.patina },
-              patinaAmount: { value: k.patina },
-              patinaColor: { value: patinaColor },
-            },
-            pars: 'uniform sampler2D patinaMap;\nuniform float patinaAmount;\nuniform vec3 patinaColor;',
-            // the tarnish takes over in blotches as Patina goes up: there it's
-            // dull and not metallic at all
-            surface: /* glsl */ `
-              vec3 pt = triS(patinaMap, vTriPos, triTiling * 0.8).rgb;
-              // the fine mottling frays the edges, so it creeps in rather than being painted on
-              float h = pt.r + (pt.g - 0.5) * 0.3;
-              float edge = 1.0 - pow(patinaAmount, 1.4) * 1.12;
-              float p = smoothstep(edge - 0.12, edge + 0.08, h) * step(0.001, patinaAmount);
-              // thin at the edges (the metal still glints through), crusty and uneven inside
-              vec3 crust = patinaColor * (0.45 + 1.1 * pt.g * pt.g);
-              diffuseColor.rgb = mix(diffuseColor.rgb, crust, p);
-              roughnessFactor = mix(roughnessFactor, 0.9, p);
-              metalnessFactor = mix(metalnessFactor, 0.0, p);`,
-          },
         },
       );
     }
     case 'stone': {
       const t = getStoneTex();
-      // veins stand out: pale on dark stone, dark on pale stone
-      const lum = c.r * 0.3 + c.g * 0.59 + c.b * 0.11;
-      const vein = c.clone().lerp(new THREE.Color(lum > 0.35 ? '#3b3530' : '#f1ece4'), 0.75);
       return triplanar(
         new THREE.MeshPhysicalMaterial({
           color: c,
@@ -1358,36 +1304,22 @@ export function makeMaterial(style: StyleId, color: string, settings: StyleSetti
             uniforms: {
               stoneData: { value: t.data },
               stoneSpeckle: { value: k.speckle },
-              stoneVeins: { value: k.veins },
-              stoneCracks: { value: k.cracks },
               stonePits: { value: k.pits },
-              stoneVein: { value: vein },
             },
             pars: /* glsl */ `
               uniform sampler2D stoneData;
-              uniform float stoneSpeckle, stoneVeins, stoneCracks, stonePits;
-              uniform vec3 stoneVein;
-              // a crack shows once the slider passes its level
-              float stoneCrack(float level) {
-                float at = 1.0 - stoneCracks;
-                return smoothstep(at - 0.04, at + 0.04, level) * step(0.001, stoneCracks);
-              }
+              uniform float stoneSpeckle, stonePits;
               float triCustomH(vec3 s) {
-                // pits dip below mid-grey, cracks cut in, grain is always there a little
-                return (s.r - 0.5) * 3.0 * stonePits - stoneCrack(s.g) * 0.9 + s.b * 0.25;
+                // pits dip below mid-grey, grain is always there a little
+                return (s.r - 0.5) * 3.0 * stonePits + s.b * 0.25;
               }`,
             color: /* glsl */ `
               vec3 sd = triS(stoneData, vTriPos, triTiling).rgb;
               vec3 sb = triS(bumpMap, vTriPos, triTiling).rgb;
               float shade = 1.0 + (sd.r - 0.5) * 0.75 + (sd.g - 0.5) * 2.0 * stoneSpeckle;
               diffuseColor.rgb *= shade;
-              diffuseColor.rgb = mix(diffuseColor.rgb, stoneVein, sd.b * stoneVeins);
-              // dirt settles in the pits and cracks
-              diffuseColor.rgb *= 1.0 - max(0.0, 0.5 - sb.r) * 1.6 * stonePits;
-              diffuseColor.rgb *= 1.0 - stoneCrack(sb.g) * 0.88;
-              #ifdef GLOW
-                glowCrack = stoneCrack(sb.g);
-              #endif`,
+              // dirt settles in the pits
+              diffuseColor.rgb *= 1.0 - max(0.0, 0.5 - sb.r) * 1.6 * stonePits;`
           },
         },
       );
@@ -1413,7 +1345,7 @@ export function makeMaterial(style: StyleId, color: string, settings: StyleSetti
       );
     }
     case 'knit': {
-      const t = getKnit(k.stripes);
+      const t = getKnit();
       return triplanar(
         new THREE.MeshPhysicalMaterial({
           color: c,
@@ -1433,56 +1365,6 @@ export function makeMaterial(style: StyleId, color: string, settings: StyleSetti
       );
     }
   }
-}
-
-/**
- * Felt's second color: the part's own color turned round the color wheel
- * (Patch hue) and darkened or lightened (Patch shade), laid on in patches.
- * Worked out in the shader, so it follows blended colors too. Shared by the
- * surface and its fuzz shells, which sample the same spots.
- */
-function feltPatches(k: StyleSettings): NonNullable<TriOptions['custom']> {
-  return {
-    id: 'felt',
-    uniforms: {
-      feltPatch: { value: getFelt().patch },
-      feltPatches: { value: k.patches ?? 0 },
-      feltPatchHue: { value: k.patchHue ?? 0 },
-      feltPatchShade: { value: k.patchShade ?? 0 },
-    },
-    pars: /* glsl */ `
-      uniform sampler2D feltPatch;
-      uniform float feltPatches;
-      uniform float feltPatchHue;
-      uniform float feltPatchShade;
-      vec3 feltToHsv(vec3 c) {
-        vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
-        vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
-        vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
-        float d = q.x - min(q.w, q.y);
-        return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + 1e-10)), d / (q.x + 1e-10), q.x);
-      }
-      vec3 feltToRgb(vec3 c) {
-        vec3 p = abs(fract(c.xxx + vec3(1.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0);
-        return c.z * mix(vec3(1.0), clamp(p - 1.0, 0.0, 1.0), c.y);
-      }`,
-    color: /* glsl */ `
-      if (feltPatches > 0.001) {
-        vec3 fp = triS(feltPatch, vTriPos, 0.55).rgb;
-        float h = fp.r + (fp.g - 0.5) * 0.3;
-        float edge = 1.0 - feltPatches * 1.15;
-        float p = smoothstep(edge - 0.05, edge + 0.05, h);
-        // turned and shaded as the eye sees color (sRGB), so a dark orange is brown, not maroon
-        vec3 hsv = feltToHsv(pow(max(diffuseColor.rgb, 0.0), vec3(1.0 / 2.2)));
-        hsv.x = fract(hsv.x + feltPatchHue);
-        // darker keeps its richness (orange goes to deep brown); lighter fades
-        // towards a warm undyed-wool white (orange goes to cream, not pink)
-        if (feltPatchShade < 0.0) hsv.z *= 1.0 + feltPatchShade * 0.88;
-        vec3 second = feltToRgb(hsv);
-        if (feltPatchShade > 0.0) second = mix(second, vec3(1.0, 0.95, 0.84), pow(feltPatchShade, 0.6));
-        diffuseColor.rgb = mix(diffuseColor.rgb, pow(second, vec3(2.2)), p);
-      }`,
-  };
 }
 
 /** Share of felt fuzz shells actually drawn (lower = faster; see Settings > Performance). */
@@ -1510,8 +1392,6 @@ export function makeFuzzShells(geo: THREE.BufferGeometry, color: string, setting
         tiling: unit,
         rim: settings.glow * 1.6,
         shell: { offset: height * Math.pow(level, 1.3), level: floor + level * 0.74, hair: f.hair, hairTiling: 2.4 * unit },
-        // the fuzz takes the patches too, or it would hide them
-        custom: feltPatches(settings),
       },
     );
     // bare spots (under eyes), filled by setFuzzMask before or after the shader compiles
@@ -1689,9 +1569,9 @@ export function setOpacity(root: THREE.Object3D, opacity: number) {
 
 // ---------------------------------------------------------------------------
 // Glow: a color can shine with its own light. It's worked out in the shader
-// after the material's textures, so it can follow them: evenly all over, from
-// the bright parts (cracks and dark patches stay dim), or from the dark parts
-// (cracks, seams and patina light up). The scene's glow pass (main.ts) blooms
+// after the material's textures and markings, so it can follow them: evenly
+// all over, from the material (its texture's bright parts; markings stay dim),
+// or from just the markings (see markings.ts). The scene's glow pass (main.ts) blooms
 // whatever glows by drawing it again with glowMaskOut on: just its glow.
 // Under baked colors (blended parts and pieces) the glow is tinted by them per
 // vertex; a skin that blends glowing and plain parts also carries how much
@@ -1700,9 +1580,14 @@ export function setOpacity(root: THREE.Object3D, opacity: number) {
 /** the glow at full strength, as a multiple of the color */
 export const GLOW_GAIN = 1.6;
 
-/** where a glow comes from: all over, or the bright or the dark parts of the texture */
-export type GlowFollow = 'even' | 'bright' | 'dark';
-const FOLLOW: Record<GlowFollow, number> = { even: 0, bright: 1, dark: 2 };
+/** where a glow comes from: all over, the material's texture (its bright parts), or just the markings (see markings.ts) */
+export type GlowFollow = 'even' | 'material' | 'markings';
+const FOLLOW: Record<GlowFollow, number> = { even: 0, material: 1, markings: 2 };
+
+/** A saved glow's source as it is now (from before markings, a glow followed the bright or dark parts of the texture). */
+export function followOf(f: string | undefined): GlowFollow {
+  return f === 'material' || f === 'markings' ? f : f === 'bright' || f === 'dark' ? 'material' : 'even';
+}
 
 /** on while the glow pass draws: glowing materials put out just their glow */
 const GLOW_MASK_OUT = { value: false };
@@ -1713,8 +1598,8 @@ export function setGlowMaskOut(on: boolean) {
 THREE.ShaderChunk.color_pars_vertex += '\n#ifdef GLOW_ATTR\nattribute float glow;\nvarying float vGlow;\n#endif';
 THREE.ShaderChunk.color_vertex += '\n#ifdef GLOW_ATTR\nvGlow = glow;\n#endif';
 THREE.ShaderChunk.color_pars_fragment += '\n#ifdef GLOW_ATTR\nvarying float vGlow;\n#endif';
-// a material's own code can say where it's cracked (stone does), for the glow
-THREE.ShaderChunk.color_fragment += '\n#ifdef GLOW\nfloat glowCrack = 0.0;\n#endif';
+// how marked each point is (a marking fills it in, see markings.ts), for the glow
+THREE.ShaderChunk.color_fragment += '\nfloat markMask = 0.0;';
 THREE.ShaderChunk.emissivemap_pars_fragment += '\n#ifdef GLOW\nuniform vec3 glowTint;\nuniform bool glowMaskOut;\n#endif';
 THREE.ShaderChunk.emissivemap_fragment += /* glsl */ `
 #ifdef GLOW
@@ -1729,11 +1614,11 @@ THREE.ShaderChunk.emissivemap_fragment += /* glsl */ `
   const vec3 glowLuma = vec3(0.2126, 0.7152, 0.0722);
   float glowShift = clamp(dot(diffuseColor.rgb, glowLuma) / max(dot(glowBase, glowLuma), 1e-3), 0.0, 1.5);
   #if GLOW == 1
-    // the bright parts, in the texture's own colors; cracks stay dark
-    glowE *= clamp(diffuseColor.rgb / max(glowBase, vec3(1e-3)), 0.0, 1.5) * glowShift * (1.0 - glowCrack);
+    // the material: its bright parts, in the texture's own colors; markings stay dark
+    glowE *= clamp(diffuseColor.rgb / max(glowBase, vec3(1e-3)), 0.0, 1.5) * glowShift * (1.0 - markMask);
   #elif GLOW == 2
-    // the dark parts (cracks, seams, patina, pits), in the picked color
-    glowE *= max(glowCrack, 1.0 - smoothstep(0.4, 0.9, glowShift));
+    // just the markings, in the picked color
+    glowE *= markMask;
   #endif
   #ifdef GLOW_ATTR
     glowE *= vGlow;
@@ -1800,7 +1685,7 @@ export function glowMaterial(m: THREE.Material, color: THREE.ColorRepresentation
     setDefine(m, 'GLOW_ATTR', null);
     return;
   }
-  const follow = bake.follow ?? 'even';
+  const follow = followOf(bake.follow);
   // under baked colors the color is in the vertices
   hookGlow(m)
     .value.set(bake.painted ? 0xffffff : color)

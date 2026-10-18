@@ -74,6 +74,9 @@ const TOOLS: Record<string, ToolDef> = {
   materials: { name: 'Materials', icon: slab('cloud'), kind: 'wide' },
   'material-params': { name: 'Material settings', icon: duo('sliders'), kind: 'wide' },
   'style-part': { name: 'Material: part or everything', icon: duo('fill-drip'), kind: 'wide' },
+  markings: { name: 'Markings', icon: slab('circle'), kind: 'wide' },
+  'marking-params': { name: 'Marking settings', icon: duo('sliders'), kind: 'wide' },
+  'marking-part': { name: 'Marking: part or everything', icon: duo('fill-drip'), kind: 'wide' },
   arrange: { name: 'Arrange', icon: duo('arrows-up-down-left-right'), kind: 'pill' },
   pull: { name: 'Pull limbs', icon: duo('hand-back-fist'), kind: 'pill', gizmo: true },
   mirror: { name: 'Mirror', icon: slab('arrow-right-arrow-left'), kind: 'pill' },
@@ -151,6 +154,7 @@ const SECTIONS: Omit<Sec, 'place'>[] = [
   { id: 'pose', name: 'Pose', icon: 'face-smile', color: '#e9a51f', tools: ['stand', 'floor', 'keep-floor'] },
   { id: 'color', name: 'Color', icon: 'palette', color: '#a66ad6', tools: ['custom-color', 'paint-all', 'swatches', 'scene-colors', 'glow', 'color-blend', 'opacity'] },
   { id: 'material', name: 'Material', icon: 'cloud', color: '#5fa0d8', tools: ['style-part', 'materials', 'material-params'] },
+  { id: 'markings', name: 'Markings', icon: 'circle', color: '#d0486a', tools: ['marking-part', 'markings', 'marking-params'] },
   { id: 'quick', name: 'Arrange', icon: 'expand', color: '#3b82f6', tools: ['arrange', 'pull'] },
   { id: 'mirror', name: 'Mirror', icon: 'arrow-right-arrow-left', color: '#14a596', tools: ['mirror'] },
   { id: 'eyes', name: 'Eyes', icon: 'eye', color: '#5b6170', tools: ['eyes'] },
@@ -164,15 +168,15 @@ const SECTIONS: Omit<Sec, 'place'>[] = [
 /** The two tabs differ only in where their sections start out, and in their gizmos */
 const DEFAULT_PLACES: Record<Base, Record<string, Place>> = {
   shape: {
-    plan: 'side', parts: 'side', part: 'side', grow: 'side', pose: 'side', color: 'hidden', material: 'hidden',
+    plan: 'side', parts: 'side', part: 'side', grow: 'side', pose: 'side', color: 'hidden', material: 'hidden', markings: 'hidden',
     quick: 'tl', mirror: 'tl', eyes: 'tl', attach: 'tl', camera: 'br', backdrop: 'hidden', photo: 'hidden', anim: 'hidden', loop: 'hidden',
   },
   look: {
-    plan: 'hidden', parts: 'hidden', part: 'hidden', grow: 'hidden', pose: 'hidden', color: 'side', material: 'side',
+    plan: 'hidden', parts: 'hidden', part: 'hidden', grow: 'hidden', pose: 'hidden', color: 'side', material: 'side', markings: 'side',
     quick: 'tl', mirror: 'hidden', eyes: 'tl', attach: 'tl', camera: 'br', backdrop: 'tr', photo: 'tr', anim: 'hidden', loop: 'hidden',
   },
   animate: {
-    plan: 'hidden', parts: 'side', part: 'hidden', grow: 'hidden', pose: 'hidden', color: 'hidden', material: 'hidden',
+    plan: 'hidden', parts: 'side', part: 'hidden', grow: 'hidden', pose: 'hidden', color: 'hidden', material: 'hidden', markings: 'hidden',
     quick: 'hidden', mirror: 'tl', eyes: 'hidden', attach: 'hidden', camera: 'br', backdrop: 'tr', photo: 'tr', anim: 'side', loop: 'side',
   },
 };

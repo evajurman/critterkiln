@@ -170,8 +170,8 @@
               <span class="ends"><em>off</em><em>bright</em></span></label>
             <div class="seg glow-follow" id="glow-follow" title="Where the glow comes from">
               <button data-follow="even" title="Glow evenly all over">Even</button>
-              <button data-follow="bright" title="Glow from the bright parts of the texture: cracks and dark patches stay dim">Bright</button>
-              <button data-follow="dark" title="Glow from the dark parts of the texture: cracks, seams, pits and patina">Dark</button>
+              <button data-follow="material" title="Glow from the material: the bright parts of its texture (markings stay dim)">Material</button>
+              <button data-follow="markings" title="Glow from just the markings">Markings</button>
             </div>
           </div>
           <div class="ck-tool" data-tool="color-blend">
@@ -181,6 +181,14 @@
           </div>
           <div class="ck-tool" data-tool="materials"><div id="styles" class="styles"></div></div>
           <div class="ck-tool" data-tool="material-params"><div id="style-params" class="style-params"></div></div>
+          <div class="ck-tool" data-tool="marking-part">
+            <div class="seg scope-seg" id="mark-scope">
+              <button data-scope="part" title="A marking just for the picked part">Part</button>
+              <button data-scope="all" title="One marking on every part">Everything</button>
+            </div>
+          </div>
+          <div class="ck-tool" data-tool="markings"><div id="markings" class="markings"></div></div>
+          <div class="ck-tool" data-tool="marking-params"><div id="marking-params" class="style-params"></div></div>
           <div class="ck-tool" data-tool="style-part">
             <div class="seg scope-seg" id="style-scope">
               <button data-scope="part" title="A material just for the picked part">Part</button>
@@ -253,8 +261,7 @@
               <span class="ends"><em>off</em><em>bright</em></span></label>
                   <div class="seg glow-follow" id="eye-glow-follow" title="Where the glow comes from">
                     <button data-follow="even" title="Glow evenly all over">Even</button>
-                    <button data-follow="bright" title="Glow from the bright parts of the texture: cracks and dark patches stay dim">Bright</button>
-                    <button data-follow="dark" title="Glow from the dark parts of the texture: cracks, seams, pits and patina">Dark</button>
+                    <button data-follow="material" title="Glow from the material: the bright parts of its texture (markings stay dim)">Material</button>
                   </div>
                   <div id="eye-shape">
                     <div class="sub-title">Expression</div>
@@ -332,8 +339,7 @@
               <span class="ends"><em>off</em><em>bright</em></span></label>
               <div class="seg glow-follow" id="floor-glow-follow" title="Where the glow comes from">
                 <button data-follow="even" title="Glow evenly all over">Even</button>
-                <button data-follow="bright" title="Glow from the bright parts of the texture: cracks and dark patches stay dim">Bright</button>
-                <button data-follow="dark" title="Glow from the dark parts of the texture: cracks, seams, pits and patina">Dark</button>
+                <button data-follow="material" title="Glow from the material: the bright parts of its texture (markings stay dim)">Material</button>
               </div>
             </div>
           </div>
@@ -430,8 +436,7 @@
               <span class="ends"><em>off</em><em>bright</em></span></label>
             <div class="seg glow-follow" id="piece-glow-follow" title="Where the glow comes from">
               <button data-follow="even" title="Glow evenly all over">Even</button>
-              <button data-follow="bright" title="Glow from the bright parts of the texture: cracks and dark patches stay dim">Bright</button>
-              <button data-follow="dark" title="Glow from the dark parts of the texture: cracks, seams, pits and patina">Dark</button>
+              <button data-follow="material" title="Glow from the material: the bright parts of its texture (markings stay dim)">Material</button>
             </div>
             <div class="mini-styles" id="piece-styles"></div>
             <div class="thing-material" id="piece-style-params"></div>
@@ -526,8 +531,7 @@
               <span class="ends"><em>off</em><em>bright</em></span></label>
             <div class="seg glow-follow" id="attach-glow-follow" title="Where the glow comes from">
               <button data-follow="even" title="Glow evenly all over">Even</button>
-              <button data-follow="bright" title="Glow from the bright parts of the texture: cracks and dark patches stay dim">Bright</button>
-              <button data-follow="dark" title="Glow from the dark parts of the texture: cracks, seams, pits and patina">Dark</button>
+              <button data-follow="material" title="Glow from the material: the bright parts of its texture (markings stay dim)">Material</button>
             </div>
           </div>
           <div id="attach-mat-body"></div>

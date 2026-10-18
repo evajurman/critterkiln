@@ -8,7 +8,6 @@ import {
   castsShadow,
   glowMaterial,
   glowWithFlash,
-  isTextured,
   setGlow,
   setFuzzMask,
   setOpacity,
@@ -27,6 +26,7 @@ import {
 } from './materials';
 import { MAX_BEND, bendCurve, expandRig, onCurve, type BendCurve, type ExpandedBone, type ExpandedRig, type RigState, type V3 } from './rigs';
 import type { PartAnim, StuffAnim } from './animate';
+import { MAX_LAYERS, applyMarkings, markingKey, markingsKey, type Marking } from './markings';
 import { buildThing, disposeThing, partPieceGeometry, type Thing, type WrapSurface } from './stuff';
 
 /** One drawn shape of a part, puffed up on its own: drawn from the front (the default) or from the side. */
@@ -46,9 +46,11 @@ export interface PartState {
   color: string;
   /** 0..1: the color shines with its own light (0 / unset = not at all) */
   glow?: number;
-  /** where in its texture it glows from (unset = evenly all over) */
+  /** where it glows from: the material, its markings, or (unset) evenly all over */
   glowFollow?: GlowFollow;
   style?: StyleId;
+  /** patterns over its material (spots, stripes, cracks...), the last on top: see src/markings.ts */
+  markings?: Marking[];
   /** 1 = solid, lower = see-through */
   opacity?: number;
   /**
@@ -60,6 +62,28 @@ export interface PartState {
 }
 
 export type PartKind = 'puffy' | 'flat' | 'turned';
+
+/**
+ * Which parts can blend into one surface, as a key per part: the same
+ * material (and the same color, unless colors blend), whatever markings they
+ * have, each fading in and out across the joins. Only if they'd need more
+ * markings between them than one surface draws (MAX_LAYERS) do parts with
+ * different markings stay apart.
+ */
+function blendKeys(s: CreatureState, blendColors: boolean): Map<string, string> {
+  const base = (p: PartState) => (p.style ?? s.style) + (blendColors ? '' : p.color.toLowerCase());
+  const marks = new Map<string, Set<string>>();
+  for (const p of Object.values(s.parts)) for (const m of p.markings ?? []) (marks.get(base(p)) ?? marks.set(base(p), new Set()).get(base(p))!).add(markingKey(m));
+  return new Map(Object.entries(s.parts).map(([id, p]) => [id, base(p) + ((marks.get(base(p))?.size ?? 0) > MAX_LAYERS ? markingsKey(p.markings) : '')]));
+}
+
+/** The markings one surface over these parts draws (each once, in order), and how much of each a part has (1 or 0: see paintMarks). */
+function surfaceMarkings(s: CreatureState, bones: BoneRT[]): { layers: Marking[]; marksOf: (b: BoneRT) => number[] } {
+  const layers: Marking[] = [];
+  for (const b of bones) for (const m of s.parts[b.src].markings ?? []) if (layers.length < MAX_LAYERS && !layers.some((l) => markingKey(l) === markingKey(m))) layers.push(m);
+  const has = (b: BoneRT, l: Marking) => (s.parts[b.src].markings ?? []).some((m) => markingKey(m) === markingKey(l));
+  return { layers, marksOf: (b) => layers.map((l) => (has(b, l) ? 1 : 0)) };
+}
 
 /** Every shape a part was drawn as (none if it hasn't been drawn). */
 export function partShapes(p: PartState): PartShape[] {
@@ -213,6 +237,8 @@ export interface CreatureState {
   keepFloor?: boolean;
   /** looping motions, per part (scene id): see src/animate.ts */
   anims?: Record<string, PartAnim>;
+  /** 1 once patterns that used to be material settings (stone cracks, metal patina...) are parts' markings (see migrateMarkings) */
+  markingsV?: number;
 }
 
 export interface Placement {
@@ -293,6 +319,11 @@ export function defaultState(rig: RigState, color?: string): CreatureState {
     rootOffset: [0, 0, 0],
     merge: true,
     mergeRadius: 0.1,
+    // touching parts of different colors fade into each other
+    mergeColors: true,
+    colorBlend: 0.2,
+    // (made now: nothing to bring up to date, see migrateMarkings)
+    markingsV: 1,
     // googly eyes start matte (saves without a shine stay glossy, as they were made)
     eyes: { enabled: true, style: 'bead', shine: 0, pairs: [{ size: 0.5, spacing: 0.5, height: 0.55 }] },
   };
@@ -1093,7 +1124,7 @@ export class Creature {
         lumps: style === 'clay' ? k.lumps : style === 'stone' ? k.rugged : 0,
       };
       const geoKey = JSON.stringify([shapes, geoOpts, getMeshDetail()]);
-      const key = geoKey + style + p.color + JSON.stringify(k) + (p.opacity ?? 1) + bendKey(bendOf(b.def, b.length));
+      const key = geoKey + style + p.color + JSON.stringify(k) + markingsKey(p.markings) + (p.opacity ?? 1) + bendKey(bendOf(b.def, b.length));
       if (key === b.meshKey) {
         this.glowPart(b);
         continue;
@@ -1127,6 +1158,7 @@ export class Creature {
           ? shapeGeo(shapes[0], 0, geoOpts)
           : cachedGeometry(geoKey + bendKey(bd), () => joinShapes(shapes.map((sh, i) => shapeGeo(sh, i, geoOpts))));
       const mesh = new THREE.Mesh(geo, makeMaterial(style, p.color, k));
+      applyMarkings(mesh.material as THREE.Material, p.markings);
       mesh.userData.baseGeo = geo;
       // the roll ring is sized to the part as if it were straight (and stretching a tip re-bends it from straight)
       const straightBox = new THREE.Box3();
@@ -1165,7 +1197,11 @@ export class Creature {
         mesh.add(ink);
       }
       if (style === 'felt') {
-        for (const shell of makeFuzzShells(geo, p.color, k)) mesh.add(shell);
+        for (const shell of makeFuzzShells(geo, p.color, k)) {
+          // the fuzz takes the markings too, or it would hide them
+          applyMarkings(shell.material as THREE.Material, p.markings);
+          mesh.add(shell);
+        }
         if (k.hairs > 0) mesh.add(makeStrayHairs(geo, p.color, hashString(b.def.id), k.hairs, false, 1, k.fuzz));
       }
       setOpacity(mesh, p.opacity ?? 1);
@@ -1556,11 +1592,11 @@ export class Creature {
     this.root.updateMatrixWorld(true);
     this.rootInv.copy(this.root.matrixWorld).invert();
 
+    const keys = blendKeys(s, blend);
     const groups = new Map<string, BoneRT[]>();
     for (const b of this.list) {
       if (!b.mesh) continue;
-      const p = s.parts[b.src];
-      const key = (p.style ?? s.style) + (blend ? '' : p.color.toLowerCase());
+      const key = keys.get(b.src)!;
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key)!.push(b);
     }
@@ -1755,11 +1791,11 @@ export class Creature {
     const kc = blend ? (s.colorBlend ?? 0.12) : 0;
 
     // same groups as the fast merge: one material (and one color unless blending)
+    const keys = blendKeys(s, blend);
     const groups = new Map<string, BoneRT[]>();
     for (const b of this.list) {
       if (!b.mesh) continue;
-      const p = s.parts[b.src];
-      const key = (p.style ?? s.style) + (blend ? '' : p.color.toLowerCase());
+      const key = keys.get(b.src)!;
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key)!.push(b);
     }
@@ -1785,7 +1821,6 @@ export class Creature {
       const k = this.settingsFor(style);
       const minR = Math.min(...joined.map(radius));
       const lowPoly = style === 'lowpoly';
-      const textured = isTextured(style);
       // low-poly keeps its own parts (and fast joins) unless the setting says otherwise
       if (lowPoly && !seamlessLowPoly) continue;
       // low-poly is built smooth like the rest, then re-faceted to each part's own facet size
@@ -1817,16 +1852,18 @@ export class Creature {
         if (shown.length + bases.length < 2) continue;
         // a part drawn as several shapes joins in as each of them
         const owners: BoneRT[] = [];
+        const marked = surfaceMarkings(s, all);
         const parts: SkinPart[] = all.flatMap((b) => {
           const geos = (b.mesh!.userData.skinGeos as (() => THREE.BufferGeometry[]) | undefined)?.() ?? [b.mesh!.userData.baseGeo as THREE.BufferGeometry];
           owners.push(...geos.map(() => b));
           return geos.map((geo) => ({
             geo,
             toSkin: toGroup.clone().multiply(b.mesh!.matrixWorld),
-            // textured materials lay their textures out in the rest pose
-            toRest: textured ? b.restGroup.clone().multiply(b.mesh!.matrix) : undefined,
+            // textures and markings are laid out in the rest pose
+            toRest: b.restGroup.clone().multiply(b.mesh!.matrix),
             color: this.shownColor(b),
             glow: s.parts[b.src].glow ?? 0,
+            marks: marked.marksOf(b),
             k: Math.max(0.005, Math.min(kMax, 0.6 * radius(b))),
             facet: geo.userData.facet as number | undefined,
           }));
@@ -1886,7 +1923,7 @@ export class Creature {
         ...sk,
         mesh,
         painted: !!geo.userData.painted,
-        colorKey: JSON.stringify([sk.parts.map((p) => [p.color.getHex(), p.glow]), kc]),
+        colorKey: JSON.stringify([sk.parts.map((p) => [p.color.getHex(), p.glow, p.marks]), kc]),
       });
     }
 
@@ -1931,6 +1968,8 @@ export class Creature {
         // clay lumps and low-poly facet size change the shape; with blending off, color changes the groups
         return [id, partShapes(p), p.thickness, p.kind, style, style === 'clay' ? k.lumps : style === 'stone' ? k.rugged : 0, style === 'lowpoly' ? k.facets : 0, blend ? '' : p.color.toLowerCase()];
       }),
+      // which parts blend together (markings split them up): changing a marking they all share only re-dresses the skin
+      ((keys) => [...keys.values()].map((k) => [...keys.values()].indexOf(k)))(blendKeys(s, blend)),
     ]);
   }
 
@@ -1941,13 +1980,16 @@ export class Creature {
     const style = part.style ?? s.style;
     const k = this.settingsFor(style);
     const kc = s.mergeColors ? (s.colorBlend ?? 0.12) : 0;
+    // every marking its parts have, each fading out over the parts without it (see paintMarks)
+    const marked = surfaceMarkings(s, sk.owners);
 
     // repaint only if the colors (or the fade width) changed
     sk.parts.forEach((p, i) => {
       p.color.copy(this.shownColor(sk.owners[i]));
       p.glow = s.parts[sk.owners[i].src].glow ?? 0;
+      p.marks = marked.marksOf(sk.owners[i]);
     });
-    const colorKey = JSON.stringify([sk.parts.map((p) => [p.color.getHex(), p.glow]), kc]);
+    const colorKey = JSON.stringify([sk.parts.map((p) => [p.color.getHex(), p.glow, p.marks]), kc]);
     if (colorKey !== sk.colorKey) {
       sk.painted = paintSkin(sk.mesh.geometry, sk.parts, kc, sk.lowPoly);
       sk.colorKey = colorKey;
@@ -1957,7 +1999,7 @@ export class Creature {
     // current dressing; rebuilding felt fuzz and stray hairs is expensive
     // a skin glows from where its first glowing part does
     const follow = sk.owners.map((b) => s.parts[b.src]).find((p) => p.glow)?.glowFollow;
-    const lookKey = JSON.stringify([style, part.color, part.glow ?? 0, follow, k, part.opacity ?? 1, sk.painted, colorKey, [...this.eyeSpots]]);
+    const lookKey = JSON.stringify([style, part.color, part.glow ?? 0, follow, k, markingsKey(marked.layers), part.opacity ?? 1, sk.painted, colorKey, [...this.eyeSpots]]);
     if (lookKey === sk.lookKey) {
       for (const b of sk.members) if (b.mesh) b.mesh.visible = false;
       return;
@@ -1975,6 +2017,7 @@ export class Creature {
     (mesh.material as THREE.Material | undefined)?.dispose();
     const geo = mesh.geometry;
     const mat = makeMaterial(style, part.color, k) as THREE.MeshStandardMaterial;
+    applyMarkings(mat, marked.layers, !!geo.getAttribute('markW'));
     if (geo.getAttribute('color')) {
       mat.vertexColors = true;
       if (sk.painted) mat.color.setRGB(1, 1, 1);
@@ -2000,6 +2043,7 @@ export class Creature {
           sm.vertexColors = true;
           sm.color.setRGB(1, 1, 1);
         }
+        applyMarkings(shell.material as THREE.Material, marked.layers, !!geo.getAttribute('markW'));
         mesh.add(shell);
       }
       if (k.hairs > 0) mesh.add(makeStrayHairs(geo, part.color, 11, k.hairs, sk.painted, 1, k.fuzz));
@@ -2057,10 +2101,8 @@ export class Creature {
     const blend = !!s.mergeColors;
     const k = Math.max(s.mergeRadius ?? 0.1, blend ? (s.colorBlend ?? 0.12) : 0);
     if (!(s.merge ?? true) || k <= 0) return [start.src];
-    const key = (b: BoneRT) => {
-      const p = s.parts[b.src];
-      return (p.style ?? s.style) + (blend ? '' : p.color.toLowerCase());
-    };
+    const keys = blendKeys(s, blend);
+    const key = (b: BoneRT) => keys.get(b.src);
     this.root.updateMatrixWorld(true);
     this.rootInv.copy(this.root.matrixWorld).invert();
     const same = this.list.filter((b) => b.mesh && key(b) === key(start));

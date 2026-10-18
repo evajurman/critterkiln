@@ -12,7 +12,7 @@ import { buildJoin } from './filletSkin';
 
 export interface SkinJob {
   id: number;
-  parts: { geo: string; toSkin: number[]; toRest?: number[]; color: [number, number, number]; glow?: number; k: number; facet?: number }[];
+  parts: { geo: string; toSkin: number[]; toRest?: number[]; color: [number, number, number]; glow?: number; marks?: number[]; k: number; facet?: number }[];
   /** the parts' shapes, by id (a worker keeps the ones it has already been sent) */
   geos: Record<string, { position: Float32Array; normal: Float32Array; index: Uint32Array | Uint16Array | null }>;
   opts: Omit<SkinOptions, 'shouldStop' | 'linked'> & { linked?: Uint8Array };
@@ -138,6 +138,7 @@ function send(l: Lane, parts: SkinPart[], opts: SkinOptions): Promise<SkinReply>
       toRest: p.toRest?.toArray(),
       color: [p.color.r, p.color.g, p.color.b],
       glow: p.glow,
+      marks: p.marks,
       k: p.k,
       facet: p.facet,
     })),

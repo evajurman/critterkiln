@@ -63,6 +63,7 @@ import {
   FUR_LAYER,
   STYLE_PARAMS,
   STYLES,
+  followOf,
   glowWithFlash,
   makeMaterial,
   setFuzzQuality,
@@ -74,6 +75,7 @@ import {
   type GlowFollow,
   type StyleId,
 } from './materials';
+import { MARKINGS, MAX_MARKINGS, defaultMarking, markingThumbnails, migrateMarkings, type Marking } from './markings';
 import { installScrollbars } from './scrollbars';
 import { applyPalette, GIFEncoder, quantize } from 'gifenc';
 import { ANIM_KINDS, animOffset, animP, canReverse, defaultAnim, leanAt, leanOf, leanQuat, mirrorAnim, reachAt, reachRim, rimLean, orbitOut, STUFF_KINDS, stuffMove, stuffP, type PartAnim, type StuffAnim, type StuffKind } from './animate';
@@ -949,6 +951,8 @@ let booted = false;
  */
 const parentsChecked = new WeakMap<CreatureState, RigState>();
 function makeCreature(s: CreatureState): Creature {
+  // stone cracks, metal patina and the like used to be material settings: now they're markings
+  migrateMarkings(s);
   // Auto parent: each part hangs off whatever its base sits on, as you see it (posed)
   if (rigPrefs.autoParent) {
     const before = parentsChecked.get(s);
@@ -5671,7 +5675,7 @@ const SWATCHES = [
 ];
 
 /**
- * Every color in use: the creatures, their eyes and what they wear, the thing
+ * Every color in use: the creatures (and their markings), their eyes and what they wear, the thing
  * on the bench, the floor and the backdrop. The most used first.
  */
 function sceneColors(): string[] {
@@ -5682,7 +5686,10 @@ function sceneColors(): string[] {
     used.set(c, (used.get(c) ?? 0) + 1);
   };
   for (const s of world.creatures) {
-    for (const p of Object.values(s.parts)) add(p.color);
+    for (const p of Object.values(s.parts)) {
+      add(p.color);
+      for (const m of p.markings ?? []) add(m.color);
+    }
     if (s.eyes.enabled && (s.eyes.style === 'bead' || s.eyes.style === 'dot' || s.eyes.style === 'button')) add(s.eyes.color);
     for (const a of s.attachments ?? []) for (const p of a.thing.pieces) add(p.color);
   }
@@ -5727,13 +5734,17 @@ setSceneColors(sceneColors);
  * Where a glow comes from (Even / Bright / Dark, under its Glow slider; only
  * shown while it glows). Returns its redraw.
  */
-function glowFollowSeg(id: string, get: () => { glow?: number; glowFollow?: GlowFollow } | undefined, set: (f: GlowFollow | undefined) => void): () => void {
+function glowFollowSeg(id: string, get: () => { glow?: number; glowFollow?: GlowFollow; markings?: Marking[] } | undefined, set: (f: GlowFollow | undefined) => void): () => void {
   const el = $(id);
   const buttons = [...el.querySelectorAll<HTMLButtonElement>('button')];
   const render = () => {
     const o = get();
     el.hidden = !o?.glow;
-    for (const b of buttons) b.classList.toggle('active', b.dataset.follow === (o?.glowFollow ?? 'even'));
+    for (const b of buttons) {
+      b.classList.toggle('active', b.dataset.follow === followOf(o?.glowFollow));
+      // (glowing from the markings needs some markings)
+      if (b.dataset.follow === 'markings') b.hidden = !o?.markings?.length;
+    }
   };
   for (const b of buttons) {
     b.onclick = () => {
@@ -6202,6 +6213,7 @@ function renderUI() {
   renderPartCard();
   renderColors();
   renderStyles();
+  renderMarkings();
   renderMerge();
   renderEyes();
   renderRigPanel();
@@ -6255,6 +6267,189 @@ function setColor(c: string, doCommit: boolean) {
     renderColors();
   }
   renderCreatureBar();
+}
+
+// ---------------------------------------------------------------------------
+// Markings: patterns over the material (see src/markings.ts), up to
+// MAX_MARKINGS on a part, the last on top: on the picked part or
+// (Everything) on every part
+
+let markAll = true;
+/** which of the picked part's markings is open for editing */
+let markOpen = 0;
+/** the kinds to add one from are showing */
+let markAdding = false;
+scopeSeg(
+  '#mark-scope',
+  () => markAll,
+  (all) => {
+    markAll = all;
+    renderMarkings();
+  },
+);
+
+/** Give the picked part (or, with Everything, every part) these markings. */
+function setMarkings(list: Marking[], doCommit: boolean) {
+  for (const p of markAll ? Object.values(state.parts) : [selPart()]) {
+    if (list.length) p.markings = list.map((m) => ({ ...m }));
+    else {
+      delete p.markings;
+      if (p.glowFollow === 'markings') delete p.glowFollow;
+    }
+  }
+  creature.sync();
+  creature.markMergeDirty();
+  if (doCommit) commit();
+}
+
+function renderMarkings() {
+  const el = $('#markings');
+  if (!creature.bones.has(selected)) return;
+  const list = [...(selPart().markings ?? [])];
+  markOpen = Math.min(markOpen, Math.max(0, list.length - 1));
+  el.innerHTML = '';
+  const pics = markingThumbnails();
+  const pic = (t: Marking['type']) => (pics.has(t) ? `<img src="${pics.get(t)}" alt="" />` : '<span class="mark-none"></span>');
+  const name = (t: Marking['type']) => MARKINGS.find((k) => k.type === t)!.name;
+  // the part's markings, the first at the bottom
+  list.forEach((m, i) => {
+    const row = document.createElement('div');
+    row.className = 'mark-row' + (i === markOpen && !markAdding ? ' active' : '');
+    const open = document.createElement('button');
+    open.className = 'mark-pick';
+    open.title = 'Change this marking';
+    open.innerHTML = `${pic(m.type)}<span>${name(m.type)}</span>`;
+    open.onclick = () => {
+      markOpen = i;
+      markAdding = false;
+      renderMarkings();
+    };
+    const del = document.createElement('button');
+    del.className = 'piece-icon';
+    del.innerHTML = fa('trash');
+    del.title = 'Take this marking off';
+    del.onclick = () => {
+      list.splice(i, 1);
+      setMarkings(list, true);
+      markOpen = Math.max(0, Math.min(markOpen, list.length - 1));
+      renderMarkings();
+      partGlowFollow();
+    };
+    row.append(open, del);
+    el.append(row);
+  });
+  const add = document.createElement('button');
+  add.className = 'ghost mark-add' + (markAdding ? ' on' : '');
+  add.innerHTML = '<i class="fa-duotone fa-regular fa-plus" aria-hidden="true"></i> Add marking';
+  add.disabled = list.length >= MAX_MARKINGS;
+  add.title = add.disabled ? `A part can have up to ${MAX_MARKINGS} markings` : 'Lay a pattern over this part (each new one goes on top)';
+  add.onclick = () => {
+    markAdding = !markAdding;
+    renderMarkings();
+  };
+  el.append(add);
+  if (markAdding) {
+    const kinds = document.createElement('div');
+    kinds.className = 'mark-kinds';
+    for (const k of MARKINGS) {
+      const btn = document.createElement('button');
+      btn.title = k.title;
+      btn.innerHTML = `${pic(k.type)}<span>${k.name}</span>`;
+      btn.onclick = () => {
+        list.push(defaultMarking(k.type));
+        markOpen = list.length - 1;
+        markAdding = false;
+        setMarkings(list, true);
+        renderMarkings();
+        partGlowFollow();
+      };
+      kinds.append(btn);
+    }
+    el.append(kinds);
+  }
+  renderMarkingParams(markAdding ? undefined : list[markOpen], list);
+}
+
+function renderMarkingParams(m: Marking | undefined, list: Marking[]) {
+  const el = $('#marking-params');
+  el.innerHTML = '';
+  el.hidden = !m;
+  if (!m) return;
+  const head = document.createElement('div');
+  head.className = 'style-params-head';
+  head.innerHTML = `<span>${MARKINGS.find((k) => k.type === m.type)!.name} settings</span>`;
+  const reset = document.createElement('button');
+  reset.className = 'link';
+  reset.textContent = 'Reset';
+  reset.onclick = () => {
+    list[list.indexOf(m)] = defaultMarking(m.type);
+    setMarkings(list, true);
+    renderMarkings();
+  };
+  head.append(reset);
+  el.append(head);
+  let pending = false;
+  const change = (patch: Partial<Marking>) => {
+    Object.assign(m, patch);
+    if (patch.color === undefined && 'color' in patch) delete m.color;
+    if (pending) return;
+    pending = true;
+    requestAnimationFrame(() => {
+      pending = false;
+      setMarkings(list, false);
+    });
+  };
+  // (the threshold reads the other way round on its slider: further right marks more)
+  const slider = (key: 'size' | 'threshold' | 'rough' | 'amount' | 'darkness' | 'finish', label: string, min: number, max: number, ends: [string, string]) => {
+    const flip = key === 'threshold';
+    const row = document.createElement('label');
+    row.className = 'slider';
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.min = String(min);
+    input.max = String(max);
+    input.step = '0.01';
+    input.value = String(flip ? 1 - m[key] : m[key]);
+    input.oninput = () => change({ [key]: flip ? 1 - parseFloat(input.value) : parseFloat(input.value) });
+    input.onchange = () => commit();
+    const name = document.createElement('span');
+    name.textContent = label;
+    const e = document.createElement('span');
+    e.className = 'ends';
+    e.innerHTML = `<em>${ends[0]}</em><em>${ends[1]}</em>`;
+    row.append(name, input, e);
+    el.append(row);
+  };
+  slider('size', 'Size', 0.2, 3, ['small', 'big']);
+  slider('threshold', 'Threshold', 0, 1, ['less', 'more']);
+  slider('rough', 'Rough edges', 0, 1, ['clean', 'ragged']);
+  slider('amount', 'Amount', 0, 1, ['faint', 'strong']);
+  // its color: the part's own made darker or lighter, or one picked (as it is)
+  if (!m.color) slider('darkness', 'Darkness', -1, 1, ['lighter', 'darker']);
+  slider('finish', 'Finish', -1, 1, ['matte', 'shiny']);
+  const row = document.createElement('div');
+  row.className = 'mark-color';
+  const own = document.createElement('label');
+  own.className = 'check';
+  const box = document.createElement('input');
+  box.type = 'checkbox';
+  box.checked = !m.color;
+  own.append(box, ' Part’s own color');
+  const color = document.createElement('input');
+  color.type = 'color';
+  color.value = m.color ?? selPart().color;
+  color.disabled = !m.color;
+  color.title = 'The marking’s color';
+  box.onchange = () => {
+    change({ color: box.checked ? undefined : color.value });
+    commit();
+    // Darkness only goes with the part's own color
+    renderMarkingParams(m, list);
+  };
+  color.oninput = () => change({ color: color.value });
+  color.onchange = () => commit();
+  row.append(own, color);
+  el.append(row);
 }
 
 function setStyle(id: StyleId) {

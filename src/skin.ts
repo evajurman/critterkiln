@@ -21,6 +21,8 @@ export interface SkinPart {
   color: THREE.Color;
   /** 0..1: how much its color glows */
   glow?: number;
+  /** for each marking the skin draws, whether this part has it (1 or 0): each fades out across the joins to parts without it */
+  marks?: number[];
   /** fillet size where this part joins others */
   k: number;
   /** low-poly: this part's facet size */
@@ -1125,6 +1127,7 @@ export function paintSkin(geo: THREE.BufferGeometry, parts: SkinPart[], colorBle
   const pos = geo.getAttribute('position') as THREE.BufferAttribute;
   const n = pos.count;
   paintGlow(geo, parts, colorBlend);
+  paintMarks(geo, parts, colorBlend);
   const blend = colorBlend > 0 && parts.some((p) => !p.color.equals(parts[0].color));
   if (!blend && !lowPoly) {
     if (geo.getAttribute('color')) geo.deleteAttribute('color');
@@ -1172,6 +1175,44 @@ export function paintSkin(geo: THREE.BufferGeometry, parts: SkinPart[], colorBle
   }
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   return blend;
+}
+
+/**
+ * Where a skin's parts are marked differently, how much of each of its
+ * markings each point has (a 4-wide `markW` attribute, see markings.ts):
+ * faded across each join over the fillet's width (or the color fade's, if
+ * wider), so a marking on one part dies away where it meets the next
+ * instead of stopping at a line. Removed when they're all marked alike.
+ */
+function paintMarks(geo: THREE.BufferGeometry, parts: SkinPart[], colorBlend: number) {
+  const key = (p: SkinPart) => (p.marks ?? []).join();
+  if (parts.every((p) => key(p) === key(parts[0]))) {
+    if (geo.getAttribute('markW')) geo.deleteAttribute('markW');
+    return;
+  }
+  const n = geo.getAttribute('position').count;
+  const out = new Float32Array(n * 4);
+  const mark = (p: SkinPart, j: number) => p.marks?.[j] ?? 0;
+  const kc = Math.max(colorBlend, ...parts.map((p) => p.k));
+  const fade = fadeDistances(geo, parts, 2 * kc);
+  for (let v = 0; v < n; v++) {
+    let wsum = 0;
+    const m = [0, 0, 0, 0];
+    let nearest = 0, nearestD = Infinity;
+    for (let e = fade.start[v]; e < fade.start[v + 1]; e++) {
+      const d = fade.d[e];
+      if (d < nearestD) {
+        nearestD = d;
+        nearest = fade.part[e];
+      }
+      if (d >= 2 * kc) continue;
+      const w = 1 / (Math.max(d, 0) + 0.25 * kc) ** 2;
+      for (let j = 0; j < 4; j++) m[j] += mark(parts[fade.part[e]], j) * w;
+      wsum += w;
+    }
+    for (let j = 0; j < 4; j++) out[v * 4 + j] = wsum > 0 ? m[j] / wsum : mark(parts[nearest], j);
+  }
+  geo.setAttribute('markW', new THREE.BufferAttribute(out, 4));
 }
 
 /**

@@ -47,6 +47,7 @@ self.onmessage = async (e: MessageEvent<SkinJob | { cancel: number }>) => {
       toRest: p.toRest ? new THREE.Matrix4().fromArray(p.toRest) : undefined,
       color: new THREE.Color(p.color[0], p.color[1], p.color[2]),
       glow: p.glow,
+      marks: p.marks,
       k: p.k,
       facet: p.facet,
     }));
