@@ -60,6 +60,8 @@ export const STYLE_PARAMS: Record<StyleId, StyleParam[]> = {
     { key: 'tint', label: 'Tint strength', min: 0, max: 1, step: 0.01, value: 0.7 },
     { key: 'thick', label: 'Thickness', min: 0, max: 1, step: 0.01, value: 0.08 },
     { key: 'ior', label: 'Refraction', min: 1, max: 2.2, step: 0.01, value: 1.45 },
+    // from glass to a gummy: hazy inside under a glossy skin, deep through the middle, glowing where it's thin
+    { key: 'gummy', label: 'Gummy', min: 0, max: 1, step: 0.01, value: 0 },
   ],
   patchwork: [
     { key: 'size', label: 'Patch size', min: 0.3, max: 6, step: 0.05, value: 1 },
@@ -1167,6 +1169,62 @@ function triplanar<T extends THREE.Material>(mat: T, o: TriOptions): T {
 }
 
 /**
+ * Glass made into jelly (a stand-in for light scattering inside it, which
+ * three.js doesn't do). Seen straight on it's deep, where light crosses the
+ * most of it; at the edges it's thin and lighter (the thickness light is
+ * tinted over follows that, not one number for the whole part). Light
+ * coming from behind shines through the thin parts in its own
+ * color (taken before shadows: the creature itself would always shadow it),
+ * and the edges glow softly even lit from the front. The color is the part's
+ * own, saturated (glass shows it paled by the tint), so blended colors glow
+ * as they are; a dark color barely glows, so black jelly stays black.
+ */
+function jelly(m: THREE.MeshPhysicalMaterial, cloud: number, inner: number): THREE.MeshPhysicalMaterial {
+  m.onBeforeCompile = (shader) => {
+    shader.uniforms.jellyCloud = { value: cloud };
+    shader.uniforms.jellyInner = { value: inner };
+    const back = 'jellyLit += jellyBack(directLight, geometryNormal, geometryViewDir, jellyThin);';
+    const lights = THREE.ShaderChunk.lights_fragment_begin.replace(/(get\w+LightInfo\([^;]*\);)/g, `$1\n${back}`);
+    const transmit = THREE.ShaderChunk.transmission_fragment.replace('material.thickness = thickness;', 'material.thickness = thickness * jellyDepth;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        'void main() {',
+        /* glsl */ `uniform float jellyCloud, jellyInner;
+        // light from behind, through the surface toward the eye (and a little wrapped round the edge)
+        vec3 jellyBack(IncidentLight l, vec3 n, vec3 v, float thin) {
+          vec3 h = normalize(l.direction + n * 0.4);
+          float through = pow(saturate(dot(v, -h)), 3.0) * 1.8;
+          float wrap = saturate((dot(n, l.direction) + 0.6) / 1.6) * 0.3;
+          return l.color * (through * (0.3 + thin) + wrap * thin);
+        }
+        void main() {`,
+      )
+      .replace(
+        '#include <lights_fragment_begin>',
+        /* glsl */ `float jellyFacing = clamp(abs(dot(normal, normalize(vViewPosition))), 0.0, 1.0);
+        float jellyThin = pow(1.0 - jellyFacing, 1.6);
+        // deep straight through the middle, thin at the edges
+        float jellyDepth = mix(1.0, 0.15 + 1.7 * pow(jellyFacing, 1.5), 0.4 + 0.6 * jellyCloud);
+        vec3 jellyLit = vec3(0.0);
+        ${lights}`,
+      )
+      .replace('#include <transmission_fragment>', transmit)
+      .replace(
+        '#include <opaque_fragment>',
+        /* glsl */ `{
+          float bright = max(diffuseColor.r, max(diffuseColor.g, diffuseColor.b));
+          vec3 own = diffuseColor.rgb / max(bright, 1e-3);
+          vec3 glowColor = own * own * min(1.0, bright * 1.5);
+          outgoingLight += glowColor * jellyInner * (jellyLit * 0.5 + 0.05 + 0.5 * jellyThin);
+        }
+        #include <opaque_fragment>`,
+      );
+  };
+  m.customProgramCacheKey = () => 'glass-jelly';
+  return m;
+}
+
+/**
  * Where a mesh's textures are laid out, for every triplanar material on it
  * (fuzz shells included). Body parts pass their bone's rest-pose frame, so
  * every part shares one texture space that then bends and turns with the
@@ -1244,24 +1302,32 @@ export function makeMaterial(style: StyleId, color: string, settings: StyleSetti
     case 'glass': {
       // real transmission: things behind and inside are refracted and tinted
       const white = new THREE.Color(1, 1, 1);
-      return new THREE.MeshPhysicalMaterial({
+      // Gummy: hazier, glowing from within, thicker and less refractive (like jelly's 1.35) as it goes up
+      const gummy = k.gummy ?? 0;
+      const cloud = gummy * 0.4;
+      const thick = Math.max(k.thick, 0.6 * gummy);
+      const m = new THREE.MeshPhysicalMaterial({
         color: surfaceColor('glass', color, k),
         metalness: 0,
-        roughness: (1 - k.clarity) * 0.55,
-        transmission: 1,
-        ior: k.ior,
-        thickness: 0.005 + k.thick * 0.6,
+        // cloudiness blurs what's seen through it (and lets a little of its own color show)...
+        roughness: Math.max((1 - k.clarity) * 0.55, cloud * 0.7),
+        transmission: 1 - cloud * 0.4,
+        ior: k.ior + (1.35 - k.ior) * gummy,
+        thickness: 0.005 + thick * 0.6,
         attenuationColor: white.clone().lerp(c, 0.3 + k.tint * 0.7),
-        attenuationDistance: 0.1 + (1 - k.tint) * 3,
+        // (cloudy jelly is deeper in color where it's thick)
+        attenuationDistance: (0.1 + (1 - k.tint) * 3) * (1 - cloud * 0.7),
         specularIntensity: 0.8,
-        clearcoat: 0.25,
-        clearcoatRoughness: (1 - k.clarity) * 0.3,
+        // ...while the clear coat keeps its skin wet and glossy
+        clearcoat: 0.25 + cloud * 0.75,
+        clearcoatRoughness: (1 - k.clarity) * 0.3 * (1 - cloud),
         // the scene's environment is kept dim for the matte materials; glass
         // gets its own brighter copy so it has crisp reflections. Not too
         // bright: a hollow jar stacks four reflective walls.
         envMap: glassEnv,
         envMapIntensity: 0.75,
       });
+      return gummy > 0 ? jelly(m, cloud, gummy) : m;
     }
     case 'metal': {
       const t = getMetalTex();
