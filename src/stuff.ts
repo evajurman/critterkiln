@@ -62,7 +62,7 @@ export interface Piece {
    */
   place?: PiecePlace;
   /**
-   * Both sides: the id of this piece's mirror image across the centre line.
+   * Mirror: the id of this piece's mirror image across the centre line.
    * The two are kept mirror images of each other (and both have it set).
    */
   twin?: string;
@@ -670,7 +670,7 @@ function wrapPoints(g: THREE.BufferGeometry, field: (x: number, y: number) => nu
 
 /** fillet size at a Blend shape of 1 (thing units) */
 const SHAPE_MAX = 0.15;
-/** width of the color fade at a Blend color of 1, either side of the seam */
+/** width of the color fade at a Blend colors of 1, either side of the seam */
 const COLOR_MAX = 0.3;
 
 interface BlendLink {

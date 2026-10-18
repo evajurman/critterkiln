@@ -37,7 +37,7 @@ export const TROPHIES: Trophy[] = [
   { id: 'body-plan', area: 'shape', icon: 'dna', title: 'Shape Shifter', desc: 'Switch to a different body plan.' },
   { id: 'named', area: 'shape', icon: 'tag', title: 'Hello, My Name Is', desc: 'Give a creature a name.' },
   { id: 'pose', area: 'shape', icon: 'person-running', title: 'Strike a Pose', desc: 'Bend a creature into a new pose.' },
-  { id: 'wonky', area: 'shape', icon: 'scale-unbalanced', title: 'Wonky Is Beautiful', desc: 'Turn off symmetry while drawing.' },
+  { id: 'wonky', area: 'shape', icon: 'scale-unbalanced', title: 'Wonky Is Beautiful', desc: 'Turn off Mirror while drawing.' },
   { id: 'limb', area: 'shape', icon: 'bone', title: 'Spare Parts', desc: 'Add a brand new limb to a skeleton.' },
   { id: 'split', area: 'shape', icon: 'code-fork', title: 'Double Jointed', desc: 'Split a bone in two.' },
   { id: 'limbs', area: 'shape', icon: 'spider', title: 'Too Many Limbs', desc: 'Build a creature with 16 or more parts.' },
