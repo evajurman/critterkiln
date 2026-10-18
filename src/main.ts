@@ -75,7 +75,7 @@ import {
   type GlowFollow,
   type StyleId,
 } from './materials';
-import { MARKINGS, MAX_MARKINGS, defaultMarking, markingThumbnails, migrateMarkings, type Marking } from './markings';
+import { MARKINGS, MAX_MARKINGS, defaultMarking, markingPlace, markingThumbnails, migrateMarkings, type Marking } from './markings';
 import { installScrollbars } from './scrollbars';
 import { applyPalette, GIFEncoder, quantize } from 'gifenc';
 import { ANIM_KINDS, animOffset, animP, canReverse, defaultAnim, leanAt, leanOf, leanQuat, mirrorAnim, reachAt, reachRim, rimLean, orbitOut, STUFF_KINDS, stuffMove, stuffP, type PartAnim, type StuffAnim, type StuffKind } from './animate';
@@ -2014,8 +2014,8 @@ function pickHandle(x: number, y: number): THREE.Object3D | null {
 }
 
 function handlesVisible() {
-  // Arrange has its own handles at the creature's feet, and picked stuff its own arrows
-  return !idle && !drawState && !placing && !selectedAttachment && mode !== 'stuff' && gizmos() !== 'none';
+  // Arrange has its own handles at the creature's feet, picked stuff its own arrows, and a marking being placed its own
+  return !idle && !drawState && !placing && !selectedAttachment && !markGizmo && mode !== 'stuff' && gizmos() !== 'none';
 }
 
 /** Back to nothing picked: clicking empty space in Shape. */
@@ -4077,6 +4077,7 @@ gizmo.addEventListener('dragging-changed', (e) => {
 });
 gizmo.addEventListener('objectChange', () => {
   invalidate();
+  if (gizmo.object === markProxy) return markGizmoMoved();
   if (piecePivot && gizmo.object === piecePivot) {
     mirrorTwinLive();
     return;
@@ -4102,6 +4103,11 @@ gizmo.addEventListener('mouseUp', () => {
     bakePiece();
     return;
   }
+  // (the last move, which would otherwise land after the commit)
+  if (gizmo.object === markProxy) {
+    layMarking();
+    renderMarkings();
+  }
   // a rescaled felt attachment regrows its fuzz at the new size
   if (selectedAttachment) creature.syncAttachments();
   if (placing && gizmo.mode === 'translate' && lifted()) setKeepFloor(false, true);
@@ -4118,6 +4124,7 @@ function selectAttachment(id: string) {
   const obj = creature.attachmentObject(id);
   if (!obj) return deselectAttachment();
   stopPlacing();
+  stopMarkGizmo();
   selectedAttachment = id;
   gizmo.showX = gizmo.showY = gizmo.showZ = true;
   gizmo.attach(obj);
@@ -4165,6 +4172,7 @@ function placeOnFloor() {
 function startPlacing() {
   if (mode === 'stuff') return;
   if (selectedAttachment) deselectAttachment();
+  stopMarkGizmo();
   placing = true;
   gizmo.showX = gizmo.showY = gizmo.showZ = true;
   gizmo.attach(creature.root);
@@ -6384,7 +6392,7 @@ function setMarkings(list: Marking[], doCommit: boolean) {
 
 function renderMarkings() {
   const el = $('#markings');
-  if (!creature.bones.has(selected)) return;
+  if (!creature.bones.has(selected)) return syncMarkGizmo();
   const list = [...(selPart().markings ?? [])];
   markOpen = Math.min(markOpen, Math.max(0, list.length - 1));
   el.innerHTML = '';
@@ -6454,7 +6462,7 @@ function renderMarkingParams(m: Marking | undefined, list: Marking[]) {
   const el = $('#marking-params');
   el.innerHTML = '';
   el.hidden = !m;
-  if (!m) return;
+  if (!m) return syncMarkGizmo();
   const head = document.createElement('div');
   head.className = 'style-params-head';
   head.innerHTML = `<span>${MARKINGS.find((k) => k.type === m.type)!.name} settings</span>`;
@@ -6530,6 +6538,138 @@ function renderMarkingParams(m: Marking | undefined, list: Marking[]) {
   color.onchange = () => commit();
   row.append(own, color);
   el.append(row);
+  // where the pattern lies: a gizmo in the view moves, turns and stretches it
+  const place = document.createElement('div');
+  place.className = 'mark-place';
+  const seg = document.createElement('div');
+  seg.className = 'seg';
+  const modes: [GizmoMode, string, string, string][] = [
+    ['translate', 'fa-duotone fa-regular fa-arrows-up-down-left-right', 'Move', 'Slide the pattern over the surface (W)'],
+    ['rotate', 'fa-duotone fa-regular fa-rotate', 'Turn', 'Turn the pattern: stripes run another way (E)'],
+    ['scale', 'fa-slab-duo fa-regular fa-expand', 'Stretch', 'Stretch the pattern along one way, or drag the middle to size it all (R)'],
+  ];
+  for (const [gm, icon, label, title] of modes) {
+    const b = document.createElement('button');
+    b.className = markGizmo && gizmo.mode === gm ? 'active' : '';
+    b.innerHTML = `<i class="${icon}" aria-hidden="true"></i> ${label}`;
+    b.title = title;
+    b.onclick = () => (markGizmo && gizmo.mode === gm ? stopMarkGizmo() : startMarkGizmo(gm));
+    seg.append(b);
+  }
+  const back = document.createElement('button');
+  back.className = 'link';
+  back.textContent = 'Put back';
+  back.title = 'Undo moving, turning and stretching this pattern';
+  back.hidden = !m.offset && !m.turn && !m.stretch;
+  back.onclick = () => {
+    delete m.offset;
+    delete m.turn;
+    delete m.stretch;
+    setMarkings(list, true);
+    renderMarkings();
+  };
+  place.append(seg, back);
+  el.append(place);
+  syncMarkGizmo();
+}
+
+// The marking gizmo: a stand-in object for the open marking's pattern, in the
+// creature's rest pose (where patterns are laid out), shown on the picked part
+// as it's posed now. Dragging it moves, turns or stretches the pattern.
+
+type GizmoMode = 'translate' | 'rotate' | 'scale';
+let markGizmo = false;
+/** the rest pose, as the picked part is posed now (kept in step every frame) */
+const markFrame = new THREE.Group();
+markFrame.matrixAutoUpdate = false;
+const markProxy = new THREE.Object3D();
+markFrame.add(markProxy);
+scene.add(markFrame);
+/** where the gizmo sits on the pattern: the picked part's middle, in the rest pose */
+const markAnchor = new THREE.Vector3();
+
+function openMarking(): Marking | undefined {
+  if (markAdding || mode === 'stuff' || !creature.bones.has(selected)) return undefined;
+  return selPart().markings?.[markOpen];
+}
+
+function placeMarkFrame() {
+  const b = creature.bones.get(selected);
+  if (!b) return;
+  creature.root.updateMatrixWorld(true);
+  markFrame.matrix.copy(b.pivot.matrixWorld).multiply(b.restGroup.clone().invert());
+  markFrame.updateMatrixWorld(true);
+}
+
+function startMarkGizmo(m: GizmoMode) {
+  stopPlacing();
+  if (selectedAttachment) deselectAttachment();
+  markGizmo = true;
+  gizmo.setMode(m);
+  gizmo.setSpace('local');
+  gizmo.showX = gizmo.showY = gizmo.showZ = true;
+  renderMarkings();
+  updateSkeletonVisibility();
+}
+
+function stopMarkGizmo() {
+  if (!markGizmo) return;
+  markGizmo = false;
+  if (gizmo.object === markProxy) gizmo.detach();
+  invalidate();
+  if (creature.bones.has(selected)) renderMarkings();
+  updateSkeletonVisibility();
+}
+
+/** Put the gizmo on the open marking (or take it off, with none open). */
+function syncMarkGizmo() {
+  const m = markGizmo ? openMarking() : undefined;
+  if (!m) {
+    if (gizmo.object === markProxy) gizmo.detach();
+    if (markGizmo) {
+      markGizmo = false;
+      updateSkeletonVisibility();
+    }
+    return;
+  }
+  const b = creature.bones.get(selected)!;
+  placeMarkFrame();
+  markAnchor.set(0, b.length / 2, 0).applyMatrix4(b.restGroup);
+  if (!gizmo.dragging) {
+    markingPlace(m).multiply(new THREE.Matrix4().makeTranslation(markAnchor)).decompose(markProxy.position, markProxy.quaternion, markProxy.scale);
+    markProxy.updateMatrixWorld(true);
+  }
+  if (gizmo.object !== markProxy) gizmo.attach(markProxy);
+  invalidate();
+}
+
+let markDragPending = false;
+/** The gizmo was dragged: lay the open marking where it now is (once a frame). */
+function markGizmoMoved() {
+  if (markDragPending) return;
+  markDragPending = true;
+  requestAnimationFrame(layMarking);
+}
+
+/** Lay the open marking where the gizmo is. */
+function layMarking() {
+    markDragPending = false;
+    const list = [...(selPart().markings ?? [])];
+    if (!list[markOpen]) return;
+    markProxy.updateMatrix();
+    const pos = new THREE.Vector3();
+    const turn = new THREE.Quaternion();
+    const stretch = new THREE.Vector3();
+    markProxy.matrix.clone().multiply(new THREE.Matrix4().makeTranslation(markAnchor.clone().negate())).decompose(pos, turn, stretch);
+    const r = (v: number) => Math.round(v * 1e4) / 1e4;
+    list[markOpen] = {
+      ...list[markOpen],
+      offset: pos.toArray().map(r) as [number, number, number],
+      turn: turn.toArray().map(r) as [number, number, number, number],
+      // (never squashed flat)
+      stretch: stretch.toArray().map((v) => r(Math.max(0.05, v))) as [number, number, number],
+    };
+    setMarkings(list, false);
 }
 
 function setStyle(id: StyleId) {
@@ -6594,6 +6734,7 @@ function setMode(m: Mode) {
   }
   mode = m;
   if (m === ANIM_TAB) deselectAttachment();
+  stopMarkGizmo();
   applyDof();
   if (m === 'look' || m === 'stuff') unlock(m);
   document.querySelectorAll<HTMLButtonElement>('.modes button').forEach((b) => b.classList.toggle('active', b.dataset.mode === m));
@@ -8154,6 +8295,7 @@ window.addEventListener('keydown', (e) => {
       gizmo.setMode(m);
       syncAttachBar();
     } else if (placing) setPlaceMode(m);
+    else if (markGizmo) startMarkGizmo(m);
   } else if (is(e, 'shape')) setMode('shape');
   else if (is(e, 'look')) setMode('look');
   else if (!e.ctrlKey && !e.metaKey && !e.altKey && k >= '4' && k <= '9' && customTabs()[+k - 4]) setMode(customTabs()[+k - 4].id);
@@ -8312,6 +8454,8 @@ function loop(now: number) {
   updateFocus(now);
   if (renderFrames <= 0) return;
   renderFrames--;
+  // the marking gizmo stays on its part as it's posed
+  if (gizmo.object === markProxy) placeMarkFrame();
   // sliders moved by code (undo, switching parts...) keep their numbers in step
   if (settings.numbers) syncSliderNumbers();
   if (shadowsChanged()) renderer.shadowMap.needsUpdate = true;

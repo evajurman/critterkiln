@@ -31,6 +31,12 @@ export interface Marking {
   color?: string;
   /** where it's marked the surface turns matte (down to -1) or shiny (up to 1); 0 = as the material is */
   finish: number;
+  /** where the pattern's moved to, in the creature's rest pose (unset: where it falls) */
+  offset?: [number, number, number];
+  /** how it's turned (a quaternion) */
+  turn?: [number, number, number, number];
+  /** how it's stretched along each of its own axes */
+  stretch?: [number, number, number];
 }
 
 /** markings one part can have */
@@ -58,7 +64,16 @@ export function defaultMarking(type: MarkingType): Marking {
 
 /** Changes whenever a marking would look different. */
 export function markingKey(m: Marking): string {
-  return JSON.stringify([m.type, m.size, m.threshold, m.rough, m.amount, m.darkness, m.color ?? '', m.finish]);
+  return JSON.stringify([m.type, m.size, m.threshold, m.rough, m.amount, m.darkness, m.color ?? '', m.finish, m.offset ?? 0, m.turn ?? 0, m.stretch ?? 0]);
+}
+
+/** Where a marking's pattern is laid, moved, turned and stretched, in the rest pose (the gizmo's handle on it). */
+export function markingPlace(m: Marking): THREE.Matrix4 {
+  return new THREE.Matrix4().compose(
+    new THREE.Vector3(...(m.offset ?? [0, 0, 0])),
+    new THREE.Quaternion(...(m.turn ?? [0, 0, 0, 1])),
+    new THREE.Vector3(...(m.stretch ?? [1, 1, 1])),
+  );
 }
 /** The same for a part's whole stack of markings (for mesh and grouping keys). */
 export function markingsKey(list: Marking[] | undefined): string {
@@ -115,14 +130,14 @@ vec3 mkWorley(vec3 p) {
       }
   return vec3(sqrt(d1), sqrt(d2), id);
 }
-vec4 mkTri(sampler2D t, vec3 p) {
-  vec3 w = pow(abs(normalize(vMarkNormal)), vec3(4.0));
+vec4 mkTri(sampler2D t, vec3 p, vec3 n) {
+  vec3 w = pow(abs(n), vec3(4.0));
   w /= w.x + w.y + w.z;
   return texture2D(t, p.yz) * w.x + texture2D(t, p.xz) * w.y + texture2D(t, p.xy) * w.z;
 }
 `;
 
-/** each pattern as a field: 1 where it's most marked, 0 where it's least (the threshold cuts it); TEX = its texture */
+/** each pattern as a field: 1 where it's most marked, 0 where it's least (the threshold cuts it); TEX = its texture, mn = the surface's direction in the pattern's own space */
 const FIELD: Record<MarkingType, string> = {
   spots: 'vec3 w = mkWorley(p); f = 1.0 - w.x * 1.2 + (mkNoise(p * 3.0) - 0.5) * 0.15;',
   speckles: 'vec3 w = mkWorley(p); f = 1.0 - w.x / (0.25 + 0.75 * w.z);',
@@ -131,16 +146,18 @@ const FIELD: Record<MarkingType, string> = {
   patches: 'f = clamp((mkFbm(p * 0.8 + 3.7) - 0.5) * 2.5 + 0.5, 0.0, 1.0);',
   cells: 'vec3 w = mkWorley(p + (vec3(mkNoise(p * 2.0), mkNoise(p * 2.0 + 5.2), mkNoise(p * 2.0 + 9.4)) - 0.5) * 0.35); f = clamp((w.y - w.x) * 2.2, 0.0, 1.0);',
   // each crack at its own level: a lower threshold shows more of them
-  cracks: 'f = mkTri(TEX, p).g;',
-  veins: 'f = mkTri(TEX, p).b;',
-  belly: 'f = 0.5 - 0.5 * normalize(vMarkNormal).y + (mkFbm(p) - 0.5) * 0.3;',
+  cracks: 'f = mkTri(TEX, p, mn).g;',
+  veins: 'f = mkTri(TEX, p, mn).b;',
+  belly: 'f = 0.5 - 0.5 * mn.y + (mkFbm(p) - 0.5) * 0.3;',
 };
 
 /** One marking's turn in the shader: `i` its uniforms, `w` how much of it this point has. */
 function layerGLSL(m: Marking, i: number, w: string): string {
   const u = (n: string) => `mk${i}${n}`;
   return /* glsl */ `{
-    vec3 p = vMarkPos * ${u('Scale')};
+    // into the pattern's own space (moved, turned, stretched: see markingPlace)
+    vec3 p = (${u('Xf')} * vec4(vMarkPos, 1.0)).xyz * ${u('Scale')};
+    vec3 mn = normalize(${u('XfN')} * vMarkNormal);
     float f = 0.0;
     ${FIELD[m.type].replace(/TEX/g, u('Tex'))}
     // rough edges: finer noise frays the cut, so it creeps in rather than being painted on
@@ -172,7 +189,10 @@ export function applyMarkings(mat: THREE.Material, layers: Marking[] | undefined
   if (!list.length || mat.userData.ink) return;
   const uniforms: Record<string, THREE.IUniform> = {};
   list.forEach((m, i) => {
+    const xf = markingPlace(m).invert();
     Object.assign(uniforms, {
+      [`mk${i}Xf`]: { value: xf },
+      [`mk${i}XfN`]: { value: new THREE.Matrix3().getNormalMatrix(xf) },
       [`mk${i}Scale`]: { value: 1 / (BASE_SIZE[m.type] * Math.max(0.05, m.size)) },
       [`mk${i}Thr`]: { value: m.threshold },
       [`mk${i}Rough`]: { value: m.rough ?? 0 },
@@ -218,7 +238,7 @@ export function applyMarkings(mat: THREE.Material, layers: Marking[] | undefined
         );
     }
     const decls = list
-      .map((m, i) => `uniform float mk${i}Scale, mk${i}Thr, mk${i}Rough, mk${i}Amt, mk${i}Dark, mk${i}Own, mk${i}Finish;\nuniform vec3 mk${i}Color;\n` + (TEXTURED[m.type] ? `uniform sampler2D mk${i}Tex;\n` : ''))
+      .map((m, i) => `uniform float mk${i}Scale, mk${i}Thr, mk${i}Rough, mk${i}Amt, mk${i}Dark, mk${i}Own, mk${i}Finish;\nuniform vec3 mk${i}Color;\nuniform mat4 mk${i}Xf;\nuniform mat3 mk${i}XfN;\n` + (TEXTURED[m.type] ? `uniform sampler2D mk${i}Tex;\n` : ''))
       .join('');
     const pars =
       (perPoint ? 'varying vec4 vMarkW;\n' : '') +

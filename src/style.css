@@ -254,6 +254,9 @@ input[type=range] { accent-color: var(--accent); width: 100%; }
 .mark-none { display: grid; place-items: center; border: 2px dashed var(--line); }
 .mark-color { display: flex; align-items: center; gap: 8px; margin: 8px 0; font-size: 13px; font-weight: var(--w-bold); }
 .mark-color input[type="color"]:disabled { opacity: .35; }
+.mark-place { display: flex; align-items: center; gap: 8px; }
+.mark-place .seg { flex: 1; margin-bottom: 0; }
+.mark-place .seg button { white-space: nowrap; padding: 6px 4px; }
 .styles b { display: block; font-size: 13px; }
 .ball { width: 26px; height: 26px; border-radius: 50%; flex: none; }
 .ball.clay { background: radial-gradient(circle at 35% 30%, #f3b7a3, #c96f55 70%); }
