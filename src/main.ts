@@ -75,7 +75,23 @@ import {
   type GlowFollow,
   type StyleId,
 } from './materials';
-import { MARKINGS, MAX_MARKINGS, defaultMarking, markingPlace, markingThumbnails, migrateMarkings, type Marking } from './markings';
+import {
+  FONTS,
+  MARKINGS,
+  MAX_MARKINGS,
+  STICKERS,
+  defaultMarking,
+  endLivePaint,
+  livePaint,
+  markingPlace,
+  markingThumbnails,
+  markingUses,
+  migrateMarkings,
+  onMarkingTexture,
+  pictureId,
+  type Marking,
+  type PaintStroke,
+} from './markings';
 import { installScrollbars } from './scrollbars';
 import { applyPalette, GIFEncoder, quantize } from 'gifenc';
 import { ANIM_KINDS, animOffset, animP, canReverse, defaultAnim, leanAt, leanOf, leanQuat, mirrorAnim, reachAt, reachRim, rimLean, orbitOut, STUFF_KINDS, stuffMove, stuffP, type PartAnim, type StuffAnim, type StuffKind } from './animate';
@@ -984,7 +1000,12 @@ function activate(i: number) {
   const next = creatures[i];
   const switching = creature !== next;
   // gizmos belong to the previous creature (first: leaving Arrange would show its handles again)
-  if (switching) stopPlacing();
+  if (switching) {
+    stopPlacing();
+    // (and a marking's gizmo, or the brush)
+    stopMarkGizmo();
+    stopBrush();
+  }
   if (creature && switching) {
     creature.setSkeletonVisible(false);
     creature.flash(null, 0);
@@ -2015,7 +2036,7 @@ function pickHandle(x: number, y: number): THREE.Object3D | null {
 
 function handlesVisible() {
   // Arrange has its own handles at the creature's feet, picked stuff its own arrows, and a marking being placed its own
-  return !idle && !drawState && !placing && !selectedAttachment && !markGizmo && mode !== 'stuff' && gizmos() !== 'none';
+  return !idle && !drawState && !placing && !selectedAttachment && !markGizmo && !brush.on && mode !== 'stuff' && gizmos() !== 'none';
 }
 
 /** Back to nothing picked: clicking empty space in Shape. */
@@ -6385,6 +6406,12 @@ function setMarkings(list: Marking[], doCommit: boolean) {
       if (p.glowFollow === 'markings') delete p.glowFollow;
     }
   }
+  // pictures no marking shows any more go
+  if (state.pictures) {
+    const shown = new Set(Object.values(state.parts).flatMap((p) => (p.markings ?? []).map((m) => m.picture)));
+    for (const id of Object.keys(state.pictures)) if (!shown.has(id)) delete state.pictures[id];
+    if (!Object.keys(state.pictures).length) delete state.pictures;
+  }
   creature.sync();
   creature.markMergeDirty();
   if (doCommit) commit();
@@ -6444,12 +6471,17 @@ function renderMarkings() {
       btn.title = k.title;
       btn.innerHTML = `${pic(k.type)}<span>${k.name}</span>`;
       btn.onclick = () => {
-        list.push(defaultMarking(k.type));
+        const m = defaultMarking(k.type);
+        if (STICKERS.includes(k.type)) faceView(m);
+        list.push(m);
         markOpen = list.length - 1;
         markAdding = false;
         setMarkings(list, true);
         renderMarkings();
         partGlowFollow();
+        if (k.type === 'picture') pickPicture(markOpen);
+        if (STICKERS.includes(k.type)) startMarkGizmo('translate');
+        if (k.type === 'paint') startBrush(false);
       };
       kinds.append(btn);
     }
@@ -6470,7 +6502,10 @@ function renderMarkingParams(m: Marking | undefined, list: Marking[]) {
   reset.className = 'link';
   reset.textContent = 'Reset';
   reset.onclick = () => {
-    list[list.indexOf(m)] = defaultMarking(m.type);
+    // (what's been painted, written or picked stays, and a sticker where it is)
+    const keep: Partial<Marking> = { picture: m.picture, text: m.text, font: m.font, strokes: m.strokes, id: m.id };
+    if (STICKERS.includes(m.type)) Object.assign(keep, { offset: m.offset, turn: m.turn, stretch: m.stretch });
+    list[list.indexOf(m)] = { ...defaultMarking(m.type), ...Object.fromEntries(Object.entries(keep).filter(([, v]) => v !== undefined)) };
     setMarkings(list, true);
     renderMarkings();
   };
@@ -6508,14 +6543,49 @@ function renderMarkingParams(m: Marking | undefined, list: Marking[]) {
     row.append(name, input, e);
     el.append(row);
   };
-  slider('size', 'Size', 0.2, 3, ['small', 'big']);
-  slider('threshold', 'Threshold', 0, 1, ['less', 'more']);
-  slider('rough', 'Rough edges', 0, 1, ['clean', 'ragged']);
+  const uses = markingUses(m.type);
+  if (m.type === 'picture') {
+    const choose = document.createElement('button');
+    choose.className = 'ghost mark-choose';
+    choose.innerHTML = `<i class="fa-duotone fa-regular fa-image" aria-hidden="true"></i> ${m.picture ? 'Change picture' : 'Choose a picture'}`;
+    choose.title = 'A picture from your computer (best with a see-through background)';
+    choose.onclick = () => pickPicture(list.indexOf(m));
+    el.append(choose);
+  }
+  if (m.type === 'text') {
+    const words = document.createElement('textarea');
+    words.className = 'mark-text';
+    words.rows = 2;
+    words.value = m.text ?? '';
+    words.placeholder = 'Type something';
+    words.oninput = () => change({ text: words.value });
+    words.onchange = () => commit();
+    const font = document.createElement('select');
+    font.className = 'mark-font';
+    for (const t of FONTS) {
+      const o = new Option(t.name, t.css);
+      o.style.fontFamily = t.css;
+      font.append(o);
+    }
+    font.value = m.font ?? FONTS[0].css;
+    font.style.fontFamily = font.value;
+    font.onchange = () => {
+      font.style.fontFamily = font.value;
+      change({ font: font.value });
+      commit();
+    };
+    el.append(words, font);
+  }
+  if (m.type === 'paint') paintTools(el, m, list);
+  if (uses.size) slider('size', 'Size', 0.2, 3, ['small', 'big']);
+  if (uses.threshold) slider('threshold', 'Threshold', 0, 1, ['less', 'more']);
+  if (uses.rough) slider('rough', 'Rough edges', 0, 1, ['clean', 'ragged']);
   slider('amount', 'Amount', 0, 1, ['faint', 'strong']);
   // its color: the part's own made darker or lighter, or one picked (as it is)
-  if (!m.color) slider('darkness', 'Darkness', -1, 1, ['lighter', 'darker']);
+  if (uses.color && !m.color) slider('darkness', 'Darkness', -1, 1, ['lighter', 'darker']);
   slider('finish', 'Finish', -1, 1, ['matte', 'shiny']);
   const row = document.createElement('div');
+  row.hidden = !uses.color;
   row.className = 'mark-color';
   const own = document.createElement('label');
   own.className = 'check';
@@ -6558,13 +6628,15 @@ function renderMarkingParams(m: Marking | undefined, list: Marking[]) {
   }
   const back = document.createElement('button');
   back.className = 'link';
-  back.textContent = 'Put back';
-  back.title = 'Undo moving, turning and stretching this pattern';
-  back.hidden = !m.offset && !m.turn && !m.stretch;
+  const sticker = STICKERS.includes(m.type);
+  back.textContent = sticker ? 'Face me' : 'Put back';
+  back.title = sticker ? 'Put it back on the middle of this part, facing you' : 'Undo moving, turning and stretching this pattern';
+  back.hidden = !sticker && !m.offset && !m.turn && !m.stretch;
   back.onclick = () => {
     delete m.offset;
     delete m.turn;
     delete m.stretch;
+    if (sticker) faceView(m);
     setMarkings(list, true);
     renderMarkings();
   };
@@ -6602,6 +6674,8 @@ function placeMarkFrame() {
 }
 
 function startMarkGizmo(m: GizmoMode) {
+  brush.on = false;
+  brushRing.hidden = true;
   stopPlacing();
   if (selectedAttachment) deselectAttachment();
   markGizmo = true;
@@ -6623,6 +6697,11 @@ function stopMarkGizmo() {
 
 /** Put the gizmo on the open marking (or take it off, with none open). */
 function syncMarkGizmo() {
+  if (brush.on && openMarking()?.type !== 'paint') {
+    brush.on = false;
+    brushRing.hidden = true;
+    updateSkeletonVisibility();
+  }
   const m = markGizmo ? openMarking() : undefined;
   if (!m) {
     if (gizmo.object === markProxy) gizmo.detach();
@@ -6634,7 +6713,9 @@ function syncMarkGizmo() {
   }
   const b = creature.bones.get(selected)!;
   placeMarkFrame();
-  markAnchor.set(0, b.length / 2, 0).applyMatrix4(b.restGroup);
+  // (on a sticker the gizmo is the sticker; on a pattern it sits on the part)
+  if (STICKERS.includes(m.type)) markAnchor.set(0, 0, 0);
+  else markAnchor.set(0, b.length / 2, 0).applyMatrix4(b.restGroup);
   if (!gizmo.dragging) {
     markingPlace(m).multiply(new THREE.Matrix4().makeTranslation(markAnchor)).decompose(markProxy.position, markProxy.quaternion, markProxy.scale);
     markProxy.updateMatrixWorld(true);
@@ -6671,6 +6752,242 @@ function layMarking() {
     };
     setMarkings(list, false);
 }
+
+/** Lay a sticker on the picked part where the view meets it (in its middle), facing the way it's being looked at. */
+function faceView(m: Marking) {
+  const b = creature.bones.get(selected);
+  if (!b) return;
+  placeMarkFrame();
+  const toRest = markFrame.matrixWorld.clone().invert();
+  let mid = new THREE.Vector3(0, b.length / 2, 0).applyMatrix4(b.restGroup);
+  // on its surface, not deep inside a fat part (a sticker only reaches so far in and out)
+  const from = view.getWorldPosition(new THREE.Vector3());
+  raycaster.set(from, mid.clone().applyMatrix4(markFrame.matrixWorld).sub(from).normalize());
+  const hit = creature.surfaceAt(raycaster);
+  if (hit) mid = hit.point.clone().applyMatrix4(hit.bone.pivot.matrixWorld.clone().invert()).applyMatrix4(hit.bone.restGroup);
+  const eye = view.getWorldPosition(new THREE.Vector3()).applyMatrix4(toRest);
+  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(view.quaternion).transformDirection(toRest);
+  // (its front, +Z, towards the eye)
+  const turn = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().lookAt(eye, mid, up));
+  const r = (v: number) => Math.round(v * 1e4) / 1e4;
+  m.offset = mid.toArray().map(r) as [number, number, number];
+  m.turn = turn.toArray().map(r) as [number, number, number, number];
+}
+
+/** Ask for a picture from the computer for marking i of the picked part (made small enough to keep). */
+function pickPicture(i: number) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.onchange = async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    let src: string;
+    try {
+      src = await shrinkPicture(file);
+    } catch {
+      hint('That picture couldn’t be opened', 2600, true);
+      return;
+    }
+    const list = [...(selPart().markings ?? [])];
+    if (list[i]?.type !== 'picture') return;
+    const id = pictureId(src);
+    state.pictures = { ...state.pictures, [id]: src };
+    list[i] = { ...list[i], picture: id };
+    setMarkings(list, true);
+    renderMarkings();
+  };
+  input.click();
+}
+
+/** A picture at most 512 across, as a data URL (webp keeps see-through parts and is small; a browser that can't write it gives a png). */
+async function shrinkPicture(file: File): Promise<string> {
+  const img = await createImageBitmap(file);
+  const k = Math.min(1, 512 / Math.max(img.width, img.height));
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(img.width * k));
+  c.height = Math.max(1, Math.round(img.height * k));
+  c.getContext('2d')!.drawImage(img, 0, 0, c.width, c.height);
+  img.close();
+  return c.toDataURL('image/webp', 0.9);
+}
+
+// a picture loading or a font arriving redraws whatever shows it
+onMarkingTexture(() => invalidate());
+
+// ---------------------------------------------------------------------------
+// Paint: with a paint marking open and its brush picked up, dragging over the
+// creature paints (or rubs out) a stroke; dragging off it still turns the view.
+
+const brush = { on: false, erase: false, size: 0.03, color: '#e04a4a' };
+/** the stroke going on: the marking it's for, and its strokes with this one last */
+let stroke: { m: Marking; strokes: PaintStroke[] } | null = null;
+/** the brush's outline, under the pointer */
+const brushRing = document.createElement('div');
+brushRing.id = 'brush-ring';
+brushRing.hidden = true;
+document.body.append(brushRing);
+
+/** The paint marking the brush paints on, if it's picked up. */
+function paintMarking(): Marking | undefined {
+  const m = brush.on ? openMarking() : undefined;
+  return m?.type === 'paint' ? m : undefined;
+}
+
+function startBrush(erase: boolean) {
+  stopMarkGizmo();
+  brush.on = true;
+  brush.erase = erase;
+  renderMarkings();
+  updateSkeletonVisibility();
+  hintOnce(erase ? 'Drag over the creature to rub paint out' : 'Drag over the creature to paint (drag off it to turn the view)', 3000);
+}
+
+function stopBrush() {
+  if (!brush.on) return;
+  brush.on = false;
+  brushRing.hidden = true;
+  if (creature.bones.has(selected)) renderMarkings();
+  updateSkeletonVisibility();
+}
+
+/** The brush's buttons and settings, in a paint marking's settings. */
+function paintTools(el: HTMLElement, m: Marking, list: Marking[]) {
+  const seg = document.createElement('div');
+  seg.className = 'seg mark-brush';
+  const tools: [boolean, string, string, string][] = [
+    [false, 'fa-paintbrush', 'Paint', 'Paint on the creature: drag over it'],
+    [true, 'fa-eraser', 'Rub out', 'Rub paint off: drag over it'],
+  ];
+  for (const [erase, icon, label, title] of tools) {
+    const b = document.createElement('button');
+    b.className = brush.on && brush.erase === erase ? 'active' : '';
+    b.innerHTML = `<i class="fa-duotone fa-regular ${icon}" aria-hidden="true"></i> ${label}`;
+    b.title = title;
+    b.onclick = () => (brush.on && brush.erase === erase ? stopBrush() : startBrush(erase));
+    seg.append(b);
+  }
+  el.append(seg);
+  const size = document.createElement('label');
+  size.className = 'slider';
+  const input = document.createElement('input');
+  input.type = 'range';
+  input.min = '0.005';
+  input.max = '0.12';
+  input.step = '0.001';
+  input.value = String(brush.size);
+  input.oninput = () => (brush.size = parseFloat(input.value));
+  const name = document.createElement('span');
+  name.textContent = 'Brush size';
+  const ends = document.createElement('span');
+  ends.className = 'ends';
+  ends.innerHTML = '<em>fine</em><em>broad</em>';
+  size.append(name, input, ends);
+  el.append(size);
+  const row = document.createElement('div');
+  row.className = 'mark-color';
+  const color = document.createElement('input');
+  color.type = 'color';
+  color.value = brush.color;
+  color.title = 'The brush’s color';
+  color.oninput = () => (brush.color = color.value);
+  const clear = document.createElement('button');
+  clear.className = 'link';
+  clear.textContent = 'Clear paint';
+  clear.title = 'Take all of this paint off';
+  clear.hidden = !m.strokes?.length;
+  clear.onclick = () => {
+    list[list.indexOf(m)] = { ...m, strokes: [] };
+    setMarkings(list, true);
+    renderMarkings();
+  };
+  row.append('Brush color', color, clear);
+  el.append(row);
+}
+
+/** Where the pointer is on the creature, in the paint's own space (and in the scene), if it's on it. */
+function paintAt(m: Marking, x: number, y: number): { at: THREE.Vector3; point: THREE.Vector3 } | null {
+  setRay(x, y);
+  const hit = creature.surfaceAt(raycaster);
+  if (!hit) return null;
+  const b = hit.bone;
+  const rest = hit.point.clone().applyMatrix4(b.pivot.matrixWorld.clone().invert()).applyMatrix4(b.restGroup);
+  // (paint moved with the gizmo is painted where it now is)
+  return { at: rest.applyMatrix4(markingPlace(m).invert()), point: hit.point };
+}
+
+/** The brush's outline round the pointer, as big as it paints there. */
+function showBrushRing(x: number, y: number, point: THREE.Vector3 | null) {
+  if (!point) {
+    brushRing.hidden = true;
+    return;
+  }
+  const r = canvas.getBoundingClientRect();
+  const across = new THREE.Vector3(1, 0, 0).applyQuaternion(view.quaternion).multiplyScalar(brush.size * creature.root.getWorldScale(new THREE.Vector3()).x);
+  const a = point.clone().project(view);
+  const b = point.clone().add(across).project(view);
+  const px = Math.max(3, Math.hypot(((b.x - a.x) * r.width) / 2, ((b.y - a.y) * r.height) / 2));
+  brushRing.hidden = false;
+  brushRing.classList.toggle('erase', brush.erase);
+  Object.assign(brushRing.style, { left: `${x}px`, top: `${y}px`, width: `${2 * px}px`, height: `${2 * px}px` });
+}
+
+const roundPt = (v: THREE.Vector3) => v.toArray().map((x) => Math.round(x * 1e4) / 1e4);
+
+// (before the view and the part handles see the press: a stroke on the creature is the brush's)
+canvas.addEventListener(
+  'pointerdown',
+  (e) => {
+    const m = paintMarking();
+    if (!m || e.button !== 0 || spacePan) return;
+    const hit = paintAt(m, e.clientX, e.clientY);
+    if (!hit) return;
+    e.stopImmediatePropagation();
+    canvas.setPointerCapture(e.pointerId);
+    const s: PaintStroke = { color: brush.color, r: Math.round(brush.size * 1e4) / 1e4, pts: roundPt(hit.at) };
+    if (brush.erase) s.erase = true;
+    stroke = { m, strokes: [...(m.strokes ?? []), s] };
+    livePaint(m, stroke.strokes, 0);
+    invalidate();
+  },
+  { capture: true },
+);
+canvas.addEventListener(
+  'pointermove',
+  (e) => {
+    const m = paintMarking();
+    if (!m) return;
+    const hit = paintAt(m, e.clientX, e.clientY);
+    showBrushRing(e.clientX, e.clientY, hit?.point ?? null);
+    if (!stroke) return;
+    e.stopImmediatePropagation();
+    if (!hit) return;
+    const s = stroke.strokes[stroke.strokes.length - 1];
+    const n = s.pts.length;
+    // a point every third of the brush's width or so
+    if (new THREE.Vector3().fromArray(s.pts, n - 3).distanceTo(hit.at) < brush.size * 0.3) return;
+    s.pts.push(...roundPt(hit.at));
+    livePaint(stroke.m, stroke.strokes, n - 3);
+    invalidate();
+  },
+  { capture: true },
+);
+function endStroke(e: PointerEvent) {
+  if (!stroke) return;
+  e.stopImmediatePropagation();
+  const { m, strokes } = stroke;
+  stroke = null;
+  endLivePaint(m);
+  const list = [...(selPart().markings ?? [])];
+  const i = list.indexOf(m) >= 0 ? list.indexOf(m) : markOpen;
+  if (list[i]?.type !== 'paint') return;
+  list[i] = { ...list[i], strokes };
+  setMarkings(list, true);
+  renderMarkings();
+}
+canvas.addEventListener('pointerup', endStroke, { capture: true });
+canvas.addEventListener('pointercancel', endStroke, { capture: true });
+canvas.addEventListener('pointerleave', () => (brushRing.hidden = true));
 
 function setStyle(id: StyleId) {
   if (!styleAll) {
@@ -6735,6 +7052,7 @@ function setMode(m: Mode) {
   mode = m;
   if (m === ANIM_TAB) deselectAttachment();
   stopMarkGizmo();
+  stopBrush();
   applyDof();
   if (m === 'look' || m === 'stuff') unlock(m);
   document.querySelectorAll<HTMLButtonElement>('.modes button').forEach((b) => b.classList.toggle('active', b.dataset.mode === m));
@@ -8234,7 +8552,7 @@ window.addEventListener('keydown', (e) => {
   if (e.defaultPrevented && !$('#keys-pop').hidden) return;
   const tag = (e.target as HTMLElement).tagName;
   // typing in a text or number box
-  if (tag === 'INPUT' && ['text', 'number', 'search'].includes((e.target as HTMLInputElement).type)) return;
+  if (tag === 'TEXTAREA' || (tag === 'INPUT' && ['text', 'number', 'search'].includes((e.target as HTMLInputElement).type))) return;
   const k = e.key.toLowerCase();
   if (is(e, 'undo')) {
     e.preventDefault();

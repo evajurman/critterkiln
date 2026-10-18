@@ -26,7 +26,7 @@ import {
 } from './materials';
 import { MAX_BEND, bendCurve, expandRig, onCurve, type BendCurve, type ExpandedBone, type ExpandedRig, type RigState, type V3 } from './rigs';
 import type { PartAnim, StuffAnim } from './animate';
-import { MAX_LAYERS, applyMarkings, markingKey, markingsKey, type Marking } from './markings';
+import { MAX_LAYERS, applyMarkings, markingKey, markingsKey, setPictures, type Marking } from './markings';
 import { buildThing, disposeThing, partPieceGeometry, type Thing, type WrapSurface } from './stuff';
 
 /** One drawn shape of a part, puffed up on its own: drawn from the front (the default) or from the side. */
@@ -237,6 +237,8 @@ export interface CreatureState {
   keepFloor?: boolean;
   /** looping motions, per part (scene id): see src/animate.ts */
   anims?: Record<string, PartAnim>;
+  /** pictures its markings show, by id (each kept once, however many parts show it) */
+  pictures?: Record<string, string>;
   /** 1 once patterns that used to be material settings (stone cracks, metal patina...) are parts' markings (see migrateMarkings) */
   markingsV?: number;
 }
@@ -1101,6 +1103,7 @@ export class Creature {
   sync() {
     this.baseTouch.clear();
     const s = this.state;
+    setPictures(s.pictures);
     this.applyPlacement();
     // a glow change alone (painting the whole creature, undo) leaves every
     // part's mesh as it is, but the skins still need it

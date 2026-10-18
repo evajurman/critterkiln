@@ -257,6 +257,15 @@ input[type=range] { accent-color: var(--accent); width: 100%; }
 .mark-place { display: flex; align-items: center; gap: 8px; }
 .mark-place .seg { flex: 1; margin-bottom: 0; }
 .mark-place .seg button { white-space: nowrap; padding: 6px 4px; }
+.mark-text, .mark-font { display: block; width: 100%; box-sizing: border-box; margin: 6px 0; padding: 6px 8px; border: 2px solid var(--line); border-radius: 10px; background: var(--card); color: var(--ink); font: inherit; font-size: 14px; }
+.mark-text { resize: vertical; min-height: 44px; }
+.mark-text:focus, .mark-font:focus { outline: none; border-color: var(--accent); }
+.mark-choose { width: 100%; margin: 6px 0; }
+.mark-brush { margin: 6px 0; }
+.mark-brush button { white-space: nowrap; }
+.mark-color .link { margin-left: auto; }
+#brush-ring { position: fixed; z-index: 30; pointer-events: none; transform: translate(-50%, -50%); border: 2px solid #fff; border-radius: 50%; box-shadow: 0 0 0 1px rgba(0,0,0,.45), inset 0 0 0 1px rgba(0,0,0,.45); }
+#brush-ring.erase { border-style: dashed; }
 .styles b { display: block; font-size: 13px; }
 .ball { width: 26px; height: 26px; border-radius: 50%; flex: none; }
 .ball.clay { background: radial-gradient(circle at 35% 30%, #f3b7a3, #c96f55 70%); }
