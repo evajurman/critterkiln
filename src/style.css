@@ -179,14 +179,6 @@ button, input, select { font: inherit; color: inherit; }
 .rigs button span { font-size: 22px; }
 .rigs button.active { border-color: var(--accent); color: var(--ink); background: var(--accent-soft); }
 
-.parts { display: flex; flex-wrap: wrap; gap: 6px; }
-.parts button {
-  border: 1px solid var(--line); background: var(--bg); border-radius: 999px;
-  padding: 4px 10px; font-size: 13px; font-weight: var(--w-bold); cursor: var(--cursor-click);
-  display: flex; align-items: center; gap: 6px;
-}
-.parts button i:not([class]) { width: 10px; height: 10px; border-radius: 50%; display: inline-block; border: 1px solid rgba(0,0,0,.15); }
-.parts button.active { background: var(--ink); color: var(--on-ink); border-color: var(--ink); }
 
 .card {
   margin-top: 12px; padding: 12px; border: 1px solid var(--line);
@@ -516,7 +508,21 @@ button.primary.slim { width: auto; flex: 1; padding: 8px 10px; font-size: 14px; 
 }
 .creature-bar[hidden], #place-bar[hidden] { display: none; }
 /* one row per creature (the .piece-row look from Stuff); a crowded scene scrolls inside the bar */
-.creature-rows { display: flex; flex-direction: column; gap: 4px; max-height: 30vh; overflow-y: auto; }
+.creature-rows { display: flex; flex-direction: column; gap: 4px; max-height: 45vh; overflow-y: auto; }
+/* the > before a creature: its parts, folded out under it */
+.creature-row .parts-fold { width: 22px; flex: none; }
+.parts-fold .fa-chevron-down { font-size: 11px; transition: transform .15s; transform: rotate(-90deg); }
+.parts-fold.open .fa-chevron-down { transform: none; }
+.part-rows { display: flex; flex-direction: column; gap: 1px; margin: 0 0 4px 24px; }
+.part-row {
+  display: flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 8px; text-align: left;
+  border: 0; background: none; color: inherit; font-size: 12px; font-weight: var(--w-bold); cursor: var(--cursor-click);
+}
+.part-row:hover { background: var(--accent-soft); }
+.part-row.active { background: var(--ink); color: var(--on-ink); }
+.part-row i:not([class]) { width: 10px; height: 10px; border-radius: 50%; display: inline-block; border: 1px solid rgba(0,0,0,.15); flex: none; }
+.part-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.part-mark { flex: none; font-size: 11px; opacity: .75; }
 .creature-row .piece-pick { min-width: 0; }
 .creature-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .creature-row .chip-name { flex: 1; min-width: 0; padding: 4px 8px; font-weight: var(--w-heavy); font-size: 13px; border: 1.5px solid var(--accent); border-radius: 8px; }
@@ -644,6 +650,8 @@ body.show-nums .slider input.num, body.show-nums .bar-slider input.num { display
 .legend span { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
 /* a how-to after the key, set off by a divider */
 .legend .legend-tip { gap: 3px; padding-left: 10px; border-left: 1px solid var(--line); }
+/* keys look as they do on the shortcut sheet (.keys-btn kbd) */
+.legend kbd { font: inherit; font-size: 11px; font-weight: var(--w-bold); background: var(--bg); color: var(--ink); border-radius: 5px; padding: 1px 6px; }
 .legend .legend-tip .dot:last-of-type { margin-right: 2px; }
 @media (max-width: 960px) { .legend { display: none; } }
 
@@ -889,7 +897,8 @@ button.piece-icon { padding: 0; border: 0; background: transparent; }
   .sheet-grip:active::before { background: var(--muted); }
 
   /* bigger targets for fingers */
-  .parts button:not(.piece-icon), .eye-pairs button { padding: 6px 12px; }
+  .part-row { padding: 6px 10px; font-size: 14px; }
+  .eye-pairs button { padding: 6px 12px; }
   .check input { width: 20px; height: 20px; }
   /* iOS zooms the page into any text box under 16px */
   input.text, .creature-row .chip-name, .slider input.num, .bar-slider input.num { font-size: 16px; }
@@ -1040,7 +1049,7 @@ html.theme-color .fa-shield { --ic: #5577bd; }
 html.theme-color .fa-fill-drip { --ic: #e0609a; }
 html.theme-color :is(.fa-triangle, .fa-square, .fa-circle, .fa-rectangle-wide) { --ic: #f07a32; }
 /* on a filled button or badge an icon keeps the button's own text color */
-html.theme-color :is(button.primary, .parts button.active, .eye-pairs button.active, .piece-row.active, .cancel,
+html.theme-color :is(button.primary, .part-row.active, .eye-pairs button.active, .piece-row.active, .cancel,
   .draw-bar button:not(.seg-btn), .seg-btn.on, .pill-toggle.on, .tools button.on, .hint,
   .trophy-icon, .toast-icon, .creation-badge) [class*="fa-"] { --ic: initial; color: inherit; }
 

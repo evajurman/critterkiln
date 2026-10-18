@@ -88,7 +88,6 @@
               <div id="saved-rig-list" class="saved-rigs"></div>
             </details>
           </div>
-          <div class="ck-tool" data-tool="parts"><div id="parts" class="parts"></div></div>
           <div class="ck-tool" data-tool="blend">
             <label class="slider wide-label" title="How smoothly touching parts of the same material flow into each other. 0 keeps them separate.">
               <span>Blend parts</span><input id="merge-radius" type="range" min="0" max="0.25" step="0.005" />
@@ -459,6 +458,7 @@
           <span><b class="dot orange"></b> bend</span>
           <span><b class="dot purple square"></b> slide</span>
           <span title="Drag to curve the part; double-click to straighten it"><b class="dot green diamond"></b> curve</span>
+          <span class="legend-tip mouse-only" title="While dragging a grip: Shift keeps it to the creature's X, Y or Z; Ctrl snaps it onto another part's base or tip"><kbd>Shift</kbd> one axis · <kbd class="ctrl-key">Ctrl</kbd> snap</span>
           <span class="legend-tip" title="Scroll on an orange tip or a purple base: Tip and Base width (a drawn part grows or shrinks whole)"><b class="dot orange"></b><b class="dot purple square"></b> scroll to change size</span>
         </div>
         <div id="hint" class="hint">

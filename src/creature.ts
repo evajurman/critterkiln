@@ -2978,15 +2978,7 @@ export class Creature {
    */
   dragTip(id: string, target: THREE.Vector3, ik: boolean): BoneRT[] {
     const b = this.bones.get(id)!;
-    const chain: BoneRT[] = [b];
-    const branches = (p: BoneRT) => this.list.filter((c) => c.parent === p).length > 1;
-    if (ik) {
-      let p = b.parent;
-      while (p && !p.def.anchor && !branches(p)) {
-        chain.push(p);
-        p = p.parent;
-      }
-    }
+    const chain = this.ikChain(id, ik);
     this.mergeDirty = true;
     // turning the body itself: the legs it stands on keep hanging the way they
     // were, so it rears up or leans over its feet instead of tipping the whole critter
@@ -3062,6 +3054,45 @@ export class Creature {
         }
       }
     }
+  }
+
+  /** The parts dragging this one's tip turns (see dragTip): it, and with IK the limb above it. */
+  ikChain(id: string, ik: boolean): BoneRT[] {
+    const b = this.bones.get(id)!;
+    const chain: BoneRT[] = [b];
+    const branches = (p: BoneRT) => this.list.filter((c) => c.parent === p).length > 1;
+    if (ik) {
+      let p = b.parent;
+      while (p && !p.def.anchor && !branches(p)) {
+        chain.push(p);
+        p = p.parent;
+      }
+    }
+    return chain;
+  }
+
+  /** These parts and every part hanging off them. */
+  withBelow(bones: BoneRT[]): Set<BoneRT> {
+    const set = new Set(bones);
+    for (const b of this.list) {
+      for (let p = b.parent; p; p = p.parent) {
+        if (set.has(p)) {
+          set.add(b);
+          break;
+        }
+      }
+    }
+    return set;
+  }
+
+  /** Every part's base and tip, where they are now (things a dragged grip can snap to). */
+  nodes(skip: Set<BoneRT> = new Set()): { bone: BoneRT; end: 'base' | 'tip'; at: THREE.Vector3 }[] {
+    return this.list
+      .filter((b) => !skip.has(b))
+      .flatMap((b) => [
+        { bone: b, end: 'base' as const, at: b.pivot.getWorldPosition(new THREE.Vector3()) },
+        { bone: b, end: 'tip' as const, at: b.tip.getWorldPosition(new THREE.Vector3()) },
+      ]);
   }
 
   /** A limb that (as drawn) reaches down to the floor, itself or through the parts hanging off it. */

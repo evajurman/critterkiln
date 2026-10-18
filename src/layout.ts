@@ -45,7 +45,6 @@ const duo = (n: string) => `fa-duotone fa-regular fa-${n}`;
 
 const TOOLS: Record<string, ToolDef> = {
   plan: { name: 'Body plans', icon: duo('bone'), kind: 'wide' },
-  parts: { name: 'Parts list', icon: slab('square'), kind: 'wide' },
   blend: { name: 'Blend parts', icon: duo('sliders'), kind: 'wide' },
   opacity: { name: 'Opacity', icon: duo('sliders'), kind: 'wide' },
   seamless: { name: 'Seamless joins', icon: slab('wand-magic-sparkles'), kind: 'wide' },
@@ -146,7 +145,7 @@ const pick = <T>(a: T[]) => a[Math.floor(Math.random() * a.length)];
 
 const SECTIONS: Omit<Sec, 'place'>[] = [
   { id: 'plan', name: 'Body plan', icon: 'hand', color: '#c98f5a', tools: ['plan'] },
-  { id: 'parts', name: 'Parts', icon: 'square', color: '#f07a32', tools: ['parts', 'blend', 'seamless', 'worn'] },
+  { id: 'parts', name: 'Parts', icon: 'square', color: '#f07a32', tools: ['blend', 'seamless', 'worn'] },
   { id: 'part', name: 'This part', icon: 'pencil', color: '#e5823a', tools: ['name', 'draw', 'thickness', 'width0', 'width1', 'reset-shape'] },
   { id: 'grow', name: 'Grow', icon: 'scissors', color: '#d0486a', tools: ['bone', 'extend', 'split', 'detach', 'dup', 'del', 'parent'] },
   { id: 'pose', name: 'Pose', icon: 'face-smile', color: '#e9a51f', tools: ['stand', 'floor', 'keep-floor'] },

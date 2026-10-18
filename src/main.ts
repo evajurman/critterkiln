@@ -906,6 +906,10 @@ function restore(snap: string) {
     }
   }
   while (creatures.length > next.creatures.length) creatures.pop()!.dispose();
+  // (undo brings back copies: their parts lists stay open or closed)
+  next.creatures.forEach((s, i) => {
+    if (world.creatures[i] && partsOpen.has(world.creatures[i])) partsOpen.add(s);
+  });
   world = next;
   activate(world.active);
   syncWorkbench();
@@ -1054,6 +1058,11 @@ let drag: {
   toDef?: THREE.Matrix3;
   /** where the pointer last was (scrolling pushes a dragged tip nearer or further from there) */
   last?: THREE.Vector2;
+  /** the parts that move with this drag, so not snapped to (Ctrl), and where the pointer is (Shift or Ctrl pressed mid-drag re-applies) */
+  moving: Set<BoneRT>;
+  at?: THREE.Vector2;
+  /** the base or tip it's snapped to now */
+  snapped?: string;
   /**
    * Dragging a tip: pulled past the part's (or limb's) reach it stretches, and
    * one pushed nearer its base than it started shrinks it. The skeleton before
@@ -1394,7 +1403,13 @@ canvas.addEventListener('pointerdown', (e) => {
     roll = { start: new THREE.Vector2(e.clientX, e.clientY), dir, pxPerRad: visible ? pxPerRad : 120, rest, pose: structuredClone(state.pose), eyes: structuredClone(state.eyes) };
   }
   const stretch = kind === 'end' ? { base: JSON.stringify(state.rig), k: 1, kY: new Map<string, number>() } : undefined;
-  drag = { id, kind, plane, body, stretch, startHit: pos, moved: false, rigBase: reshape ? JSON.stringify(state.rig) : undefined, toDef, roll, node: h.userData.node as number | undefined, gap: h.userData.gap === undefined ? undefined : { at: h.userData.gap as number, pos: h.position.clone() } };
+  const ik = $<HTMLInputElement>('#ik').checked;
+  const moving = !b
+    ? new Set<BoneRT>()
+    : body
+      ? new Set(creature.list)
+      : creature.withBelow(kind === 'end' ? creature.linked(id).flatMap((l) => creature.ikChain(l.def.id, ik)) : creature.linked(id));
+  drag = { id, kind, plane, body, stretch, moving, startHit: pos, moved: false, rigBase: reshape ? JSON.stringify(state.rig) : undefined, toDef, roll, node: h.userData.node as number | undefined, gap: h.userData.gap === undefined ? undefined : { at: h.userData.gap as number, pos: h.position.clone() } };
 });
 
 canvas.addEventListener('pointermove', (e) => {
@@ -1405,9 +1420,11 @@ canvas.addEventListener('pointermove', (e) => {
   }
   if (drag) {
     setRay(e.clientX, e.clientY);
-    const hit = raycaster.ray.intersectPlane(drag.plane, new THREE.Vector3());
+    let hit = raycaster.ray.intersectPlane(drag.plane, new THREE.Vector3());
     if (!hit) return;
     drag.moved = drag.moved || pointer.moved;
+    drag.at = new THREE.Vector2(e.clientX, e.clientY);
+    if (drag.kind !== 'roll') hit = assistDrag(hit, e);
     if (drag.body) {
       if (!drag.moved) return;
       // the move in the creature's own space (it may be turned or resized)
@@ -1487,6 +1504,81 @@ canvas.addEventListener('pointermove', (e) => {
     $('#viewport').style.cursor = h ? 'var(--cursor-click)' : '';
   }
 });
+
+// a grip dragged with Shift keeps to one of the creature's axes (the line
+// shows which), with Ctrl (⌘) it snaps onto the base or tip of another part
+const AXIS_COLORS = [0xe5484d, 0x30a46c, 0x3b82f6];
+const axisGuide = new THREE.Line(
+  new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-50, 0, 0), new THREE.Vector3(50, 0, 0)]),
+  new THREE.LineBasicMaterial({ depthTest: false, transparent: true }),
+);
+const snapGuide = new THREE.Mesh(new THREE.SphereGeometry(0.03, 16, 10), new THREE.MeshBasicMaterial({ color: 0xfacc15, depthTest: false, transparent: true }));
+for (const g of [axisGuide, snapGuide]) {
+  g.renderOrder = 1001;
+  g.frustumCulled = false;
+  g.visible = false;
+  scene.add(g);
+}
+
+/** Where a dragged grip goes, Shift (one axis) and Ctrl (snapping) taken into account. */
+function assistDrag(hit: THREE.Vector3, e: MouseEvent): THREE.Vector3 {
+  const d = drag!;
+  axisGuide.visible = snapGuide.visible = false;
+  const snap = e.ctrlKey || e.metaKey ? nodeNear(e.clientX, e.clientY, d.moving) : null;
+  if (snap) {
+    snapGuide.position.copy(snap.at);
+    snapGuide.visible = true;
+    const key = `${snap.bone.def.id} ${snap.end}`;
+    if (key !== d.snapped) hint(`Snapped to the ${snap.bone.def.name} ${snap.end}`, 1200);
+    d.snapped = key;
+    return snap.at.clone();
+  }
+  d.snapped = undefined;
+  if (!e.shiftKey) return hit;
+  // in the creature's own X, Y and Z (it may be turned): whichever the move is mostly along
+  const from = creature.root.worldToLocal(d.startHit.clone());
+  const to = creature.root.worldToLocal(hit.clone());
+  const m = to.clone().sub(from).toArray().map(Math.abs);
+  const ax = m[0] >= m[1] && m[0] >= m[2] ? 0 : m[1] >= m[2] ? 1 : 2;
+  from.setComponent(ax, to.getComponent(ax));
+  const dir = new THREE.Vector3().setComponent(ax, 1).transformDirection(creature.root.matrixWorld);
+  axisGuide.position.copy(d.startHit);
+  axisGuide.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), dir);
+  (axisGuide.material as THREE.LineBasicMaterial).color.setHex(AXIS_COLORS[ax]);
+  axisGuide.visible = true;
+  return creature.root.localToWorld(from);
+}
+
+/** The base or tip (of any creature's parts but the moving ones) nearest the pointer on screen, if one's close. */
+function nodeNear(x: number, y: number, moving: Set<BoneRT>) {
+  const r = canvas.getBoundingClientRect();
+  let best: ReturnType<Creature['nodes']>[number] | null = null;
+  let bestD = 18;
+  for (const c of creatures) {
+    c.root.updateMatrixWorld(true);
+    for (const n of c.nodes(c === creature ? moving : undefined)) {
+      const v = n.at.clone().project(view);
+      if (v.z > 1) continue;
+      const dd = Math.hypot(r.left + ((v.x + 1) / 2) * r.width - x, r.top + ((1 - v.y) / 2) * r.height - y);
+      if (dd < bestD) {
+        bestD = dd;
+        best = n;
+      }
+    }
+  }
+  return best;
+}
+
+if (/Mac|iPhone|iPad/.test(navigator.platform)) document.querySelectorAll('.ctrl-key').forEach((k) => (k.textContent = '⌘'));
+
+// pressing or letting go of Shift or Ctrl mid-drag applies straight away
+for (const type of ['keydown', 'keyup'] as const) {
+  addEventListener(type, (e) => {
+    if (!drag?.at || !['Shift', 'Control', 'Meta'].includes(e.key)) return;
+    const { x, y } = drag.at;
+    canvas.dispatchEvent(new PointerEvent('pointermove', { clientX: x, clientY: y, buttons: 1, shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey }));
+  });
+}
 
 /**
  * Sliding a base over the surface (see ridesSurface): the spot on the surface
@@ -1606,6 +1698,7 @@ canvas.addEventListener('pointerup', (e) => {
     const d = drag;
     drag = null;
     controls.enabled = true;
+    axisGuide.visible = snapGuide.visible = false;
     // the waiting bend grips come back, in the gaps either side of a new bend point
     if (creature.bendDragging) creature.setBendDragging(false);
     creature.rolling = false;
@@ -2729,7 +2822,7 @@ function finishDraw() {
   exitDraw(true);
   creature.sync();
   commit();
-  renderParts();
+  renderCreatureBar();
   flashPart();
   hintOnce('Inflated! Drag to look around, or pick another part', 2200);
 }
@@ -4110,6 +4203,9 @@ $('#place-done').onclick = () => {
 // ---------------------------------------------------------------------------
 // the creature switcher
 
+/** creatures whose parts are shown under their row (the > beside it) */
+const partsOpen = new WeakSet<CreatureState>();
+
 function renderCreatureBar() {
   const el = $('#creature-rows');
   el.innerHTML = '';
@@ -4148,9 +4244,56 @@ function renderCreatureBar() {
     del.title = world.creatures.length < 2 ? 'The scene needs at least one creature' : 'Remove this creature from the scene';
     del.disabled = world.creatures.length < 2;
     del.onclick = () => removeCreature(i);
+    const open = partsOpen.has(s);
+    const fold = document.createElement('button');
+    fold.className = 'piece-icon parts-fold' + (open ? ' open' : '');
+    fold.innerHTML = '<i class="fa-duotone fa-regular fa-chevron-down" aria-hidden="true"></i>';
+    fold.title = open ? 'Hide its parts' : 'Show its parts';
+    fold.setAttribute('aria-expanded', String(open));
+    fold.onclick = () => {
+      if (open) partsOpen.delete(s);
+      else partsOpen.add(s);
+      renderCreatureBar();
+    };
+    row.prepend(fold);
     row.append(pick, dup, del);
     el.append(row);
+    if (open) el.append(partRows(i));
   });
+}
+
+/** One row per part of creature `i` (a pair is one row): its color, name and motion; clicking one picks it. */
+function partRows(i: number): HTMLElement {
+  const s = world.creatures[i];
+  const c = creatures[i];
+  const list = document.createElement('div');
+  list.className = 'part-rows';
+  const picked = i === world.active && !idle ? creature.bones.get(selected)?.src : undefined;
+  for (const b of c.list.filter((o) => !o.def.mirrorOf)) {
+    const p = s.parts[b.src];
+    if (!p) continue;
+    const twin = c.list.find((o) => o.def.mirrorOf === b.def.id);
+    const anim = s.anims?.[b.def.id] ?? (twin && s.anims?.[twin.def.id]);
+    const kind = anim && ANIM_KINDS.find((k) => k.kind === anim.kind);
+    const btn = document.createElement('button');
+    btn.className = 'part-row' + (b.src === picked ? ' active' : '');
+    const name = b.def.sideSign !== 0 ? b.def.name.replace(/ \((L|R)\)$/, '') : b.def.name;
+    btn.innerHTML =
+      `<i style="background:${p.color}"></i><span class="part-name">${name}${twin ? ' ×2' : ''}</span>` +
+      (p.outline ? `<span class="part-mark" title="Drawn">${fa('check')}</span>` : '') +
+      (kind ? `<span class="part-mark" title="Moves: ${kind.name}"><i class="fa-duotone fa-regular fa-${kind.icon}" aria-hidden="true"></i></span>` : '');
+    btn.title = kind ? `${name}: moves (${kind.name})` : name;
+    btn.onclick = () => {
+      if (i !== world.active || idle) {
+        idle = false;
+        activate(i);
+      }
+      selectPart(b.def.id);
+      save();
+    };
+    list.append(btn);
+  }
+  return list;
 }
 
 /** Turns the active creature's row into a name box: Enter or clicking away keeps it, Escape doesn't. */
@@ -5663,21 +5806,6 @@ function renderRigs() {
   }
 }
 
-function renderParts() {
-  const el = $('#parts');
-  el.innerHTML = '';
-  const selSrc = creature.bones.get(selected)?.src;
-  for (const b of sources()) {
-    const btn = document.createElement('button');
-    const p = state.parts[b.src];
-    const twin = creature.list.some((o) => o.def.mirrorOf === b.def.id);
-    btn.innerHTML = `<i style="background:${p.color}"></i>${partLabel(b.src)}${twin ? ' ×2' : ''}${p.outline ? ` ${fa('check')}` : ''}`;
-    btn.classList.toggle('active', b.src === selSrc);
-    btn.onclick = () => selectPart(b.def.id);
-    el.append(btn);
-  }
-}
-
 function renderPartCard() {
   const p = selPart();
   const kind = p.kind ?? 'puffy';
@@ -6071,7 +6199,6 @@ function renderUI() {
   if (!creature.bones.has(selected)) selected = creature.list[0].def.id;
   renderAnim();
   renderRigs();
-  renderParts();
   renderPartCard();
   renderColors();
   renderStyles();
@@ -6127,7 +6254,7 @@ function setColor(c: string, doCommit: boolean) {
     commit();
     renderColors();
   }
-  renderParts();
+  renderCreatureBar();
 }
 
 function setStyle(id: StyleId) {
@@ -6561,7 +6688,7 @@ function renameBone(commitIt: boolean) {
   def.name = name;
   // re-seat so the bones pick up the new name (it's shown on every part list)
   creature.relayout(state.rig);
-  renderParts();
+  renderCreatureBar();
   if (commitIt) {
     commit();
     renderUI();
@@ -8073,6 +8200,7 @@ function setAnim(a: PartAnim | null) {
   const anims = (state.anims ??= {});
   const b = creature.bones.get(selected);
   const twin = b && rigLocked() ? creature.twinOf(b) : null;
+  const was = anims[selected]?.kind;
   if (a) anims[selected] = a;
   else delete anims[selected];
   if (twin && twin !== b) {
@@ -8081,6 +8209,8 @@ function setAnim(a: PartAnim | null) {
     else delete anims[twin.def.id];
   }
   if (!Object.keys(anims).length) delete state.anims;
+  // the parts list shows which parts move
+  if (a?.kind !== was) renderCreatureBar();
 }
 
 function renderAnim() {

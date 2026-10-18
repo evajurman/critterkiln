@@ -39,10 +39,12 @@ const SHORTCUTS: Shortcut[] = [
   { id: 'side', group: 'Drawing', label: 'Front or side view', note: 'Drawing a body part', keys: ['v'] },
 ];
 
-/** Keys that always do the same thing, listed on the sheet but not changeable (or takeable). */
-const FIXED: { label: string; keys: string; group: string }[] = [
+/** Keys that always do the same thing, listed on the sheet but not changeable (or takeable). `combo`: a key named as on this computer (⌘ on a Mac). */
+const FIXED: { label: string; keys?: string; combo?: string; group: string; note?: string }[] = [
   { group: 'Getting around', label: 'Your own tabs', keys: '4 – 9' },
-  { group: 'Getting around', label: 'Pan the view: drag with Space held, or right-drag. Shift+drag too (not while drawing)', keys: 'Space' },
+  { group: 'Getting around', label: 'Pan the view: drag with Space held, or right-drag. Shift+drag on empty space too (not while drawing)', keys: 'Space' },
+  { group: 'Editing', label: 'Keep a dragged grip to one axis', note: 'Hold while dragging: it moves along the creature’s X, Y or Z, whichever you’re mostly moving along', combo: 'shift' },
+  { group: 'Editing', label: 'Snap a dragged grip', note: 'Hold while dragging: it jumps onto the base or tip of another part near the pointer', combo: 'ctrl' },
   { group: 'Drawing', label: 'Keep the drawing (Done)', keys: 'Enter' },
   { group: 'Drawing', label: 'Cancel the drawing', keys: 'Esc' },
 ];
@@ -213,7 +215,8 @@ export function renderShortcutSheet(list: HTMLElement, note = '') {
     for (const f of FIXED.filter((f) => f.group === g)) {
       const row = document.createElement('div');
       row.className = 'keys-row fixed';
-      row.innerHTML = `<div class="keys-text"><span>${f.label}</span></div><span class="keys-btn"><kbd>${f.keys}</kbd></span>`;
+      const note = f.note ? `<span class="muted small">${f.note}</span>` : '';
+      row.innerHTML = `<div class="keys-text"><span>${f.label}</span>${note}</div><span class="keys-btn"><kbd>${f.combo ? comboLabel(f.combo) : f.keys}</kbd></span>`;
       sec.append(row);
     }
     if (g === 'Editing') {
