@@ -64,6 +64,16 @@ export interface PartState {
 export type PartKind = 'puffy' | 'flat' | 'turned';
 
 /**
+ * The markings a part shows: the whole creature's (but those turned off on
+ * it), then its own, the last on top.
+ */
+export function markingsOf(s: CreatureState, id: string): Marking[] {
+  const own = s.parts[id]?.markings ?? [];
+  const all = (s.markings ?? []).filter((m) => !m.skip?.includes(id));
+  return all.length ? [...all, ...own] : own;
+}
+
+/**
  * Which parts can blend into one surface, as a key per part: the same
  * material (and the same color, unless colors blend), whatever markings they
  * have, each fading in and out across the joins. Only if they'd need more
@@ -73,15 +83,15 @@ export type PartKind = 'puffy' | 'flat' | 'turned';
 function blendKeys(s: CreatureState, blendColors: boolean): Map<string, string> {
   const base = (p: PartState) => (p.style ?? s.style) + (blendColors ? '' : p.color.toLowerCase());
   const marks = new Map<string, Set<string>>();
-  for (const p of Object.values(s.parts)) for (const m of p.markings ?? []) (marks.get(base(p)) ?? marks.set(base(p), new Set()).get(base(p))!).add(markingKey(m));
-  return new Map(Object.entries(s.parts).map(([id, p]) => [id, base(p) + ((marks.get(base(p))?.size ?? 0) > MAX_LAYERS ? markingsKey(p.markings) : '')]));
+  for (const [id, p] of Object.entries(s.parts)) for (const m of markingsOf(s, id)) (marks.get(base(p)) ?? marks.set(base(p), new Set()).get(base(p))!).add(markingKey(m));
+  return new Map(Object.entries(s.parts).map(([id, p]) => [id, base(p) + ((marks.get(base(p))?.size ?? 0) > MAX_LAYERS ? markingsKey(markingsOf(s, id)) : '')]));
 }
 
 /** The markings one surface over these parts draws (each once, in order), and how much of each a part has (1 or 0: see paintMarks). */
 function surfaceMarkings(s: CreatureState, bones: BoneRT[]): { layers: Marking[]; marksOf: (b: BoneRT) => number[] } {
   const layers: Marking[] = [];
-  for (const b of bones) for (const m of s.parts[b.src].markings ?? []) if (layers.length < MAX_LAYERS && !layers.some((l) => markingKey(l) === markingKey(m))) layers.push(m);
-  const has = (b: BoneRT, l: Marking) => (s.parts[b.src].markings ?? []).some((m) => markingKey(m) === markingKey(l));
+  for (const b of bones) for (const m of markingsOf(s, b.src)) if (layers.length < MAX_LAYERS && !layers.some((l) => markingKey(l) === markingKey(m))) layers.push(m);
+  const has = (b: BoneRT, l: Marking) => markingsOf(s, b.src).some((m) => markingKey(m) === markingKey(l));
   return { layers, marksOf: (b) => layers.map((l) => (has(b, l) ? 1 : 0)) };
 }
 
@@ -237,6 +247,8 @@ export interface CreatureState {
   keepFloor?: boolean;
   /** looping motions, per part (scene id): see src/animate.ts */
   anims?: Record<string, PartAnim>;
+  /** markings on the whole creature (each can be turned off on some parts), under the parts' own */
+  markings?: Marking[];
   /** pictures its markings show, by id (each kept once, however many parts show it) */
   pictures?: Record<string, string>;
   /** 1 once patterns that used to be material settings (stone cracks, metal patina...) are parts' markings (see migrateMarkings) */
@@ -325,7 +337,7 @@ export function defaultState(rig: RigState, color?: string): CreatureState {
     mergeColors: true,
     colorBlend: 0.2,
     // (made now: nothing to bring up to date, see migrateMarkings)
-    markingsV: 1,
+    markingsV: 2,
     // googly eyes start matte (saves without a shine stay glossy, as they were made)
     eyes: { enabled: true, style: 'bead', shine: 0, pairs: [{ size: 0.5, spacing: 0.5, height: 0.55 }] },
   };
@@ -1127,7 +1139,8 @@ export class Creature {
         lumps: style === 'clay' ? k.lumps : style === 'stone' ? k.rugged : 0,
       };
       const geoKey = JSON.stringify([shapes, geoOpts, getMeshDetail()]);
-      const key = geoKey + style + p.color + JSON.stringify(k) + markingsKey(p.markings) + (p.opacity ?? 1) + bendKey(bendOf(b.def, b.length));
+      const marks = markingsOf(s, b.src);
+      const key = geoKey + style + p.color + JSON.stringify(k) + markingsKey(marks) + (p.opacity ?? 1) + bendKey(bendOf(b.def, b.length));
       if (key === b.meshKey) {
         this.glowPart(b);
         continue;
@@ -1161,7 +1174,7 @@ export class Creature {
           ? shapeGeo(shapes[0], 0, geoOpts)
           : cachedGeometry(geoKey + bendKey(bd), () => joinShapes(shapes.map((sh, i) => shapeGeo(sh, i, geoOpts))));
       const mesh = new THREE.Mesh(geo, makeMaterial(style, p.color, k));
-      applyMarkings(mesh.material as THREE.Material, p.markings);
+      applyMarkings(mesh.material as THREE.Material, marks);
       mesh.userData.baseGeo = geo;
       // the roll ring is sized to the part as if it were straight (and stretching a tip re-bends it from straight)
       const straightBox = new THREE.Box3();
@@ -1202,7 +1215,7 @@ export class Creature {
       if (style === 'felt') {
         for (const shell of makeFuzzShells(geo, p.color, k)) {
           // the fuzz takes the markings too, or it would hide them
-          applyMarkings(shell.material as THREE.Material, p.markings);
+          applyMarkings(shell.material as THREE.Material, marks);
           mesh.add(shell);
         }
         if (k.hairs > 0) mesh.add(makeStrayHairs(geo, p.color, hashString(b.def.id), k.hairs, false, 1, k.fuzz));

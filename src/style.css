@@ -244,6 +244,11 @@ input[type=range] { accent-color: var(--accent); width: 100%; }
   font-size: 13px; font-weight: var(--w-bold); text-align: left; cursor: var(--cursor-click);
 }
 .mark-pick img, .mark-pick .mark-none { width: 28px; height: 28px; border-radius: 50%; }
+.mark-pick > span { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.15; }
+.mark-pick small { font-size: 10.5px; font-weight: var(--w-bold); color: var(--muted); }
+.mark-row.off .mark-pick img { opacity: .4; filter: grayscale(1); }
+.mark-row.off .mark-pick > span { opacity: .6; }
+.mark-where { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; font-size: 12px; font-weight: var(--w-bold); color: var(--muted); }
 .mark-add { align-self: flex-start; padding: 4px 10px; font-size: 12px; }
 .mark-kinds { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px; }
 .mark-kinds button {

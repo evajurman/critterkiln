@@ -1,6 +1,7 @@
 // ---------------------------------------------------------------------------
 // Markings: patterns laid over any material (spots, stripes, cracks...), up
-// to MAX_MARKINGS on a part, one over the other. Worked out in the shader from
+// to MAX_MARKINGS on a part, one over the other: the whole creature's (each
+// can be turned off on some parts), then the part's own. Worked out in the shader from
 // where each point sits in the creature's rest pose, in 3D, so a pattern runs
 // on across parts, bends with the pose, and has no seams. Each recolors the
 // surface after the material's own textures, keeping their detail (felt
@@ -61,10 +62,12 @@ export interface Marking {
   strokes?: PaintStroke[];
   /** paint: which paint this is (each has a canvas of its own) */
   id?: string;
+  /** on the whole creature: the parts it's turned off on */
+  skip?: string[];
 }
 
-/** markings one part can have */
-export const MAX_MARKINGS = 3;
+/** markings one part can show (the whole creature's and its own) */
+export const MAX_MARKINGS = 4;
 /** markings one surface can draw: parts that would need more between them don't blend */
 export const MAX_LAYERS = 4;
 
@@ -623,6 +626,7 @@ interface LegacyPart {
 interface LegacyCreature {
   style: string;
   parts: Record<string, LegacyPart>;
+  markings?: Marking[];
   materialSettings?: Record<string, Record<string, number> | undefined>;
   markingsV?: number;
 }
@@ -680,18 +684,33 @@ export function migrateMarkings(s: LegacyCreature) {
       delete p.marking;
     }
   }
-  if (s.markingsV) return;
-  s.markingsV = 1;
-  for (const p of Object.values(s.parts)) {
-    const style = p.style ?? s.style;
-    if (!p.markings?.length && LEGACY[style]) {
-      const list = legacyMarkings(style, { ...LEGACY[style], ...s.materialSettings?.[style] }, p.color);
-      if (list.length) p.markings = list;
+  if (!s.markingsV) {
+    for (const p of Object.values(s.parts)) {
+      const style = p.style ?? s.style;
+      if (!p.markings?.length && LEGACY[style]) {
+        const list = legacyMarkings(style, { ...LEGACY[style], ...s.materialSettings?.[style] }, p.color);
+        if (list.length) p.markings = list;
+      }
+      if (p.glowFollow === 'bright') p.glowFollow = 'material';
+      else if (p.glowFollow === 'dark') p.glowFollow = p.markings?.length ? 'markings' : 'material';
     }
-    if (p.glowFollow === 'bright') p.glowFollow = 'material';
-    else if (p.glowFollow === 'dark') p.glowFollow = p.markings?.length ? 'markings' : 'material';
+    for (const k of Object.values(s.materialSettings ?? {})) for (const key of LEGACY_KEYS) if (k) delete k[key];
   }
-  for (const k of Object.values(s.materialSettings ?? {})) for (const key of LEGACY_KEYS) if (k) delete k[key];
+  if ((s.markingsV ?? 0) < 2) {
+    // "Everything" used to give every part a copy: the markings every part has in common belong to the creature now
+    const parts = Object.values(s.parts);
+    const lists = parts.map((p) => p.markings ?? []);
+    let n = 0;
+    while (parts.length > 1 && n < lists[0].length && lists.every((l) => l[n] && markingKey(l[n]) === markingKey(lists[0][n]))) n++;
+    if (n) {
+      s.markings = [...(s.markings ?? []), ...lists[0].slice(0, n)];
+      for (const p of parts) {
+        p.markings = p.markings!.slice(n);
+        if (!p.markings.length) delete p.markings;
+      }
+    }
+  }
+  s.markingsV = 2;
 }
 
 // ---------------------------------------------------------------------------

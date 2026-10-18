@@ -18,6 +18,7 @@ import {
   Creature,
   defaultState,
   EYE_STYLES,
+  markingsOf,
   partShapes,
   setPartShapes,
   setSeamlessLowPoly,
@@ -5801,6 +5802,7 @@ function sceneColors(): string[] {
       add(p.color);
       for (const m of p.markings ?? []) add(m.color);
     }
+    for (const m of s.markings ?? []) add(m.color);
     if (s.eyes.enabled && (s.eyes.style === 'bead' || s.eyes.style === 'dot' || s.eyes.style === 'button')) add(s.eyes.color);
     for (const a of s.attachments ?? []) for (const p of a.thing.pieces) add(p.color);
   }
@@ -5974,7 +5976,7 @@ function renderColors() {
 }
 const partGlowFollow = glowFollowSeg(
   '#glow-follow',
-  () => (creature.bones.has(selected) ? selPart() : undefined),
+  () => (creature.bones.has(selected) ? { ...selPart(), markings: markingsOf(state, selPartId()) } : undefined),
   (f) => {
     for (const p of colorParts()) {
       if (f) p.glowFollow = f;
@@ -6379,12 +6381,13 @@ function setColor(c: string, doCommit: boolean) {
 }
 
 // ---------------------------------------------------------------------------
-// Markings: patterns over the material (see src/markings.ts), up to
-// MAX_MARKINGS on a part, the last on top: on the picked part or
-// (Everything) on every part
+// Markings: patterns over the material (see src/markings.ts). Each lives on
+// the whole creature (and can be turned off on any part) or on one part; a
+// part shows up to MAX_MARKINGS, the whole creature's first, the last on top.
+// Part | Everything says where a new one goes.
 
 let markAll = true;
-/** which of the picked part's markings is open for editing */
+/** which of the picked part's markings (see markRefs) is open for editing */
 let markOpen = 0;
 /** the kinds to add one from are showing */
 let markAdding = false;
@@ -6397,18 +6400,52 @@ scopeSeg(
   },
 );
 
-/** Give the picked part (or, with Everything, every part) these markings. */
-function setMarkings(list: Marking[], doCommit: boolean) {
-  for (const p of markAll ? Object.values(state.parts) : [selPart()]) {
-    if (list.length) p.markings = list.map((m) => ({ ...m }));
-    else {
-      delete p.markings;
-      if (p.glowFollow === 'markings') delete p.glowFollow;
-    }
-  }
+/** One of the markings the picked part has: the whole creature's (`all`) or its own, its place in that list, and whether it's turned off on this part. */
+interface MarkRef {
+  m: Marking;
+  all: boolean;
+  i: number;
+  off: boolean;
+}
+
+function selPartId(): string {
+  return creature.bones.get(selected)!.src;
+}
+
+/** The picked part's markings: the whole creature's, then its own. */
+function markRefs(): MarkRef[] {
+  const id = selPartId();
+  return [
+    ...(state.markings ?? []).map((m, i) => ({ m, all: true, i, off: !!m.skip?.includes(id) })),
+    ...(selPart().markings ?? []).map((m, i) => ({ m, all: false, i, off: false })),
+  ];
+}
+
+/** The open marking (none while picking a new one). */
+function openRef(): MarkRef | undefined {
+  if (markAdding || mode === 'stuff' || !creature.bones.has(selected)) return undefined;
+  return markRefs()[markOpen];
+}
+
+/** A copy of the whole creature's markings, or the picked part's own. */
+function markList(all: boolean): Marking[] {
+  return [...((all ? state.markings : selPart().markings) ?? [])];
+}
+
+/** How many markings a part shows. */
+function markCount(id: string): number {
+  return markingsOf(state, id).length;
+}
+
+/** Make these the whole creature's markings (`all`), or the picked part's own. */
+function setMarkings(list: Marking[], doCommit: boolean, all: boolean) {
+  const home = all ? state : selPart();
+  if (list.length) home.markings = list;
+  else delete home.markings;
+  for (const [id, p] of Object.entries(state.parts)) if (p.glowFollow === 'markings' && !markCount(id)) delete p.glowFollow;
   // pictures no marking shows any more go
   if (state.pictures) {
-    const shown = new Set(Object.values(state.parts).flatMap((p) => (p.markings ?? []).map((m) => m.picture)));
+    const shown = new Set([...(state.markings ?? []), ...Object.values(state.parts).flatMap((p) => p.markings ?? [])].map((m) => m.picture));
     for (const id of Object.keys(state.pictures)) if (!shown.has(id)) delete state.pictures[id];
     if (!Object.keys(state.pictures).length) delete state.pictures;
   }
@@ -6417,47 +6454,108 @@ function setMarkings(list: Marking[], doCommit: boolean) {
   if (doCommit) commit();
 }
 
+/** Why a marking can't go on (the whole creature, or the picked part), if it can't: a part already shows as many as it can. */
+function noRoomFor(all: boolean, except?: Marking): string | null {
+  const ids = all ? Object.keys(state.parts) : [selPartId()];
+  const full = ids.find((id) => markingsOf(state, id).filter((m) => m !== except).length >= MAX_MARKINGS);
+  if (!full) return null;
+  return full === selPartId() ? `This part already shows ${MAX_MARKINGS} markings` : `A part already shows ${MAX_MARKINGS} markings (take one off it first)`;
+}
+
+/** Turn a whole-creature marking off on the picked part, or back on. */
+function toggleMarkingHere(r: MarkRef) {
+  const id = selPartId();
+  if (r.off) {
+    const why = noRoomFor(false);
+    if (why) return hint(why, 2600, true);
+  }
+  const list = markList(true);
+  const skip = (r.m.skip ?? []).filter((x) => x !== id);
+  if (!r.off) skip.push(id);
+  list[r.i] = { ...r.m, skip };
+  if (!skip.length) delete list[r.i].skip;
+  setMarkings(list, true, true);
+  renderMarkings();
+  partGlowFollow();
+}
+
+/** Move the open marking to the whole creature, or keep it to just the picked part. */
+function moveMarking(r: MarkRef) {
+  const { skip: _skip, ...m } = r.m;
+  if (r.all) {
+    // just this part: off the rest
+    const list = markList(true);
+    list.splice(r.i, 1);
+    setMarkings(list, false, true);
+    setMarkings([...markList(false), m], true, false);
+    markOpen = markRefs().length - 1;
+  } else {
+    const why = noRoomFor(true, r.m);
+    if (why) return hint(why, 2600, true);
+    const own = markList(false);
+    own.splice(r.i, 1);
+    setMarkings(own, false, false);
+    const list = [...markList(true), m];
+    setMarkings(list, true, true);
+    markOpen = list.length - 1;
+  }
+  renderMarkings();
+  partGlowFollow();
+}
+
 function renderMarkings() {
   const el = $('#markings');
   if (!creature.bones.has(selected)) return syncMarkGizmo();
-  const list = [...(selPart().markings ?? [])];
-  markOpen = Math.min(markOpen, Math.max(0, list.length - 1));
+  const refs = markRefs();
+  markOpen = Math.min(markOpen, Math.max(0, refs.length - 1));
   el.innerHTML = '';
   const pics = markingThumbnails();
   const pic = (t: Marking['type']) => (pics.has(t) ? `<img src="${pics.get(t)}" alt="" />` : '<span class="mark-none"></span>');
   const name = (t: Marking['type']) => MARKINGS.find((k) => k.type === t)!.name;
-  // the part's markings, the first at the bottom
-  list.forEach((m, i) => {
+  // the whole creature's first, then the part's own: the first at the bottom
+  refs.forEach((r, i) => {
     const row = document.createElement('div');
-    row.className = 'mark-row' + (i === markOpen && !markAdding ? ' active' : '');
+    row.className = 'mark-row' + (i === markOpen && !markAdding ? ' active' : '') + (r.off ? ' off' : '');
     const open = document.createElement('button');
     open.className = 'mark-pick';
     open.title = 'Change this marking';
-    open.innerHTML = `${pic(m.type)}<span>${name(m.type)}</span>`;
+    open.innerHTML = `${pic(r.m.type)}<span>${name(r.m.type)}<small>${r.all ? (r.off ? 'Whole creature · off here' : 'Whole creature') : 'This part'}</small></span>`;
     open.onclick = () => {
       markOpen = i;
       markAdding = false;
       renderMarkings();
     };
+    row.append(open);
+    if (r.all) {
+      // the whole creature's: on or off on this part
+      const here = document.createElement('button');
+      here.className = 'piece-icon';
+      here.innerHTML = `<i class="fa-duotone fa-regular fa-${r.off ? 'eye-slash' : 'eye'}" aria-hidden="true"></i>`;
+      here.title = r.off ? 'Show it on this part again' : 'Take it off just this part';
+      here.onclick = () => toggleMarkingHere(r);
+      row.append(here);
+    }
     const del = document.createElement('button');
     del.className = 'piece-icon';
     del.innerHTML = fa('trash');
-    del.title = 'Take this marking off';
+    del.title = r.all ? 'Take this marking off the whole creature' : 'Take this marking off';
     del.onclick = () => {
-      list.splice(i, 1);
-      setMarkings(list, true);
-      markOpen = Math.max(0, Math.min(markOpen, list.length - 1));
+      const list = markList(r.all);
+      list.splice(r.i, 1);
+      setMarkings(list, true, r.all);
+      markOpen = Math.max(0, Math.min(markOpen, markRefs().length - 1));
       renderMarkings();
       partGlowFollow();
     };
-    row.append(open, del);
+    row.append(del);
     el.append(row);
   });
   const add = document.createElement('button');
   add.className = 'ghost mark-add' + (markAdding ? ' on' : '');
-  add.innerHTML = '<i class="fa-duotone fa-regular fa-plus" aria-hidden="true"></i> Add marking';
-  add.disabled = list.length >= MAX_MARKINGS;
-  add.title = add.disabled ? `A part can have up to ${MAX_MARKINGS} markings` : 'Lay a pattern over this part (each new one goes on top)';
+  add.innerHTML = `<i class="fa-duotone fa-regular fa-plus" aria-hidden="true"></i> Add marking ${markAll ? 'to the whole creature' : 'to this part'}`;
+  const why = noRoomFor(markAll);
+  add.disabled = !!why;
+  add.title = why ?? (markAll ? 'Lay a pattern over every part (it can be taken off any one of them after)' : 'Lay a pattern over just this part');
   add.onclick = () => {
     markAdding = !markAdding;
     renderMarkings();
@@ -6473,13 +6571,14 @@ function renderMarkings() {
       btn.onclick = () => {
         const m = defaultMarking(k.type);
         if (STICKERS.includes(k.type)) faceView(m);
-        list.push(m);
-        markOpen = list.length - 1;
+        const all = markAll;
+        const list = [...markList(all), m];
         markAdding = false;
-        setMarkings(list, true);
+        setMarkings(list, true, all);
+        markOpen = markRefs().findIndex((r) => r.m === m);
         renderMarkings();
         partGlowFollow();
-        if (k.type === 'picture') pickPicture(markOpen);
+        if (k.type === 'picture') pickPicture({ m, all, i: list.length - 1, off: false });
         if (STICKERS.includes(k.type)) startMarkGizmo('translate');
         if (k.type === 'paint') startBrush(false);
       };
@@ -6487,14 +6586,17 @@ function renderMarkings() {
     }
     el.append(kinds);
   }
-  renderMarkingParams(markAdding ? undefined : list[markOpen], list);
+  renderMarkingParams(markAdding ? undefined : refs[markOpen]);
 }
 
-function renderMarkingParams(m: Marking | undefined, list: Marking[]) {
+function renderMarkingParams(r: MarkRef | undefined) {
   const el = $('#marking-params');
   el.innerHTML = '';
-  el.hidden = !m;
-  if (!m) return syncMarkGizmo();
+  el.hidden = !r;
+  if (!r) return syncMarkGizmo();
+  const all = r.all;
+  const list = markList(all);
+  const m = list[r.i];
   const head = document.createElement('div');
   head.className = 'style-params-head';
   head.innerHTML = `<span>${MARKINGS.find((k) => k.type === m.type)!.name} settings</span>`;
@@ -6503,10 +6605,10 @@ function renderMarkingParams(m: Marking | undefined, list: Marking[]) {
   reset.textContent = 'Reset';
   reset.onclick = () => {
     // (what's been painted, written or picked stays, and a sticker where it is)
-    const keep: Partial<Marking> = { picture: m.picture, text: m.text, font: m.font, strokes: m.strokes, id: m.id };
+    const keep: Partial<Marking> = { picture: m.picture, text: m.text, font: m.font, strokes: m.strokes, id: m.id, skip: m.skip };
     if (STICKERS.includes(m.type)) Object.assign(keep, { offset: m.offset, turn: m.turn, stretch: m.stretch });
     list[list.indexOf(m)] = { ...defaultMarking(m.type), ...Object.fromEntries(Object.entries(keep).filter(([, v]) => v !== undefined)) };
-    setMarkings(list, true);
+    setMarkings(list, true, all);
     renderMarkings();
   };
   head.append(reset);
@@ -6519,7 +6621,7 @@ function renderMarkingParams(m: Marking | undefined, list: Marking[]) {
     pending = true;
     requestAnimationFrame(() => {
       pending = false;
-      setMarkings(list, false);
+      setMarkings(list, false, all);
     });
   };
   // (the threshold reads the other way round on its slider: further right marks more)
@@ -6549,7 +6651,7 @@ function renderMarkingParams(m: Marking | undefined, list: Marking[]) {
     choose.className = 'ghost mark-choose';
     choose.innerHTML = `<i class="fa-duotone fa-regular fa-image" aria-hidden="true"></i> ${m.picture ? 'Change picture' : 'Choose a picture'}`;
     choose.title = 'A picture from your computer (best with a see-through background)';
-    choose.onclick = () => pickPicture(list.indexOf(m));
+    choose.onclick = () => pickPicture(r);
     el.append(choose);
   }
   if (m.type === 'text') {
@@ -6576,7 +6678,7 @@ function renderMarkingParams(m: Marking | undefined, list: Marking[]) {
     };
     el.append(words, font);
   }
-  if (m.type === 'paint') paintTools(el, m, list);
+  if (m.type === 'paint') paintTools(el, m, list, all);
   if (uses.size) slider('size', 'Size', 0.2, 3, ['small', 'big']);
   if (uses.threshold) slider('threshold', 'Threshold', 0, 1, ['less', 'more']);
   if (uses.rough) slider('rough', 'Rough edges', 0, 1, ['clean', 'ragged']);
@@ -6602,7 +6704,7 @@ function renderMarkingParams(m: Marking | undefined, list: Marking[]) {
     change({ color: box.checked ? undefined : color.value });
     commit();
     // Darkness only goes with the part's own color
-    renderMarkingParams(m, list);
+    renderMarkingParams(r);
   };
   color.oninput = () => change({ color: color.value });
   color.onchange = () => commit();
@@ -6637,11 +6739,21 @@ function renderMarkingParams(m: Marking | undefined, list: Marking[]) {
     delete m.turn;
     delete m.stretch;
     if (sticker) faceView(m);
-    setMarkings(list, true);
+    setMarkings(list, true, all);
     renderMarkings();
   };
   place.append(seg, back);
   el.append(place);
+  // where it lives: moved to the whole creature, or kept to just this part
+  const where = document.createElement('div');
+  where.className = 'mark-where';
+  const move = document.createElement('button');
+  move.className = 'link';
+  move.textContent = all ? 'Keep to just this part' : 'Put on the whole creature';
+  move.title = all ? 'Take it off every other part' : 'Show it on every part (it can be taken off any one of them after)';
+  move.onclick = () => moveMarking(r);
+  where.append(all ? 'On the whole creature' : 'On this part', move);
+  el.append(where);
   syncMarkGizmo();
 }
 
@@ -6661,8 +6773,7 @@ scene.add(markFrame);
 const markAnchor = new THREE.Vector3();
 
 function openMarking(): Marking | undefined {
-  if (markAdding || mode === 'stuff' || !creature.bones.has(selected)) return undefined;
-  return selPart().markings?.[markOpen];
+  return openRef()?.m;
 }
 
 function placeMarkFrame() {
@@ -6735,22 +6846,24 @@ function markGizmoMoved() {
 /** Lay the open marking where the gizmo is. */
 function layMarking() {
     markDragPending = false;
-    const list = [...(selPart().markings ?? [])];
-    if (!list[markOpen]) return;
+    const r = openRef();
+    if (!r) return;
+    const list = markList(r.all);
+    const at = r.i;
     markProxy.updateMatrix();
     const pos = new THREE.Vector3();
     const turn = new THREE.Quaternion();
     const stretch = new THREE.Vector3();
     markProxy.matrix.clone().multiply(new THREE.Matrix4().makeTranslation(markAnchor.clone().negate())).decompose(pos, turn, stretch);
-    const r = (v: number) => Math.round(v * 1e4) / 1e4;
-    list[markOpen] = {
-      ...list[markOpen],
-      offset: pos.toArray().map(r) as [number, number, number],
-      turn: turn.toArray().map(r) as [number, number, number, number],
+    const round = (v: number) => Math.round(v * 1e4) / 1e4;
+    list[at] = {
+      ...list[at],
+      offset: pos.toArray().map(round) as [number, number, number],
+      turn: turn.toArray().map(round) as [number, number, number, number],
       // (never squashed flat)
-      stretch: stretch.toArray().map((v) => r(Math.max(0.05, v))) as [number, number, number],
+      stretch: stretch.toArray().map((v) => round(Math.max(0.05, v))) as [number, number, number],
     };
-    setMarkings(list, false);
+    setMarkings(list, false, r.all);
 }
 
 /** Lay a sticker on the picked part where the view meets it (in its middle), facing the way it's being looked at. */
@@ -6774,8 +6887,8 @@ function faceView(m: Marking) {
   m.turn = turn.toArray().map(r) as [number, number, number, number];
 }
 
-/** Ask for a picture from the computer for marking i of the picked part (made small enough to keep). */
-function pickPicture(i: number) {
+/** Ask for a picture from the computer for this marking (made small enough to keep). */
+function pickPicture(r: MarkRef) {
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = 'image/*';
@@ -6789,12 +6902,13 @@ function pickPicture(i: number) {
       hint('That picture couldn’t be opened', 2600, true);
       return;
     }
-    const list = [...(selPart().markings ?? [])];
+    const list = markList(r.all);
+    const i = list.indexOf(r.m) >= 0 ? list.indexOf(r.m) : r.i;
     if (list[i]?.type !== 'picture') return;
     const id = pictureId(src);
     state.pictures = { ...state.pictures, [id]: src };
     list[i] = { ...list[i], picture: id };
-    setMarkings(list, true);
+    setMarkings(list, true, r.all);
     renderMarkings();
   };
   input.click();
@@ -6852,7 +6966,7 @@ function stopBrush() {
 }
 
 /** The brush's buttons and settings, in a paint marking's settings. */
-function paintTools(el: HTMLElement, m: Marking, list: Marking[]) {
+function paintTools(el: HTMLElement, m: Marking, list: Marking[], all: boolean) {
   const seg = document.createElement('div');
   seg.className = 'seg mark-brush';
   const tools: [boolean, string, string, string][] = [
@@ -6898,7 +7012,7 @@ function paintTools(el: HTMLElement, m: Marking, list: Marking[]) {
   clear.hidden = !m.strokes?.length;
   clear.onclick = () => {
     list[list.indexOf(m)] = { ...m, strokes: [] };
-    setMarkings(list, true);
+    setMarkings(list, true, all);
     renderMarkings();
   };
   row.append('Brush color', color, clear);
@@ -6978,11 +7092,13 @@ function endStroke(e: PointerEvent) {
   const { m, strokes } = stroke;
   stroke = null;
   endLivePaint(m);
-  const list = [...(selPart().markings ?? [])];
-  const i = list.indexOf(m) >= 0 ? list.indexOf(m) : markOpen;
+  const r = openRef();
+  if (!r) return;
+  const list = markList(r.all);
+  const i = list.indexOf(m) >= 0 ? list.indexOf(m) : r.i;
   if (list[i]?.type !== 'paint') return;
   list[i] = { ...list[i], strokes };
-  setMarkings(list, true);
+  setMarkings(list, true, r.all);
   renderMarkings();
 }
 canvas.addEventListener('pointerup', endStroke, { capture: true });
