@@ -381,16 +381,17 @@ function stampPaint(c: PaintCanvas, s: PaintStroke, a: number, b: number): boole
 
 /**
  * Show a stroke being painted, before it's part of the marking: `strokes`
- * is the marking's own with the one in progress last, which has just gone
- * on from point `from` (an index into its pts). The marking's canvas is
- * painted on as it's shown; call endLivePaint once the stroke is kept.
+ * is the marking's own with the ones in progress (`live` of them: a stroke
+ * and its mirror image) last, which have just gone on from point `from` (an
+ * index into their pts). The marking's canvas is painted on as it's shown;
+ * call endLivePaint once the strokes are kept.
  */
-export function livePaint(m: Marking, strokes: PaintStroke[], from: number) {
+export function livePaint(m: Marking, strokes: PaintStroke[], from: number, live = 1) {
   const c = paintCanvas(m);
-  const s = strokes[strokes.length - 1];
-  if (s && from >= 0 && stampPaint(c, s, from, Math.max(from, s.pts.length - 3))) {
-    c.tex.needsUpdate = true;
-  } else bakePaint(c, strokes, 0.5);
+  const going = strokes.slice(-live);
+  const fits = from >= 0 && going.every((s) => stampPaint(c, s, from, Math.max(from, s.pts.length - 3)));
+  if (fits) c.tex.needsUpdate = true;
+  else bakePaint(c, strokes, 0.5);
   textureReady();
 }
 /** The stroke's been kept (or dropped): the canvas painted on live no longer shows the marking as it was. */

@@ -78,7 +78,7 @@ import {
   type StyleId,
 } from './materials';
 import { migrateMarkings, onMarkingTexture, type Marking } from './markings';
-import { MarkingPanel, followMarkTools, initMarkingTools, markGizmoHeld, markGizmoMode, markToolsOut, stopMarkTools } from './markingPanel';
+import { MarkingPanel, followMarkTools, initMarkingTools, markGizmoHeld, markGizmoMode, markToolKey, markToolsOut, stopMarkTools } from './markingPanel';
 import { installScrollbars } from './scrollbars';
 import { applyPalette, GIFEncoder, quantize } from 'gifenc';
 import { ANIM_KINDS, animOffset, animP, canReverse, defaultAnim, leanAt, leanOf, leanQuat, mirrorAnim, reachAt, reachRim, rimLean, orbitOut, STUFF_KINDS, stuffMove, stuffP, type PartAnim, type StuffAnim, type StuffKind } from './animate';
@@ -6445,6 +6445,8 @@ const partMarks = new MarkingPanel(
       const b = hit.bone;
       return { point: hit.point, at: hit.point.clone().applyMatrix4(b.pivot.matrixWorld.clone().invert()).applyMatrix4(b.restGroup) };
     },
+    // (the skeleton's two sides mirror across X, as pairs of parts do)
+    mirror: (v) => v.setX(-v.x),
   },
   { list: $('#markings'), params: $('#marking-params') },
 );
@@ -6509,6 +6511,8 @@ const pieceMarks = new MarkingPanel(
       if (!hit) return null;
       return { point: hit.point, at: hit.point.clone().applyMatrix4(bench.matrixWorld.clone().invert()) };
     },
+    // across the centre line, as Mirror makes pieces
+    mirror: (v) => v.setX(-v.x),
   },
   { list: $('#piece-markings'), params: $('#piece-marking-params') },
 );
@@ -8084,6 +8088,11 @@ window.addEventListener('keydown', (e) => {
   const tag = (e.target as HTMLElement).tagName;
   // typing in a text or number box
   if (tag === 'TEXTAREA' || (tag === 'INPUT' && ['text', 'number', 'search'].includes((e.target as HTMLInputElement).type))) return;
+  // the paint brush's own keys come first while it's picked up (Brush size, Mirror)
+  if (markToolKey(e)) {
+    e.preventDefault();
+    return;
+  }
   const k = e.key.toLowerCase();
   if (is(e, 'undo')) {
     e.preventDefault();

@@ -11,7 +11,8 @@ export type ShortcutId =
   | 'frame' | 'frameAll'
   | 'draw' | 'mirror' | 'delete' | 'help'
   | 'move' | 'rotate' | 'scale'
-  | 'erase' | 'side';
+  | 'erase' | 'side'
+  | 'brushSize';
 
 interface Shortcut {
   id: ShortcutId;
@@ -20,6 +21,8 @@ interface Shortcut {
   /** more about where it works, shown under the label */
   note?: string;
   keys: string[];
+  /** only works then (painting): its key can be one that does something else the rest of the time */
+  while?: 'painting';
 }
 
 const SHORTCUTS: Shortcut[] = [
@@ -32,13 +35,14 @@ const SHORTCUTS: Shortcut[] = [
   { id: 'undo', group: 'Editing', label: 'Undo', keys: ['ctrl+z'] },
   { id: 'redo', group: 'Editing', label: 'Redo', keys: ['ctrl+shift+z', 'ctrl+y'] },
   { id: 'draw', group: 'Editing', label: 'Draw', note: 'A new part, or a stuff piece. While drawing: the Draw tool', keys: ['d'] },
-  { id: 'mirror', group: 'Editing', label: 'Mirror', note: 'Both sides of a pair change together; while drawing, one half is copied across the centre line; on a stuff piece, a mirror image on the other side', keys: ['m'] },
+  { id: 'mirror', group: 'Editing', label: 'Mirror', note: 'Both sides of a pair change together; while drawing, one half is copied across the centre line; on a stuff piece, a mirror image on the other side; while painting, paint both sides', keys: ['m'] },
   { id: 'delete', group: 'Editing', label: 'Delete', note: 'The picked part, stuff or piece', keys: ['delete', 'backspace'] },
   { id: 'move', group: 'Move, rotate and scale', label: 'Move', note: 'Pieces, worn stuff, a creature you’re arranging, and a drawing', keys: ['w'] },
   { id: 'rotate', group: 'Move, rotate and scale', label: 'Rotate', keys: ['e'] },
   { id: 'scale', group: 'Move, rotate and scale', label: 'Scale', keys: ['r'] },
   { id: 'erase', group: 'Drawing', label: 'Erase tool', keys: ['x'] },
   { id: 'side', group: 'Drawing', label: 'Front or side view', note: 'Drawing a body part', keys: ['v'] },
+  { id: 'brushSize', group: 'Painting', label: 'Brush size', note: 'Then move the pointer out or in, and click (or press it again) to keep the size; Esc puts it back. Only while painting, so its key can do something else the rest of the time', keys: ['f'], while: 'painting' },
 ];
 
 /** Keys that always do the same thing, listed on the sheet but not changeable (or takeable). `combo`: a key named as on this computer (⌘ on a Mac). */
@@ -162,11 +166,12 @@ function setKeys(id: ShortcutId, keys: string[]) {
   else custom[id] = keys;
 }
 
-/** Give the shortcut this key, taking it from whatever had it. Returns what lost it. */
+/** Give the shortcut this key, taking it from whatever had it (that works at the same times). Returns what lost it. */
 function assign(id: ShortcutId, combo: string): Shortcut | undefined {
   let lost: Shortcut | undefined;
+  const when = SHORTCUTS.find((s) => s.id === id)!.while;
   for (const s of SHORTCUTS) {
-    if (s.id === id) continue;
+    if (s.id === id || s.while !== when) continue;
     const keys = keysOf(s.id);
     if (!keys.includes(combo)) continue;
     setKeys(s.id, keys.filter((k) => k !== combo));

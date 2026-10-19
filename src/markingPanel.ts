@@ -25,6 +25,7 @@ import {
   type Marking,
   type PaintStroke,
 } from './markings';
+import { is, keyLabel } from './shortcuts';
 
 /** Something with markings: a creature (by part) or a stuff item (by piece). */
 export interface MarkTarget {
@@ -52,6 +53,8 @@ export interface MarkTarget {
   frame(): { toWorld: THREE.Matrix4; middle: THREE.Vector3 } | null;
   /** where a ray first meets it: the spot in the scene, and in the pattern space */
   surface(ray: THREE.Raycaster): { point: THREE.Vector3; at: THREE.Vector3 } | null;
+  /** a spot's mirror image across its middle, in the pattern space (paint can go on both sides at once) */
+  mirror?(v: THREE.Vector3): THREE.Vector3;
 }
 
 /** What the panels need from the app. */
@@ -98,9 +101,15 @@ frame.add(proxy);
 const anchor = new THREE.Vector3();
 let dragPending = false;
 
-const brush = { on: false, erase: false, size: 0.03, color: '#e04a4a' };
-/** the stroke going on: the marking it's for, and its strokes with this one last */
-let stroke: { m: Marking; strokes: PaintStroke[] } | null = null;
+const brush = { on: false, erase: false, size: 0.03, color: '#e04a4a', mirror: false };
+const MIN_BRUSH = 0.005;
+const MAX_BRUSH = 0.12;
+/** the stroke going on: the marking it's for, and its strokes with this one (and its mirror image, `live` of them) last */
+let stroke: { m: Marking; strokes: PaintStroke[]; live: number } | null = null;
+/** the brush being sized (see the brushSize key): round where, how many pixels a unit of size is there, and the size it had */
+let sizing: { x: number; y: number; pxPerUnit: number; was: number } | null = null;
+/** where the pointer last was over the view */
+const pointerAt = { x: 0, y: 0 };
 /** the brush's outline, under the pointer */
 const ring = document.createElement('div');
 ring.id = 'brush-ring';
@@ -130,16 +139,25 @@ export function initMarkingTools(h: MarkHost) {
   canvas.addEventListener(
     'pointerdown',
     (e) => {
+      if (sizing) {
+        // a click keeps the size
+        e.stopImmediatePropagation();
+        endSizing(true);
+        return;
+      }
       const m = paintMarking();
       if (!m || e.button !== 0 || h.busy()) return;
       const hit = paintAt(m, e.clientX, e.clientY);
       if (!hit) return;
       e.stopImmediatePropagation();
       canvas.setPointerCapture(e.pointerId);
-      const s: PaintStroke = { color: brush.color, r: round(brush.size), pts: hit.at.toArray().map(round) };
-      if (brush.erase) s.erase = true;
-      stroke = { m, strokes: [...(m.strokes ?? []), s] };
-      livePaint(m, stroke.strokes, 0);
+      const going = hit.both.map((at) => {
+        const s: PaintStroke = { color: brush.color, r: round(brush.size), pts: at.toArray().map(round) };
+        if (brush.erase) s.erase = true;
+        return s;
+      });
+      stroke = { m, strokes: [...(m.strokes ?? []), ...going], live: going.length };
+      livePaint(m, stroke.strokes, 0, stroke.live);
       h.invalidate();
     },
     { capture: true },
@@ -147,6 +165,16 @@ export function initMarkingTools(h: MarkHost) {
   canvas.addEventListener(
     'pointermove',
     (e) => {
+      pointerAt.x = e.clientX;
+      pointerAt.y = e.clientY;
+      if (sizing) {
+        // the ring stays put, its edge under the pointer
+        e.stopImmediatePropagation();
+        const d = Math.hypot(e.clientX - sizing.x, e.clientY - sizing.y);
+        brush.size = Math.min(MAX_BRUSH, Math.max(MIN_BRUSH, d / sizing.pxPerUnit));
+        placeRing(sizing.x, sizing.y, brush.size * sizing.pxPerUnit);
+        return;
+      }
       const m = paintMarking();
       if (!m) return;
       const hit = paintAt(m, e.clientX, e.clientY);
@@ -154,12 +182,12 @@ export function initMarkingTools(h: MarkHost) {
       if (!stroke) return;
       e.stopImmediatePropagation();
       if (!hit) return;
-      const s = stroke.strokes[stroke.strokes.length - 1];
-      const n = s.pts.length;
+      const going = stroke.strokes.slice(-stroke.live);
+      const n = going[0].pts.length;
       // a point every third of the brush's width or so
-      if (new THREE.Vector3().fromArray(s.pts, n - 3).distanceTo(hit.at) < brush.size * 0.3) return;
-      s.pts.push(...hit.at.toArray().map(round));
-      livePaint(stroke.m, stroke.strokes, n - 3);
+      if (new THREE.Vector3().fromArray(going[0].pts, n - 3).distanceTo(hit.both[0]) < brush.size * 0.3) return;
+      going.forEach((s, i) => s.pts.push(...hit.both[i].toArray().map(round)));
+      livePaint(stroke.m, stroke.strokes, n - 3, stroke.live);
       h.invalidate();
     },
     { capture: true },
@@ -201,6 +229,7 @@ export function stopMarkTools() {
   if (!markToolsOut()) return;
   gizmoOn = false;
   brush.on = false;
+  sizing = null;
   ring.hidden = true;
   if (host.gizmo.object === proxy) host.gizmo.detach();
   tools = null;
@@ -231,30 +260,93 @@ function paintMarking(): Marking | undefined {
   return m?.type === 'paint' ? m : undefined;
 }
 
-/** Where the pointer is on the target, in the paint's own space (and in the scene), if it's on it. */
-function paintAt(m: Marking, x: number, y: number): { at: THREE.Vector3; point: THREE.Vector3 } | null {
-  const hit = tools?.target.surface(host.rayAt(x, y));
-  if (!hit) return null;
+/**
+ * Where the pointer is on the target, if it's on it: in the scene, and in
+ * the paint's own space (with Mirror, its mirror image too: `both`).
+ */
+function paintAt(m: Marking, x: number, y: number): { both: THREE.Vector3[]; point: THREE.Vector3 } | null {
+  const t = tools?.target;
+  const hit = t?.surface(host.rayAt(x, y));
+  if (!t || !hit) return null;
   // (paint moved with the gizmo is painted where it now is)
-  return { at: hit.at.applyMatrix4(markingPlace(m).invert()), point: hit.point };
+  const toPaint = markingPlace(m).invert();
+  const both = [hit.at.clone().applyMatrix4(toPaint)];
+  if (brush.mirror && t.mirror) both.push(t.mirror(hit.at.clone()).applyMatrix4(toPaint));
+  return { both, point: hit.point };
+}
+
+/** How many pixels across one unit of brush size is at this spot in the scene. */
+function pxPerUnit(point: THREE.Vector3): number {
+  const f = tools?.target.frame();
+  const view = host.view();
+  const r = host.canvas.getBoundingClientRect();
+  const across = new THREE.Vector3(1, 0, 0).applyQuaternion(view.quaternion).multiplyScalar(f ? f.toWorld.getMaxScaleOnAxis() : 1);
+  const a = point.clone().project(view);
+  const b = point.clone().add(across).project(view);
+  return Math.hypot(((b.x - a.x) * r.width) / 2, ((b.y - a.y) * r.height) / 2);
+}
+
+function placeRing(x: number, y: number, px: number) {
+  px = Math.max(3, px);
+  ring.hidden = false;
+  ring.classList.toggle('erase', brush.erase);
+  Object.assign(ring.style, { left: `${x}px`, top: `${y}px`, width: `${2 * px}px`, height: `${2 * px}px` });
 }
 
 /** The brush's outline round the pointer, as big as it paints there. */
 function showRing(x: number, y: number, point: THREE.Vector3 | null) {
-  const f = tools?.target.frame();
-  if (!point || !f) {
+  if (!point) {
     ring.hidden = true;
     return;
   }
-  const view = host.view();
-  const r = host.canvas.getBoundingClientRect();
-  const across = new THREE.Vector3(1, 0, 0).applyQuaternion(view.quaternion).multiplyScalar(brush.size * f.toWorld.getMaxScaleOnAxis());
-  const a = point.clone().project(view);
-  const b = point.clone().add(across).project(view);
-  const px = Math.max(3, Math.hypot(((b.x - a.x) * r.width) / 2, ((b.y - a.y) * r.height) / 2));
-  ring.hidden = false;
-  ring.classList.toggle('erase', brush.erase);
-  Object.assign(ring.style, { left: `${x}px`, top: `${y}px`, width: `${2 * px}px`, height: `${2 * px}px` });
+  placeRing(x, y, brush.size * pxPerUnit(point));
+}
+
+/** Start sizing the brush where the pointer is (over the target, or as if it were at the picked one's middle). */
+function startSizing() {
+  const t = tools?.target;
+  const f = t?.frame();
+  if (!t || !f) return;
+  const hit = t.surface(host.rayAt(pointerAt.x, pointerAt.y));
+  const point = hit?.point ?? f.middle.clone().applyMatrix4(f.toWorld);
+  sizing = { x: pointerAt.x, y: pointerAt.y, pxPerUnit: Math.max(1e-3, pxPerUnit(point)), was: brush.size };
+  placeRing(sizing.x, sizing.y, brush.size * sizing.pxPerUnit);
+  host.hintOnce(`Move the pointer to size the brush; click to keep it (Esc: as it was)`, 3000);
+}
+
+function endSizing(keep: boolean) {
+  if (!sizing) return;
+  if (!keep) brush.size = sizing.was;
+  sizing = null;
+  ring.hidden = true;
+  // (the slider shows the new size)
+  tools?.render();
+}
+
+/**
+ * Keys for the brush while it's picked up: Brush size, Mirror (both sides),
+ * and Esc while sizing. Says whether it took the key (the app shouldn't act on it).
+ */
+export function markToolKey(e: KeyboardEvent): boolean {
+  if (sizing) {
+    if (e.key === 'Escape' || is(e, 'brushSize') || e.key === 'Enter') {
+      endSizing(e.key !== 'Escape');
+      return true;
+    }
+    return false;
+  }
+  if (!paintMarking() || stroke) return false;
+  if (is(e, 'brushSize')) {
+    startSizing();
+    return true;
+  }
+  if (is(e, 'mirror') && tools?.target.mirror) {
+    brush.mirror = !brush.mirror;
+    host.hint(brush.mirror ? 'Mirror on: paint goes on both sides' : 'Mirror off', 1600);
+    tools.render();
+    return true;
+  }
+  return false;
 }
 
 /** Lay the open marking where the gizmo is. */
@@ -781,13 +873,15 @@ export class MarkingPanel {
     size.className = 'slider';
     const input = document.createElement('input');
     input.type = 'range';
-    input.min = '0.005';
-    input.max = '0.12';
+    input.min = String(MIN_BRUSH);
+    input.max = String(MAX_BRUSH);
     input.step = '0.001';
     input.value = String(brush.size);
     input.oninput = () => (brush.size = parseFloat(input.value));
     const name = document.createElement('span');
     name.textContent = 'Brush size';
+    const key = keyLabel('brushSize');
+    if (key) size.title = `Or press ${key} while painting, move the pointer, and click`;
     const ends = document.createElement('span');
     ends.className = 'ends';
     ends.innerHTML = '<em>fine</em><em>broad</em>';
@@ -812,5 +906,18 @@ export class MarkingPanel {
     };
     row.append('Brush color', color, clear);
     el.append(row);
+    if (this.target.mirror) {
+      // paint both sides at once
+      const sym = document.createElement('label');
+      sym.className = 'check mark-mirror';
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = brush.mirror;
+      box.onchange = () => (brush.mirror = box.checked);
+      const key = keyLabel('mirror');
+      sym.title = `Each stroke goes on the other side of the ${this.target.whole} too${key ? ` (${key})` : ''}`;
+      sym.append(box, ' Mirror: paint both sides');
+      el.append(sym);
+    }
   }
 }
