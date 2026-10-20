@@ -6,33 +6,15 @@ import { migrateMarkings } from '../markings';
 import { stopMarkTools } from '../markingPanel';
 import { type Tab } from '../layout';
 import { RIGS, expandRig, movedBases, reparentAll, rigFromTemplate, type RigState, type V3 } from '../rigs';
-import {
-  animSecs,
-  autosaveThing,
-  deselectAttachment,
-  drawState,
-  exitDraw,
-  hint,
-  invalidate,
-  partsOpen,
-  placing,
-  queueCreationSave,
-  rehang,
-  renderSceneColors,
-  renderUI,
-  rigPrefs,
-  sceneName,
-  selectAttachment,
-  selectedAttachment,
-  sizesIn,
-  startPlacing,
-  stopPlacing,
-  syncWorkbench,
-  updateSkeletonVisibility,
-  workbench,
-} from '../main';
+import { animSecs, hint, invalidate, queueCreationSave, rehang, renderSceneColors, renderUI, rigPrefs, sceneName, sizesIn } from '../main';
 import { $ } from './dom';
 import { key, KEY_AT, lightSpin, scene } from './stage';
+import { updateSkeletonVisibility } from './controls';
+import { drawState, exitDraw } from './drawing';
+import { autosaveThing, syncWorkbench, workbench } from './workbench';
+import { deselectAttachment, selectAttachment, selectedAttachment } from './attach';
+import { placing, startPlacing, stopPlacing } from './arrange';
+import { partsOpen } from './creatureBar';
 
 // state + history
 

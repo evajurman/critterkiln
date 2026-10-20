@@ -1,11 +1,7 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import {
-  bendOf,
   blendWithOf,
-  carryOnBend,
   Creature,
   defaultState,
   EYE_STYLES,
@@ -21,40 +17,15 @@ import {
   type EyeFinish,
   type EyeStyle,
   type PartKind,
-  type PartShape,
   type PartState,
-  type Placement,
-  type Planted,
   type SeamlessMode,
 } from './creature';
 import { collect, reach, renderTrophies, setTrophyHandlers, unlock } from './achievements';
-import { bounds, clipLoop, combineLoops, getMeshDetail, pointInPolygon, setMeshDetail, signedArea, smoothLoop, symmetrize, type Vec2 } from './inflate';
-import {
-  buildThing,
-  collection,
-  disposeThing,
-  downloadText,
-  envelope,
-  mirrorShape,
-  newPiece,
-  newThing,
-  placeMatrix,
-  parseEnvelope,
-  putThing,
-  removeThing,
-  safeFileName,
-  setCollection,
-  uid,
-  type BendMode,
-  WRAP_SMOOTH,
-  WRAP_STRENGTH,
-  type Piece,
-  type Thing,
-  type Wearer,
-} from './stuff';
-import { STYLE_PARAMS, STYLES, followOf, glowWithFlash, setFuzzQuality, setSketchPixelRatio, styleSettings, type GlowFollow, type StyleId } from './materials';
+import { bounds, clipLoop, setMeshDetail, type Vec2 } from './inflate';
+import { collection, downloadText, envelope, placeMatrix, safeFileName, setCollection, uid, type Thing } from './stuff';
+import { STYLE_PARAMS, STYLES, followOf, setFuzzQuality, setSketchPixelRatio, styleSettings, type GlowFollow, type StyleId } from './materials';
 import { onMarkingTexture, type Marking } from './markings';
-import { MarkingPanel, followMarkTools, initMarkingTools, markGizmoHeld, markGizmoMode, markToolKey, markToolsOut, stopMarkTools } from './markingPanel';
+import { MarkingPanel, followMarkTools, initMarkingTools, markGizmoMode, markToolKey, stopMarkTools } from './markingPanel';
 import { installScrollbars } from './scrollbars';
 import { applyPalette, GIFEncoder, quantize } from 'gifenc';
 import {
@@ -78,7 +49,7 @@ import {
   type StuffAnim,
   type StuffKind,
 } from './animate';
-import { arrangeMenu, customTabs, tabNamesMenu, gizmos, initLayout, setLayoutIdle, setLayoutTab, setSceneColors } from './layout';
+import { arrangeMenu, customTabs, tabNamesMenu, initLayout, setLayoutTab, setSceneColors } from './layout';
 import { installCursorPress } from './cursorPress';
 import { installTooltips } from './tooltip';
 import {
@@ -89,7 +60,6 @@ import {
   labelShortcuts,
   renderShortcutSheet,
   resetShortcuts,
-  ridesSurface,
   stopListening,
   type ShortcutId,
 } from './shortcuts';
@@ -99,31 +69,24 @@ import {
   RIGS,
   addLimb,
   canParent,
-  copyLimb,
   deleteLimb,
   deleteSavedRig,
   detachBone,
-  duplicateLimb,
   expandRig,
   extendBone,
   getRig,
   mirrorLimb,
   mirrorTarget,
-  moveJoint,
   partIds,
-  pasteLimb,
   reattachBone,
   moveLimb,
   rigFromTemplate,
-  rollLimb,
   saveRig,
-  scaleBone,
   savedRigs,
   setParent,
   splitBone,
   unlinkPair,
   type BoneDef,
-  type LimbClip,
   type PartCopy,
   type PartSizes,
   type RigState,
@@ -138,8 +101,6 @@ import {
   key,
   LIGHT_KEY,
   lightTurn,
-  octx,
-  ORTHO_KEY,
   overlay,
   pixelRatio,
   quality,
@@ -152,7 +113,6 @@ import {
   setLightTurn,
   setOrtho,
   setQualityValue,
-  setSceneOrtho,
   shadowMat,
   syncView,
   view,
@@ -217,6 +177,95 @@ import {
   world,
   type World,
 } from './editor/state';
+import {
+  controls,
+  creatureLabel,
+  drag,
+  handlesVisible,
+  initControls,
+  pickOtherCreature,
+  pickPart,
+  pointer,
+  raycaster,
+  setRay,
+  showEyes,
+  syncIdle,
+  touchScreen,
+  updateSkeletonVisibility,
+  viewChanged,
+  viewMoved,
+} from './editor/controls';
+import { flyTo, focusOnBone, frameAll, frameCreature, freshView, initFraming, partToFloor, setTween, tween } from './editor/framing';
+import {
+  drawHint,
+  drawState,
+  enterDraw,
+  exitDraw,
+  finishDraw,
+  initDrawing,
+  localToOverlay,
+  partPlane,
+  renderOverlay,
+  screenToLocal,
+  setDrawSide,
+  setDrawTool,
+  setSpacePan,
+  spacePan,
+  syncDrawBar,
+  toggleSymmetry,
+} from './editor/drawing';
+import {
+  autosaveThing,
+  bench,
+  benchKey,
+  board,
+  clip,
+  copyPicked,
+  copyPiece,
+  deletePiece,
+  flashPiece,
+  focusOnBoard,
+  focusOnPlane,
+  initWorkbench,
+  pasteClip,
+  pickPiece,
+  piece,
+  pieceMode,
+  piecePivot,
+  refreshPieceGizmo,
+  renderStuffPanel,
+  saveWorkbenchNow,
+  selectedPiece,
+  setBenchKey,
+  setPieceMirror,
+  setPieceMode,
+  setSelectedPiece,
+  snapThumb,
+  syncTwin,
+  syncWorkbench,
+  thingSaveTimer,
+  twinOf,
+  workbench,
+} from './editor/workbench';
+import { deselectAttachment, gizmo, initAttach, selectAttachment, selectedAttachment } from './editor/attach';
+import { initArrange, type PlaceMode, placing, setPlaceMode, startPlacing, stopPlacing } from './editor/arrange';
+import { initCreatureBar, renderCreatureBar } from './editor/creatureBar';
+import { initAttachPanel, removeAttachment, syncAttachBar } from './editor/attachPanel';
+import { initCarry, pickAttachment, pickStuff, renderCreatureStuff } from './editor/carry';
+import { closeAttachPops, closeTopPopovers, togglePopover } from './editor/popovers';
+import {
+  applyLook,
+  currentLook,
+  forFile,
+  initFiles,
+  keepInCollection,
+  loadBundle,
+  openFile,
+  putView,
+  saveBundle,
+  sceneFileName,
+  type SceneLook,
+} from './editor/files';
 
 // Render on demand: the loop only draws when something asked for it (any
 // input, a commit, camera motion, a merge or skin update...). A couple of
@@ -228,4285 +277,15 @@ export function invalidate(frames = 3) {
 initFloor();
 initPost();
 initState();
-
-// controls (our pointer handlers are registered first so they can veto orbiting)
-
-const raycaster = new THREE.Raycaster();
-const pointer = { downX: 0, downY: 0, moved: false, touch: false };
-/** A phone or tablet: hints talk about fingers, not mice and keys. */
-const touchScreen = () => matchMedia('(pointer: coarse)').matches;
-// the last tap on the 3D view, to spot a double tap
-let lastTap = { t: 0, x: 0, y: 0 };
-let lastDoubleTap = 0;
-type DragKind = 'body' | 'start' | 'end' | 'bend' | 'roll';
-let drag: {
-  id: string;
-  kind: DragKind;
-  plane: THREE.Plane;
-  /** the body's base grip: where the creature was, and the feet it keeps planted as the body moves */
-  body?: { from: THREE.Vector3; feet: Planted[] };
-  startHit: THREE.Vector3;
-  /** rig mode: skeleton at the start of the drag, so each move re-applies from scratch */
-  rigBase?: string;
-  /**
-   * reshaping: turns a world-space move into skeleton space. The bone's base
-   * rides its parent, so this undoes everything above it (the parent's pose,
-   * a bendy parent's curve, the creature's turn and size) but not the bone's
-   * own bend.
-   */
-  toDef?: THREE.Matrix3;
-  /** where the pointer last was (scrolling pushes a dragged tip nearer or further from there) */
-  last?: THREE.Vector2;
-  /** the parts that move with this drag, so not snapped to (Ctrl), and where the pointer is (Shift or Ctrl pressed mid-drag re-applies) */
-  moving: Set<BoneRT>;
-  at?: THREE.Vector2;
-  /** the base or tip it's snapped to now */
-  snapped?: string;
-  /**
-   * Dragging a tip: pulled past the part's (or limb's) reach it stretches, and
-   * one pushed nearer its base than it started shrinks it. The skeleton before
-   * the drag, the limb's straight reach and how far the tip was from its base
-   * then (in the scene), how much it's stretched now, and each part's
-   * lengthening (for its drawing)
-   */
-  stretch?: { base: string; reach?: number; from?: number; k: number; kY: Map<string, number> };
-  /** a bend grip on one of the bone's bend points: which one */
-  node?: number;
-  /** a waiting (dotted) bend grip: the gap it sits in, and where (in the bone's frame); it becomes a bend point once it moves */
-  gap?: { at: number; pos: THREE.Vector3 };
-  /** roll ring: where the press was, which way on screen the ring moves as the part rolls, and how many pixels per radian */
-  roll?: {
-    start: THREE.Vector2;
-    dir: THREE.Vector2;
-    pxPerRad: number;
-    /** the part (and its twin) before the drag: rest turn and pose, to keep a posed limb where it is */
-    rest: Map<string, THREE.Quaternion>;
-    pose: CreatureState['pose'];
-    /** eyes before the drag: splitting a pair gives its right side its own */
-    eyes: CreatureState['eyes'];
-    /** pairs hanging off it were split so they could turn with it */
-    split?: boolean;
-  };
-  moved: boolean;
-} | null = null;
-
-/**
- * A pose is kept relative to a part's rest axes, which a roll turns: turn it
- * back the other way so a bent limb stays where it was and only spins about
- * its length. `rest` and `pose` are from before the roll.
- */
-function keepPoseThroughRoll(rest: Map<string, THREE.Quaternion>, pose: CreatureState['pose']) {
-  for (const [lid, before] of rest) {
-    const q = pose[lid];
-    const l = creature.bones.get(lid);
-    if (!q || !l) continue;
-    const d = before.clone().invert().multiply(l.restQuat);
-    const kept = d.clone().invert().multiply(new THREE.Quaternion(...q)).multiply(d);
-    state.pose[lid] = kept.toArray() as [number, number, number, number];
-  }
-  creature.applyPose();
-}
-
-/**
- * Roll a part to `to(its roll now)`, as seen on its own side, turning whatever
- * hangs off it along with it. With Mirror off, a pair stops being one so only
- * this side rolls, and pairs on a middle part are split so they turn with it.
- * Says whether anything was split.
- */
-function rollPart(id: string, to: (now: number) => number): boolean {
-  // the rig, not the scene: mid-drag the scene already shows an earlier split
-  const ex = expandRig(state.rig).bones.find((x) => x.id === id);
-  if (!ex) return false;
-  const copies = !rigLocked() && ex.sideSign !== 0 ? unlinkPair(state.rig, id) : [];
-  const def = state.rig.bones.find((d) => d.id === (copies.length ? id : ex.baseId));
-  if (!def) return false;
-  // a right twin shares its left twin's roll, turned the other way
-  const flip = !copies.length && ex.sideSign === -1 ? -1 : 1;
-  const was = def.roll ?? 0;
-  let r = to(was * flip) * flip;
-  r = Math.round(Math.atan2(Math.sin(r), Math.cos(r)) * 1000) / 1000;
-  copies.push(...rollLimb(state.rig, id, r - was, rigLocked()));
-  def.roll = r;
-  applyPartCopies(copies, true);
-  return copies.length > 0;
-}
-
-/** Double-clicking a roll grip: straighten the part's roll (and its twin's, with Mirror on). */
-function resetRoll(id: string) {
-  const b = creature.bones.get(id);
-  const def = b && state.rig.bones.find((d) => d.id === b.def.baseId);
-  if (!b || !def) return;
-  if (!def.roll) {
-    hint('Already straight', 1200);
-    return;
-  }
-  const rest = new Map(creature.linked(id).map((l) => [l.def.id, l.restQuat.clone()] as const));
-  const pose = structuredClone(state.pose);
-  const split = rollPart(id, () => 0);
-  creature.relayout(state.rig);
-  keepPoseThroughRoll(rest, pose);
-  if (!state.rig.base.startsWith('custom')) state.rig.base = 'custom';
-  buildCreature();
-  settleOnFloor();
-  creature.boing(id);
-  commit();
-  selectPart(id);
-  hint(split ? 'Roll straightened: now separate from its other side (Mirror keeps them paired)' : 'Roll straightened', 1600);
-}
-
-/**
- * Double-clicking a green bend diamond: undo just that bend (and its twin's).
- * A bend point goes, the part curving through the rest (the last one leaves
- * it straight); an arc's middle straightens it. A waiting (dotted) one has nothing to undo.
- */
-function resetBend(id: string, node: number | undefined, used: boolean) {
-  const b = creature.bones.get(id);
-  const def = b && state.rig.bones.find((d) => d.id === b.def.baseId);
-  if (!b || !def) return;
-  if (!used) {
-    hint(def.bendNodes?.length || (def.bendy && def.bend) ? 'Not bent there yet: drag it to bend' : 'Already straight', 1400);
-    return;
-  }
-  const one = node !== undefined && !!def.bendNodes && def.bendNodes.length > 1;
-  if (one) {
-    def.bendNodes!.splice(node!, 1);
-    def.bendRound?.splice(node!, 1);
-  } else {
-    // the last bend: back to one waiting grip in the middle
-    delete def.bendNodes;
-    delete def.bendRound;
-    def.bendy = false;
-    def.bend = 0;
-  }
-  creature.relayout(state.rig);
-  if (!state.rig.base.startsWith('custom')) state.rig.base = 'custom';
-  buildCreature();
-  settleOnFloor();
-  creature.boing(id);
-  commit();
-  selectPart(id);
-  hint(one ? 'That bend undone' : 'Bend straightened', 1400);
-}
-
-/** A point in a bone's frame as a bend point: kept for the left twin (like bendDir), as fractions of the length. */
-function bendNodeAt(b: { length: number; def: { sideSign: number } }, v: THREE.Vector3): V3 {
-  const r = (x: number) => Math.round((x / b.length) * 1000) / 1000;
-  return [r(v.x), r(v.y), r(b.def.sideSign === -1 ? -v.z : v.z)];
-}
-
-/**
- * Scrolling on a solid bend grip: how round the curve is there, in tenths
- * from a corner (0) through round (1, an arc) to swollen (2). An arc's middle
- * first becomes a bend point there (the same arc). Kept on a pause.
- */
-let roundCommit = 0;
-function roundBend(id: string, node: number | undefined, step: number) {
-  const b = creature.bones.get(id);
-  const def = b && state.rig.bones.find((d) => d.id === b.def.baseId);
-  if (!b || !def) return;
-  if (node === undefined || !def.bendNodes?.length) {
-    const mid = b.bendHandles.find((h) => h.userData.used)?.position;
-    if (!mid) return;
-    def.bendNodes = [bendNodeAt(b, mid)];
-    delete def.bend;
-    delete def.bendDir;
-    delete def.bendRound;
-    def.bendy = true;
-    node = 0;
-  }
-  const round = def.bendRound ?? def.bendNodes.map(() => 1);
-  round[node] = Math.min(2, Math.max(0, Math.round(((round[node] ?? 1) + step * 0.1) * 10) / 10));
-  if (round.every((v) => v === 1)) delete def.bendRound;
-  else def.bendRound = round;
-  creature.relayout(state.rig);
-  creature.sync();
-  const v = round[node];
-  hint(v === 1 ? 'Round, like an arc' : v === 0 ? 'A sharp corner' : `${v < 1 ? 'Sharper' : 'Rounder'}: ${Math.round(v * 100)}%`, 1200);
-  clearTimeout(roundCommit);
-  roundCommit = window.setTimeout(() => {
-    if (!state.rig.base.startsWith('custom')) state.rig.base = 'custom';
-    settleOnFloor();
-    commit();
-  }, 400);
-}
-
-/**
- * Scrolling on a joint: the purple square (a part's own base) widens or
- * narrows its Base width; the orange circle its Tip width, and the Base width
- * of every part growing from that tip with it, so the joint stays even.
- * A part with a drawing grows or shrinks whole instead. Kept on a pause.
- */
-let widenCommit = 0;
-function widenJoint(id: string, at: 'start' | 'end', step: number) {
-  const b = creature.bones.get(id);
-  if (!b) return;
-  const defOf = (x: { def: { baseId: string } }) => state.rig.bones.find((d) => d.id === x.def.baseId);
-  const drawn = (x: { src: string }) => !!state.parts[x.src]?.outline;
-  const k = step > 0 ? 1.08 : 1 / 1.08;
-  const grow = (w: number) => Math.min(1.2, Math.max(0.02, Math.round(w * k * 1000) / 1000));
-  // a drawing sets its own widths: either end grows or shrinks the whole part instead, drawing, length and curve alike
-  if (drawn(b)) return scaleDrawnPart(id, k);
-  const ends: { def: BoneDef; end: 'base' | 'tip' }[] = [];
-  const add = (x: (typeof creature.list)[number], end: 'base' | 'tip') => {
-    const d = defOf(x);
-    if (d && !drawn(x) && !ends.some((o) => o.def === d && o.end === end)) ends.push({ def: d, end });
-  };
-  if (at === 'start') add(b, 'base');
-  else {
-    add(b, 'tip');
-    for (const c of creature.list) if (c.parent === b && !c.attach) add(c, 'base');
-  }
-  if (!ends.length) return;
-  for (const { def, end } of ends) {
-    if (end === 'base') {
-      // the tip keeps the width it had (it followed the base while unset)
-      def.widthEnd ??= def.width;
-      def.width = grow(def.width);
-    } else def.widthEnd = grow(def.widthEnd ?? def.width);
-  }
-  creature.relayout(state.rig);
-  creature.sync();
-  hint(step > 0 ? 'Wider' : 'Thinner', 900);
-  clearTimeout(widenCommit);
-  widenCommit = window.setTimeout(() => {
-    settleOnFloor();
-    commitBoneEdit();
-  }, 400);
-}
-
-/** Grow a drawn part (and its twin) by `k` all over, rebuilt at its new size. */
-function scaleDrawnPart(id: string, k: number) {
-  const b = creature.bones.get(id);
-  const part = b && state.parts[b.src];
-  if (!b || !part) return;
-  creature.capturePose();
-  const before = structuredClone(state.rig);
-  // (bend points are fractions of the length, so the curve grows with it as it is)
-  const kY = scaleBone(state.rig, id, k, k);
-  carryEyes(before, new Set([b.def.baseId]), k);
-  const r4 = (v: number) => Math.round(v * 1e4) / 1e4;
-  setPartShapes(part, partShapes(part).map((sh) => ({ ...sh, outline: sh.outline.map(([x, y]) => [r4(x * k), r4(y * kY)] as Vec2) })));
-  if (!state.rig.base.startsWith('custom')) state.rig.base = 'custom';
-  buildCreature();
-  hint(k > 1 ? 'Bigger' : 'Smaller', 900);
-  clearTimeout(widenCommit);
-  widenCommit = window.setTimeout(() => {
-    settleOnFloor();
-    commitBoneEdit();
-  }, 400);
-}
-
-/** Double-clicking a joint's tip: unbend that joint (and its twin, with Mirror on). */
-function resetJoint(id: string) {
-  const b = creature.bones.get(id);
-  if (!b) return;
-  const twin = rigLocked() ? creature.twinOf(b) : null;
-  const ids = [id, ...(twin ? [twin.def.id] : [])].filter((i) => state.pose[i]);
-  if (!ids.length) {
-    hint('Already straight', 1200);
-    return;
-  }
-  for (const i of ids) delete state.pose[i];
-  creature.applyPose();
-  settleOnFloor();
-  creature.boing(id);
-  commit();
-  hint('Joint straightened', 1400);
-}
-
-/** Where a point in a bone's own space lands on screen, in client pixels. */
-function toScreen(obj: THREE.Object3D, local: THREE.Vector3): THREE.Vector2 {
-  const r = canvas.getBoundingClientRect();
-  const v = local.clone().applyMatrix4(obj.matrixWorld).project(view);
-  return new THREE.Vector2(r.left + ((v.x + 1) / 2) * r.width, r.top + ((1 - v.y) / 2) * r.height);
-}
-
-/** Height of the creature's lowest point above the floor. */
-function floorGap(): number {
-  const box = creatureBox(true);
-  return box.isEmpty() ? 0 : box.min.y;
-}
-/** where the lowest point was when a move began: raising it means the creature should float */
-let gapBefore = 0;
-const lifted = () => floorGap() > Math.max(0, gapBefore) + 0.02;
-
-/** Turn "Keep feet on the floor" on or off for this creature. */
-function setKeepFloor(on: boolean, announce = false) {
-  if ((state.keepFloor !== false) === on) return;
-  state.keepFloor = on;
-  $<HTMLInputElement>('#keep-floor').checked = on;
-  if (announce) hint(on ? 'Feet back on the floor' : 'Floating: "Keep feet on the floor" is off', 2200);
-}
-
-/** After a bend or resize, a creature that keeps its feet on the floor settles back onto it. */
-function settleOnFloor() {
-  if (state.keepFloor === false) return;
-  const box = creatureBox(true);
-  if (box.isEmpty() || Math.abs(box.min.y) < 1e-4) return;
-  const down = creature.root.worldToLocal(new THREE.Vector3(0, -box.min.y, 0)).sub(creature.root.worldToLocal(new THREE.Vector3()));
-  creature.group.position.add(down);
-  creature.capturePose();
-}
-
-canvas.addEventListener('pointerdown', (e) => {
-  pointer.downX = e.clientX;
-  pointer.downY = e.clientY;
-  pointer.moved = false;
-  pointer.touch = e.pointerType !== 'mouse';
-  // holding Space, the left button only pans
-  if (e.button !== 0 || pickingFocus || pickingParent || spacePan) return;
-  // pressing on an eye: dragging slides the pair over the surface (a click still opens its settings)
-  const onHandle = (handlesVisible() && pickHandle(e.clientX, e.clientY)) || gizmo.dragging || gizmo.axis !== null;
-  const eye = !onHandle && mode !== 'stuff' && !drawState && !idle ? pickEyeHit(e.clientX, e.clientY) : null;
-  if (eye) {
-    eyeDrag = { pair: eye.pair, sgn: eye.sgn };
-    controls.enabled = false;
-    canvas.setPointerCapture(e.pointerId);
-    return;
-  }
-  if (!handlesVisible()) return;
-  const h = pickHandle(e.clientX, e.clientY);
-  if (!h) return;
-  controls.enabled = false;
-  canvas.setPointerCapture(e.pointerId);
-  const pos = h.getWorldPosition(new THREE.Vector3());
-  const id = h.userData.handle as string;
-  const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(camera.getWorldDirection(new THREE.Vector3()).negate(), pos);
-  const b = creature.bones.get(id);
-  // the body's base grip poses: the body moves, the legs bend to keep their feet where they are
-  const feet = b && !b.parent && h.userData.kind === 'start' ? creature.plantedFeet(b) : [];
-  const body = feet.length ? { from: creature.group.position.clone(), feet } : undefined;
-  const kind = body ? 'body' : (h.userData.kind as DragKind);
-  // bending is posing; sliding, curving and resizing reshape the skeleton itself
-  const reshape = kind !== 'end' && kind !== 'body';
-  let toDef: THREE.Matrix3 | undefined;
-  if (reshape && b) {
-    b.pivot.updateMatrixWorld(true);
-    // where the bone would be in the scene if it weren't bent itself
-    const unbent = b.pivot.parent!.matrixWorld.clone().multiply(new THREE.Matrix4().compose(b.pivot.position, b.restQuat, new THREE.Vector3(1, 1, 1)));
-    toDef = new THREE.Matrix3().setFromMatrix4(b.restWorld.clone().multiply(unbent.invert()));
-  }
-  let roll: NonNullable<typeof drag>['roll'];
-  if (b && kind === 'roll') {
-    // which way the ring travels on screen as the part rolls a little (about its own length)
-    // which way the ring runs where it was grabbed (it circles the line from base to tip, which is the bone's Y)
-    const at = (h.userData.grab as THREE.Vector3 | undefined)?.clone() ?? h.position.clone().add(new THREE.Vector3(h.userData.ring, 0, 0));
-    const eps = 0.02;
-    const moved = toScreen(b.pivot, at.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), eps)).sub(toScreen(b.pivot, at));
-    const pxPerRad = moved.length() / eps;
-    // seen end-on the ring barely moves: fall back to dragging sideways
-    const visible = pxPerRad > 40;
-    const dir = visible ? moved.normalize() : new THREE.Vector2(1, 0);
-    const rest = new Map(creature.linked(id).map((l) => [l.def.id, l.restQuat.clone()] as const));
-    creature.rolling = true;
-    roll = { start: new THREE.Vector2(e.clientX, e.clientY), dir, pxPerRad: visible ? pxPerRad : 120, rest, pose: structuredClone(state.pose), eyes: structuredClone(state.eyes) };
-  }
-  const stretch = kind === 'end' ? { base: JSON.stringify(state.rig), k: 1, kY: new Map<string, number>() } : undefined;
-  const ik = $<HTMLInputElement>('#ik').checked;
-  const moving = !b
-    ? new Set<BoneRT>()
-    : body
-      ? new Set(creature.list)
-      : creature.withBelow(kind === 'end' ? creature.linked(id).flatMap((l) => creature.ikChain(l.def.id, ik)) : creature.linked(id));
-  drag = { id, kind, plane, body, stretch, moving, startHit: pos, moved: false, rigBase: reshape ? JSON.stringify(state.rig) : undefined, toDef, roll, node: h.userData.node as number | undefined, gap: h.userData.gap === undefined ? undefined : { at: h.userData.gap as number, pos: h.position.clone() } };
-});
-
-canvas.addEventListener('pointermove', (e) => {
-  if (Math.hypot(e.clientX - pointer.downX, e.clientY - pointer.downY) > 5) pointer.moved = true;
-  if (eyeDrag) {
-    if (pointer.moved) moveEyesTo(eyeDrag.pair, eyeDrag.sgn, e.clientX, e.clientY);
-    return;
-  }
-  if (drag) {
-    setRay(e.clientX, e.clientY);
-    let hit = raycaster.ray.intersectPlane(drag.plane, new THREE.Vector3());
-    if (!hit) return;
-    drag.moved = drag.moved || pointer.moved;
-    drag.at = new THREE.Vector2(e.clientX, e.clientY);
-    if (drag.kind !== 'roll') hit = assistDrag(hit, e);
-    if (drag.body) {
-      if (!drag.moved) return;
-      // the move in the creature's own space (it may be turned or resized)
-      const d = creature.root.worldToLocal(hit.clone()).sub(creature.root.worldToLocal(drag.startHit.clone()));
-      creature.moveBodyOver(drag.body.feet, drag.body.from, d);
-      hintOnce('Moving the body: its feet stay planted', 2200);
-    } else if (drag.rigBase && drag.kind === 'bend') {
-      // a green diamond: its bend point goes where the pointer is
-      if (!drag.moved) return;
-      const b = creature.bones.get(drag.id);
-      const def = b && state.rig.bones.find((x) => x.id === b.def.baseId);
-      if (!b || !def) return;
-      const local = b.pivot.worldToLocal(hit.clone());
-      const asNode = (v: THREE.Vector3) => bendNodeAt(b, v);
-      if (drag.gap && drag.node === undefined) {
-        // a waiting grip, used: it becomes a bend point there (an arc first turns into one through its middle)
-        const g = drag.gap;
-        if (!def.bendNodes?.length) {
-          const mid = b.bendHandles.find((h) => h.userData.used)!.position;
-          def.bendNodes = g.at === 0 ? [asNode(g.pos), asNode(mid)] : [asNode(mid), asNode(g.pos)];
-          delete def.bend;
-          delete def.bendDir;
-          delete def.bendRound;
-        } else {
-          def.bendNodes.splice(g.at, 0, asNode(g.pos));
-          def.bendRound?.splice(g.at, 0, 1);
-        }
-        // gap n sits before point n (gap 1 of an arc: after its middle)
-        drag.node = g.at;
-      } else if (drag.node === undefined) {
-        // a straight part's middle, or an arc's: a bend point there (the same arc: one point curves round
-        // the circle through the base, it and the tip), free to go anywhere from then on
-        const mid = b.bendHandles.find((h) => h.userData.node === undefined && h.userData.gap === undefined)!.position;
-        def.bendNodes = [asNode(mid)];
-        delete def.bend;
-        delete def.bendDir;
-        delete def.bendRound;
-        drag.node = 0;
-      }
-      if (!creature.bendDragging) creature.setBendDragging(true);
-      // just that one point moves
-      def.bendNodes![drag.node] = asNode(local);
-      def.bendy = true;
-      creature.relayout(state.rig);
-      creature.sync();
-    } else if (drag.roll) {
-      if (!drag.moved) return;
-      const b = creature.bones.get(drag.id);
-      if (!b) return;
-      const rl = drag.roll;
-      const turn = new THREE.Vector2(e.clientX, e.clientY).sub(rl.start).dot(rl.dir) / rl.pxPerRad;
-      // start over from before the drag each time (a split pair included)
-      state.rig = JSON.parse(drag.rigBase!) as RigState;
-      state.eyes = structuredClone(rl.eyes);
-      rl.split = rollPart(drag.id, (now) => now + turn);
-      creature.relayout(state.rig);
-      keepPoseThroughRoll(rl.rest, rl.pose);
-      invalidate();
-    } else if (drag.rigBase && drag.kind === 'start') {
-      if (!drag.moved) return;
-      // slide the whole limb: the move in skeleton coordinates (the creature may be turned or posed, the bone may ride a curve)
-      // (or over the surface of the part under the pointer: with Alt, or always if the shortcut sheet swaps them)
-      const d = ((ridesSurface(e.altKey) && surfaceUnder(drag.id)) || hit.clone()).sub(drag.startHit);
-      if (drag.toDef) d.applyMatrix3(drag.toDef);
-      state.rig = JSON.parse(drag.rigBase) as RigState;
-      moveJoint(state.rig, drag.id, 'start', d.toArray() as V3, rigLocked());
-      creature.relayout(state.rig);
-    } else if (drag.kind === 'end') {
-      drag.last = new THREE.Vector2(e.clientX, e.clientY);
-      dragTipTo(drag.id, hit);
-    }
-    return;
-  }
-  if (handlesVisible() && e.buttons === 0) {
-    const h = pickHandle(e.clientX, e.clientY);
-    creature.setHandleHover(h);
-    $('#viewport').style.cursor = h ? 'var(--cursor-click)' : '';
-  }
-});
-
-// a grip dragged with Shift keeps to one of the creature's axes (the line
-// shows which), with Ctrl (⌘) it snaps onto the base or tip of another part
-const AXIS_COLORS = [0xe5484d, 0x30a46c, 0x3b82f6];
-const axisGuide = new THREE.Line(
-  new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-50, 0, 0), new THREE.Vector3(50, 0, 0)]),
-  new THREE.LineBasicMaterial({ depthTest: false, transparent: true }),
-);
-const snapGuide = new THREE.Mesh(new THREE.SphereGeometry(0.03, 16, 10), new THREE.MeshBasicMaterial({ color: 0xfacc15, depthTest: false, transparent: true }));
-for (const g of [axisGuide, snapGuide]) {
-  g.renderOrder = 1001;
-  g.frustumCulled = false;
-  g.visible = false;
-  scene.add(g);
-}
-
-/** Where a dragged grip goes, Shift (one axis) and Ctrl (snapping) taken into account. */
-function assistDrag(hit: THREE.Vector3, e: MouseEvent): THREE.Vector3 {
-  const d = drag!;
-  axisGuide.visible = snapGuide.visible = false;
-  const snap = e.ctrlKey || e.metaKey ? nodeNear(e.clientX, e.clientY, d.moving) : null;
-  if (snap) {
-    snapGuide.position.copy(snap.at);
-    snapGuide.visible = true;
-    const key = `${snap.bone.def.id} ${snap.end}`;
-    if (key !== d.snapped) hint(`Snapped to the ${snap.bone.def.name} ${snap.end}`, 1200);
-    d.snapped = key;
-    return snap.at.clone();
-  }
-  d.snapped = undefined;
-  if (!e.shiftKey) return hit;
-  // in the creature's own X, Y and Z (it may be turned): whichever the move is mostly along
-  const from = creature.root.worldToLocal(d.startHit.clone());
-  const to = creature.root.worldToLocal(hit.clone());
-  const m = to.clone().sub(from).toArray().map(Math.abs);
-  const ax = m[0] >= m[1] && m[0] >= m[2] ? 0 : m[1] >= m[2] ? 1 : 2;
-  from.setComponent(ax, to.getComponent(ax));
-  const dir = new THREE.Vector3().setComponent(ax, 1).transformDirection(creature.root.matrixWorld);
-  axisGuide.position.copy(d.startHit);
-  axisGuide.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), dir);
-  (axisGuide.material as THREE.LineBasicMaterial).color.setHex(AXIS_COLORS[ax]);
-  axisGuide.visible = true;
-  return creature.root.localToWorld(from);
-}
-
-/** The base or tip (of any creature's parts but the moving ones) nearest the pointer on screen, if one's close. */
-function nodeNear(x: number, y: number, moving: Set<BoneRT>) {
-  const r = canvas.getBoundingClientRect();
-  let best: ReturnType<Creature['nodes']>[number] | null = null;
-  let bestD = 18;
-  for (const c of creatures) {
-    c.root.updateMatrixWorld(true);
-    for (const n of c.nodes(c === creature ? moving : undefined)) {
-      const v = n.at.clone().project(view);
-      if (v.z > 1) continue;
-      const dd = Math.hypot(r.left + ((v.x + 1) / 2) * r.width - x, r.top + ((1 - v.y) / 2) * r.height - y);
-      if (dd < bestD) {
-        bestD = dd;
-        best = n;
-      }
-    }
-  }
-  return best;
-}
-
-if (/Mac|iPhone|iPad/.test(navigator.platform)) document.querySelectorAll('.ctrl-key').forEach((k) => (k.textContent = '⌘'));
-
-// pressing or letting go of Shift or Ctrl mid-drag applies straight away
-for (const type of ['keydown', 'keyup'] as const) {
-  addEventListener(type, (e) => {
-    if (!drag?.at || !['Shift', 'Control', 'Meta'].includes(e.key)) return;
-    const { x, y } = drag.at;
-    canvas.dispatchEvent(new PointerEvent('pointermove', { clientX: x, clientY: y, buttons: 1, shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey }));
-  });
-}
-
-/**
- * Sliding a base over the surface (see ridesSurface): the spot on the surface
- * of the part under the pointer (a little inside it), so a base dropped on a
- * head is on the head, not in front of or behind it. Null over empty space. The limb being slid
- * (and its other side) is looked through. Uses the ray from setRay.
- */
-function surfaceUnder(id: string): THREE.Vector3 | null {
-  const b = creature.bones.get(id);
-  if (!b) return null;
-  const roots = [b, ...(b.def.sideSign ? [creature.bones.get(b.def.baseId + (b.def.sideSign === 1 ? 'R' : 'L'))] : [])];
-  const moving = (x: BoneRT) => {
-    for (let p: BoneRT | null = x; p; p = p.parent) if (roots.includes(p)) return true;
-    return false;
-  };
-  const hit = raycaster.intersectObjects(creature.meshes().filter((m) => !moving(creature.bones.get(m.userData.boneId as string)!)), false)[0];
-  if (!hit?.face) return null;
-  const inward = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).negate();
-  return hit.point.clone().addScaledVector(inward, 0.03);
-}
-
-/**
- * Pose by an orange tip, stretching the part to follow. With Pull limbs the
- * whole limb bends and stretches (up to the body, or a part it branches from).
- */
-function dragTipTo(id: string, hit: THREE.Vector3) {
-  const ik = $<HTMLInputElement>('#ik').checked;
-  let chain = creature.dragTip(id, hit, ik);
-  const st = drag?.stretch;
-  if (st) {
-    // out of reach: every part of the limb lengthens alike, just enough (and back to its own size within reach)
-    // (in between, it bends to reach as usual)
-    const at = (o: THREE.Object3D) => o.getWorldPosition(new THREE.Vector3());
-    const base = at(chain[chain.length - 1].pivot);
-    st.reach ??= chain.reduce((sum, b) => sum + at(b.tip).distanceTo(at(b.pivot)), 0);
-    st.from ??= Math.min(base.distanceTo(drag!.startHit), st.reach);
-    const d = base.distanceTo(hit);
-    const k = d > st.reach ? d / Math.max(st.reach, 1e-4) : d < st.from ? Math.max(0.1, d / Math.max(st.from, 1e-4)) : 1;
-    if (Math.abs(k - st.k) > 1e-3) {
-      // (relayout re-seats the stored pose: keep the one just reached)
-      creature.capturePose();
-      state.rig = JSON.parse(st.base) as RigState;
-      st.kY.clear();
-      // (a curve through bend points grows with the part, the same shape: they're fractions of its length)
-      for (const b of chain) st.kY.set(b.src, scaleBone(state.rig, b.def.id, k, 1));
-      creature.relayout(state.rig);
-      // the meshes re-bent to their new lengths, as they'll be rebuilt on letting go
-      for (const b of chain) creature.previewBend(b.def.id);
-      st.k = k;
-      chain = creature.dragTip(id, hit, ik);
-    }
-  }
-  if (rigLocked()) creature.mirrorPose(chain);
-}
-
-// scrolling on a solid bend grip rounds or sharpens the curve there (instead of zooming)
-$('#viewport').addEventListener(
-  'wheel',
-  (e) => {
-    // scrolling while dragging a tip pushes it away or pulls it nearer
-    if (drag?.kind === 'end') {
-      e.preventDefault();
-      e.stopPropagation();
-      const at = drag.plane.coplanarPoint(new THREE.Vector3());
-      const toward = view.position.clone().sub(at);
-      const step = Math.min(toward.length() * 0.06, 0.25) * (e.deltaY > 0 ? -1 : 1);
-      drag.plane.translate(toward.normalize().multiplyScalar(step));
-      const last = drag.last ?? new THREE.Vector2(pointer.downX, pointer.downY);
-      setRay(last.x, last.y);
-      const hit = raycaster.ray.intersectPlane(drag.plane, new THREE.Vector3());
-      if (hit) {
-        drag.moved = true;
-        dragTipTo(drag.id, hit);
-      }
-      return;
-    }
-    if (!handlesVisible() || drag) return;
-    const h = pickHandle(e.clientX, e.clientY);
-    const kind = h?.userData.kind;
-    const step = e.deltaY < 0 ? 1 : -1;
-    if (kind === 'bend' && h!.userData.used) roundBend(h!.userData.handle as string, h!.userData.node as number | undefined, step);
-    else if ((kind === 'start' || kind === 'end')) widenJoint(h!.userData.handle as string, kind, step);
-    else return;
-    e.preventDefault();
-    e.stopPropagation();
-  },
-  { capture: true, passive: false },
-);
-
-/** Not every phone browser turns a double tap into a dblclick, so spot it on the way up (and act on it). */
-function doubleTapped(e: PointerEvent): boolean {
-  if (e.pointerType === 'mouse') return false;
-  const now = performance.now();
-  if (now - lastTap.t < 350 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 30) {
-    lastTap.t = 0;
-    lastDoubleTap = now;
-    onDoubleClick(e.clientX, e.clientY);
-    return true;
-  }
-  lastTap = { t: now, x: e.clientX, y: e.clientY };
-  return false;
-}
-
-canvas.addEventListener('pointerup', (e) => {
-  if (eyeDrag) {
-    const d = eyeDrag;
-    eyeDrag = null;
-    controls.enabled = true;
-    if (pointer.moved) {
-      commit();
-      showEyes(d.pair);
-      return;
-    }
-    // not moved: a click, which opens the eye settings below
-  }
-  if (drag) {
-    const d = drag;
-    drag = null;
-    controls.enabled = true;
-    axisGuide.visible = snapGuide.visible = false;
-    // the waiting bend grips come back, in the gaps either side of a new bend point
-    if (creature.bendDragging) creature.setBendDragging(false);
-    creature.rolling = false;
-    $('#viewport').style.cursor = '';
-    if (d.rigBase) {
-      if (d.moved) {
-        // rebuild meshes at their new lengths and re-seat the pose
-        if (!state.rig.base.startsWith('custom')) state.rig.base = 'custom';
-        buildCreature();
-        settleOnFloor();
-        creature.boing(d.id);
-        commit();
-        if (d.roll?.split) hint('Now separate sides, so only this one turns (Mirror keeps them paired)', 3200);
-      }
-      selectPart(d.id);
-      if (!d.moved) doubleTapped(e);
-      return;
-    }
-    creature.capturePose();
-    if (d.stretch && d.stretch.k !== 1) {
-      // a limb stretched to reach: drawn parts lengthen with it, and the meshes are rebuilt at their new lengths
-      // (eyes placed by hand on them staying on the same spots)
-      const base = JSON.parse(d.stretch.base) as RigState;
-      const stretched = new Set(expandRig(base).bones.filter((b) => d.stretch!.kY.has(b.id)).map((b) => b.baseId));
-      carryEyes(base, stretched, 1);
-      const r4 = (v: number) => Math.round(v * 1e4) / 1e4;
-      for (const [src, kY] of d.stretch.kY) {
-        const part = state.parts[src];
-        const shapes = part ? partShapes(part) : [];
-        if (shapes.length) setPartShapes(part, shapes.map((sh) => ({ ...sh, outline: sh.outline.map(([x, y]) => [x, r4(y * kY)] as Vec2) })));
-      }
-      if (!state.rig.base.startsWith('custom')) state.rig.base = 'custom';
-      buildCreature();
-      creature.boing(d.id);
-    }
-    // a double tap on the grip resets it (see onDoubleClick)
-    if (!d.moved && doubleTapped(e)) return;
-    // (the body stays where its grip was let go, even off the floor)
-    if (d.moved && d.kind !== 'body') settleOnFloor();
-    commit();
-    return;
-  }
-  if (pointer.moved || e.button !== 0 || gizmo.dragging || drawState) return;
-  if (doubleTapped(e)) return;
-  if (pickingFocus) {
-    focusAt(e.clientX, e.clientY);
-    return;
-  }
-  if (pickingParent) {
-    parentAt(e.clientX, e.clientY);
-    return;
-  }
-  if (mode === 'stuff') {
-    const id = pickPiece(e.clientX, e.clientY);
-    if (id) {
-      selectedPiece = id;
-      flashPart();
-      renderStuffPanel();
-    }
-    return;
-  }
-  // clicking a different creature makes it the one being edited
-  const other = pickOtherCreature(e.clientX, e.clientY);
-  if (other) {
-    setIdle(false);
-    activate(other.index);
-    if (other.boneId && creature.bones.has(other.boneId)) setSelected(other.boneId);
-    creature.select(selected);
-    flashPart();
-    save();
-    renderUI();
-    hint(`Now editing ${creatureLabel(other.index)}`, 1600);
-    return;
-  }
-  const eye = pickEye(e.clientX, e.clientY);
-  if (eye !== null) {
-    if (idle) {
-      setIdle(false);
-      updateSkeletonVisibility();
-      renderUI();
-    }
-    showEyes(eye);
-    return;
-  }
-  const att = pickAttachment(e.clientX, e.clientY);
-  if (att) return animOn() ? pickAnimStuff(att) : pickStuff(att);
-  const id = pickPart(e.clientX, e.clientY);
-  if (id) {
-    deselectAttachment();
-    selectPart(id);
-  } else if (gizmos() !== 'none' && !idle) deselectAll();
-});
-
-canvas.addEventListener('dblclick', (e) => {
-  // a double tap that was already handled on the way up
-  if (performance.now() - lastDoubleTap < 600) return;
-  onDoubleClick(e.clientX, e.clientY);
-});
-
-function onDoubleClick(x: number, y: number) {
-  // double-click a roll grip to straighten the part
-  if (handlesVisible()) {
-    const h = pickHandle(x, y);
-    if (h?.userData.kind === 'roll') {
-      resetRoll(h.userData.handle as string);
-      return;
-    }
-    if (h?.userData.kind === 'bend') {
-      resetBend(h.userData.handle as string, h.userData.node as number | undefined, !!h.userData.used);
-      return;
-    }
-    if (h?.userData.kind === 'end') {
-      resetJoint(h.userData.handle as string);
-      return;
-    }
-    // the other grips (sizes, sliding the base) have nothing to go back to:
-    // a double-click on one just shouldn't start drawing the part underneath
-    if (h) return;
-  }
-  if (mode === 'stuff') {
-    const id = drawState ? null : pickPiece(x, y);
-    if (id) {
-      selectedPiece = id;
-      renderStuffPanel();
-      enterDraw({ kind: 'piece', redraw: id });
-    }
-    return;
-  }
-  const other = pickOtherCreature(x, y);
-  if (other) activate(other.index);
-  // the first click already went to the eye settings
-  else if (pickEye(x, y) !== null) return;
-  const id = pickPart(x, y);
-  if (!id) return;
-  selectPart(id);
-  enterDraw();
-}
-
-export const controls = new OrbitControls(camera, canvas);
-controls.enableDamping = true;
-controls.dampingFactor = 0.12;
-controls.target.set(0, 0.9, 0);
-controls.minDistance = 0.6;
-controls.maxDistance = 14;
-controls.maxPolarAngle = Math.PI * 0.53;
-controls.autoRotateSpeed = 2.5;
-controls.update();
-/** the view's been moved by hand since the page opened (the open creation's saved view is only put back before that) */
-let viewMoved = false;
-controls.addEventListener('start', () => (viewMoved = true));
-controls.addEventListener('end', () => viewChanged());
-/** The view is kept with the open creation (see SceneLook): save it there once it's settled. */
-function viewChanged() {
-  if (opened.keep && mode !== 'stuff') queueCreationSave();
-}
-
-function setRay(clientX: number, clientY: number) {
-  const r = canvas.getBoundingClientRect();
-  raycaster.setFromCamera(
-    new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1),
-    view,
-  );
-}
-
-/** If the pointer is over a creature other than the active one, which one (and which part). */
-function pickOtherCreature(x: number, y: number): { index: number; boneId?: string } | null {
-  if (creatures.length < 2) return null;
-  setRay(x, y);
-  const targets = creatures.flatMap((c) => [...c.meshes(), ...c.attachmentMeshes()]);
-  const hit = raycaster.intersectObjects(targets, false)[0];
-  if (!hit) return null;
-  let o: THREE.Object3D | null = hit.object;
-  while (o && !creatures.some((c) => c.root === o)) o = o.parent;
-  const index = creatures.findIndex((c) => c.root === o);
-  if (index < 0 || index === world.active) return null;
-  return { index, boneId: hit.object.userData.boneId as string | undefined };
-}
-
-function creatureLabel(i: number): string {
-  return world.creatures[i]?.name?.trim() || `Creature ${i + 1}`;
-}
-
-function pickPart(x: number, y: number): string | null {
-  setRay(x, y);
-  const hit = raycaster.intersectObjects(creature.meshes(), false)[0];
-  return hit ? (hit.object.userData.boneId as string) : null;
-}
-
-/** The eye under the pointer, if it's in front of every part there: its pair, and which of the two it is. */
-function pickEyeHit(x: number, y: number): { pair: number; sgn: number } | null {
-  setRay(x, y);
-  const part = raycaster.intersectObjects(creature.meshes(), false)[0];
-  const eye = creature.pickEye(raycaster.ray);
-  return eye && (!part || eye.distance <= part.distance) ? eye : null;
-}
-
-/** The eye pair under the pointer, if an eye is in front of every part there. */
-function pickEye(x: number, y: number): number | null {
-  return pickEyeHit(x, y)?.pair ?? null;
-}
-
-/** an eye being dragged over the surface: its pair, and which of the two (-1 = the mirrored one) */
-let eyeDrag: { pair: number; sgn: number } | null = null;
-
-const round4 = (v: THREE.Vector3) => v.toArray().map((x) => Math.round(x * 1e4) / 1e4) as V3;
-
-/**
- * Eyes placed by hand on parts that were just stretched or grown (`ids`, by
- * definition, from the skeleton `before`), kept on the same spots of them.
- * Ones placed from Spacing and Height find their spots afresh anyway.
- */
-function carryEyes(before: RigState, ids: Set<string>, kWidth: number) {
-  const was = new Map(expandRig(before).bones.map((b) => [b.id, b]));
-  const now = new Map(expandRig(state.rig).bones.map((b) => [b.id, b]));
-  const len = (d: { start: V3; end: V3 }) => Math.max(new THREE.Vector3(...d.end).sub(new THREE.Vector3(...d.start)).length(), 1e-3);
-  for (const pair of state.eyes.pairs) {
-    if (!pair.at) continue;
-    // (kept in the left twin's frame)
-    const id = creature.eyeBones(pair).find((x) => x.def.sideSign !== -1)?.def.id;
-    const a = id && was.get(id), z = id && now.get(id);
-    if (!a || !z || !ids.has(a.baseId)) continue;
-    const { p, n } = carryOnBend(bendOf(a, len(a)), bendOf(z, len(z)), kWidth, new THREE.Vector3(...pair.at), new THREE.Vector3(...(pair.n ?? [0, 0, 1])));
-    pair.at = round4(p);
-    if (pair.n) pair.n = round4(n!);
-  }
-}
-
-/**
- * Put an eye where the pointer is on the creature (on whichever part is
- * there): the pair becomes hand-placed, its other eye mirrored across the
- * part's own middle. Says whether it landed on the creature.
- */
-function moveEyesTo(index: number, sgn: number, x: number, y: number): boolean {
-  const pair = state.eyes.pairs[index];
-  if (!pair) return false;
-  setRay(x, y);
-  const hit = creature.surfaceAt(raycaster);
-  if (!hit) return false;
-  const at = hit.local, n = hit.localNormal;
-  // undo the pair's Facing, then (for the mirrored eye) the mirroring, as the eyes are laid out
-  const spin = pair.turn ?? state.eyes.turn ?? 0;
-  const Y = new THREE.Vector3(0, 1, 0);
-  at.applyAxisAngle(Y, -spin);
-  n.applyAxisAngle(Y, -spin);
-  if (sgn === -1) {
-    const { across, mid } = creature.eyeMirror(hit.bone, true);
-    at.addScaledVector(across, -2 * at.clone().sub(mid).dot(across));
-    n.addScaledVector(across, -2 * n.dot(across));
-  }
-  pair.at = round4(at);
-  pair.n = round4(n.normalize());
-  pair.bone = hit.bone.src;
-  state.eyes.enabled = true;
-  creature.sync();
-  return true;
-}
-
-/** Picks the part these eyes are on, with its eye settings open at this pair. */
-function showEyes(pair: number) {
-  deselectAttachment();
-  setEyePair(pair);
-  setEyesFolded(false);
-  const on = creature.eyeBones(state.eyes.pairs[pair])[0];
-  if (on) selectPart(on.def.id);
-  else renderUI();
-}
-
-/** Handles are tiny, so pick the nearest one in screen space. */
-function pickHandle(x: number, y: number): THREE.Object3D | null {
-  const r = canvas.getBoundingClientRect();
-  let best: THREE.Object3D | null = null;
-  // fingers are less exact than a mouse
-  let bestD = pointer.touch ? 28 : 16;
-  const v = new THREE.Vector3();
-  const near = (h: THREE.Object3D, at: THREE.Vector3) => {
-    h.localToWorld(v.copy(at)).project(view);
-    if (v.z > 1) return Infinity;
-    return Math.hypot(r.left + ((v.x + 1) / 2) * r.width - x, r.top + ((1 - v.y) / 2) * r.height - y);
-  };
-  // the roll ring is big and easy to catch anywhere round its hoop, and seen
-  // edge-on it's a line straight through the grips near it (the purple base
-  // square): any grip in reach wins over it, so the ring is only tried after
-  let ring: { h: THREE.Object3D; d: number; at: THREE.Vector3 } | null = null;
-  for (const h of creature.handles()) {
-    if (!h.visible) continue;
-    if (h.userData.ring !== undefined) {
-      // the roll ring is grabbed anywhere round its hoop: remember where (in the bone's frame)
-      const rr = h.userData.ring as number;
-      for (let i = 0; i < 48; i++) {
-        const a = (i / 48) * Math.PI * 2;
-        const at = new THREE.Vector3(rr * Math.cos(a), 0, rr * Math.sin(a));
-        const d = near(h, at);
-        if (d < bestD && (!ring || d < ring.d)) ring = { h, d, at };
-      }
-      continue;
-    }
-    const d = near(h, new THREE.Vector3());
-    if (d < bestD) {
-      bestD = d;
-      best = h;
-    }
-  }
-  if (!best && ring) {
-    ring.h.userData.grab = ring.at.add(ring.h.position);
-    return ring.h;
-  }
-  return best;
-}
-
-function handlesVisible() {
-  // Arrange has its own handles at the creature's feet, picked stuff its own arrows, and a marking being placed its own
-  return !idle && !drawState && !placing && !selectedAttachment && !markToolsOut() && mode !== 'stuff' && gizmos() !== 'none';
-}
-
-/** Back to nothing picked: clicking empty space in Shape. */
-function deselectAll() {
-  setIdle(true);
-  stopPlacing();
-  deselectAttachment();
-  creature.flash(null, 0);
-  updateSkeletonVisibility();
-  renderUI();
-}
-
-/** The sidebar's part editor and the on-screen Arrange/Mirror pills only make sense with something picked. */
-function syncIdle() {
-  $('.panel').classList.toggle('idle', idle && mode !== 'stuff');
-  setLayoutIdle(idle);
-  // the handles follow the same idle state, so they can't outlive the selection
-  updateSkeletonVisibility();
-}
-
-export function updateSkeletonVisibility() {
-  // the tab's Gizmos: every part's handles, or just the picked part's
-  Creature.handleScope = gizmos() === 'part' ? 'part' : 'all';
-  creature.setSkeletonVisible(handlesVisible());
-  // the key to the handles shows with them
-  $('#shape-legend').classList.toggle('off', !handlesVisible());
-}
-
-// camera tweening
-
-let tween: { p0: THREE.Vector3; p1: THREE.Vector3; t0v: THREE.Vector3; t1v: THREE.Vector3; start: number; dur: number } | null = null;
-
-function flyTo(pos: THREE.Vector3, target: THREE.Vector3, dur = 650) {
-  tween = { p0: camera.position.clone(), p1: pos, t0v: controls.target.clone(), t1v: target, start: performance.now(), dur };
-}
-
-/** Tight bounds of the posed creature: body parts plus any stuff it's wearing. */
-function creatureBox(precise = false): THREE.Box3 {
-  creature.root.updateMatrixWorld(true);
-  const box = new THREE.Box3();
-  // parts count even while hidden: a settled seamless skin hides the parts it
-  // replaced, which used to leave an empty box (and camera views did nothing)
-  for (const m of creature.meshes()) box.expandByObject(m, precise);
-  for (const m of creature.attachmentMeshes()) if (m.visible) box.expandByObject(m, precise);
-  return box;
-}
-
-const THREE_QUARTER = new THREE.Vector3(0.62, 0.32, 0.72).normalize();
-
-/** Frame every creature in the scene, keeping the current viewing angle. */
-/** Fly to frame every creature, from the current angle or (`fresh`) the usual three-quarter one. */
-function frameAll(fresh = false) {
-  const box = new THREE.Box3();
-  for (const c of creatures) {
-    c.root.updateMatrixWorld(true);
-    for (const m of c.meshes()) box.expandByObject(m);
-  }
-  if (box.isEmpty()) return;
-  const center = box.getCenter(new THREE.Vector3());
-  const radius = box.getSize(new THREE.Vector3()).length() / 2;
-  const dir = fresh ? THREE_QUARTER.clone().normalize() : camera.position.clone().sub(controls.target).normalize();
-  const dist = (radius * 0.95) / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
-  flyTo(center.clone().addScaledVector(dir, Math.max(dist, 2)), center);
-}
-
-/** A scene that kept no view of its own (saved before views were): seen afresh, not from the last scene's angle. */
-function freshView() {
-  if (sceneOrtho) {
-    setSceneOrtho(false);
-    try {
-      localStorage.setItem(ORTHO_KEY, '0');
-    } catch {
-      /* ignore */
-    }
-    if (mode !== 'stuff') setOrtho(false);
-  }
-  frameAll(true);
-}
-
-/** Fly to frame the creature, keeping the current angle unless a view direction is given. */
-function frameCreature(view: boolean | THREE.Vector3 = false) {
-  const box = creatureBox();
-  if (box.isEmpty()) return;
-  const center = box.getCenter(new THREE.Vector3());
-  const radius = box.getSize(new THREE.Vector3()).length() / 2;
-  const dir =
-    view instanceof THREE.Vector3
-      ? view.clone().normalize()
-      : view
-        ? THREE_QUARTER.clone()
-        : camera.position.clone().sub(controls.target).normalize();
-  const dist = (radius * 0.95) / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
-  flyTo(center.clone().addScaledVector(dir, Math.max(dist, 2)), center);
-}
-
-// The creature faces +Z; "left"/"right" are as seen by someone facing it.
-// Top is nudged off the pole so the orbit camera keeps a sensible "up".
-const VIEWS: Record<string, THREE.Vector3> = {
-  front: new THREE.Vector3(0, 0, 1),
-  left: new THREE.Vector3(-1, 0, 0),
-  right: new THREE.Vector3(1, 0, 0),
-  top: new THREE.Vector3(0, 1, 0.002),
-  quarter: THREE_QUARTER,
-};
-
-function viewFrom(name: string) {
-  if (name === 'all' || name === 'selection') {
-    if (mode === 'stuff') focusOnBoard();
-    else if (name === 'all') frameAll();
-    else frameCreature();
-    return;
-  }
-  const dir = VIEWS[name];
-  if (!dir) return;
-  controls.autoRotate = false;
-  $('#spin').classList.remove('on');
-  if (mode === 'stuff') {
-    const c = board.getWorldPosition(new THREE.Vector3());
-    let r = 0.7;
-    if (bench) {
-      const box = new THREE.Box3().setFromObject(bench);
-      if (!box.isEmpty()) {
-        box.getCenter(c);
-        r = Math.max(0.5, box.getSize(new THREE.Vector3()).length() * 0.7);
-      }
-    }
-    const dist = Math.max(1.4, r / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
-    flyTo(c.clone().addScaledVector(dir.clone().normalize(), dist), c);
-    return;
-  }
-  frameCreature(dir);
-}
-
-/** Pose mode: lower (or raise) the whole creature so its lowest point rests on the floor. */
-function dropToFloor() {
-  const box = creatureBox(true);
-  if (box.isEmpty()) return;
-  if (Math.abs(box.min.y) < 1e-4) {
-    if (state.keepFloor === false) {
-      setKeepFloor(true);
-      commit();
-    }
-    hint('Already on the floor', 1500);
-    return;
-  }
-  // the creature may be turned or resized: the drop is straight down in the scene
-  const down = creature.root.worldToLocal(new THREE.Vector3(0, -box.min.y, 0)).sub(creature.root.worldToLocal(new THREE.Vector3()));
-  creature.group.position.add(down);
-  creature.capturePose();
-  setKeepFloor(true);
-  commit();
-  hint('Dropped to the floor', 1500);
-}
-
-/**
- * Move the picked part straight down (or up) until its lowest point touches
- * the floor: its base slides, as dragging the purple grip, so it keeps its
- * shape and pose. The first part holds everything: that's the whole creature.
- */
-function partToFloor(id = selected) {
-  const b = creature.bones.get(id);
-  if (!b) return;
-  if (!b.parent) return dropToFloor();
-  const low = creature.lowestPoint(b);
-  if (!low) return;
-  if (Math.abs(low.y) < 1e-3) {
-    hint('Already on the floor', 1500);
-    return;
-  }
-  // the move in skeleton coordinates (the creature may be turned or posed, as a slid base)
-  b.pivot.updateMatrixWorld(true);
-  const unbent = b.pivot.parent!.matrixWorld.clone().multiply(new THREE.Matrix4().compose(b.pivot.position, b.restQuat, new THREE.Vector3(1, 1, 1)));
-  const toDef = new THREE.Matrix3().setFromMatrix4(b.restWorld.clone().multiply(unbent.invert()));
-  const d = new THREE.Vector3(0, -low.y, 0).applyMatrix3(toDef);
-  moveJoint(state.rig, id, 'start', d.toArray() as V3, rigLocked());
-  if (!state.rig.base.startsWith('custom')) state.rig.base = 'custom';
-  buildCreature();
-  settleOnFloor();
-  creature.boing(id);
-  commit();
-  selectPart(id, false);
-  hint('Down to the floor', 1500);
-}
-
-/** Face the part straight on: from the front, or from the side when it's being drawn from the side. */
-function focusOnBone(b: BoneRT, side = false) {
-  b.pivot.updateMatrixWorld(true);
-  const geo = b.mesh?.userData.baseGeo as THREE.BufferGeometry | undefined;
-  if (geo && !geo.boundingBox) geo.computeBoundingBox();
-  const box = geo?.boundingBox ?? new THREE.Box3(new THREE.Vector3(-0.1, 0, -0.1), new THREE.Vector3(0.1, b.length, 0.1));
-  const centre = box.getCenter(new THREE.Vector3());
-  const size = box.getSize(new THREE.Vector3());
-  // the middle of the drawing plane, not of the whole part
-  if (side) centre.x = 0;
-  else centre.z = 0;
-  const center = b.pivot.localToWorld(centre);
-  const r = Math.max(side ? size.z : size.x, size.y, b.length) / 2;
-  const normal = new THREE.Vector3(side ? 1 : 0, 0, side ? 0 : 1).transformDirection(b.pivot.matrixWorld);
-  const toCam = camera.position.clone().sub(controls.target).normalize();
-  if (normal.dot(toCam) < 0) normal.negate();
-  if (Math.abs(normal.y) > 0.97) normal.add(new THREE.Vector3(0, 0, 0.1)).normalize(); // dodge orbit pole
-  const dist = (r * 2.2 + 0.3) / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
-  flyTo(center.clone().addScaledVector(normal, dist), center);
-}
-
-// drawing
-
-/** What a stroke is for: a body part's outline, or a piece on the stuff workbench (new, or one being redrawn). */
-type DrawTarget = { kind: 'bone'; boneId: string } | { kind: 'piece'; redraw?: string };
-/** What dragging on the drawing does once there's a shape: add to it, cut from it, or move, resize or turn it. */
-type DrawTool = 'draw' | 'erase' | 'move' | 'scale' | 'rotate';
-type ShapeKind = 'square' | 'triangle' | 'circle';
-
-interface DrawState {
-  target: DrawTarget;
-  /** object whose local XY plane is drawn on */
-  frame: THREE.Object3D;
-  label: string;
-  /** symmetry axis (x = 0) drawn between these local points */
-  axis: [Vec2, Vec2];
-  /** stroke in screen space, after the stabiliser */
-  pts: Vec2[];
-  /** the same stroke in the drawing plane, for the mirror preview */
-  local: Vec2[];
-  /** stabiliser position */
-  pen: Vec2 | null;
-  active: boolean;
-  /**
-   * The finished shape, waiting for Done: one loop, or a mirrored pair of
-   * pieces. In the drawing plane.
-   */
-  pending: Vec2[][] | null;
-  /** cut-outs in the pending shape (from erasing inside it), in the same space */
-  holes: Vec2[][];
-  tool: DrawTool;
-  /** Move / Scale / Rotate: the shape and pointer as the drag began, in the drawing plane */
-  grab: { start: Vec2; outers: Vec2[][]; holes: Vec2[][]; centre: Vec2 } | null;
-  /** a basic shape waiting to be placed: click to put it down, drag to size it */
-  stamp: ShapeKind | null;
-  /** the stamp being dragged out: centre and size in the drawing plane, and where the press was on screen */
-  stampDrag: { centre: Vec2; r: number; x: number; y: number } | null;
-  /** a bone's shapes from before drawing: the shapes preview live on the part, and these go back on cancel */
-  original?: PartShape[];
-  /** a body part being drawn from the side (its YZ plane) rather than the front */
-  side: boolean;
-  /** a body part's shapes in the other view (front or side), kept while this one is drawn */
-  other: Vec2[][];
-  /** a body part: what its two views show of the creature (its own plane, then the one turned a quarter round) */
-  views?: [BoneView, BoneView];
-  /** symmetry in the turned view (on when that view looks the creature in the face) */
-  sideSym: boolean;
-}
-
-type ViewKind = 'front' | 'side' | 'top';
-interface BoneView {
-  kind: ViewKind;
-  /** left and right on the drawing are the creature's left and right */
-  mirrored: boolean;
-}
-const VIEW_NAMES: Record<ViewKind, { name: string; icon: string }> = {
-  front: { name: 'Front', icon: 'fa-duotone fa-regular fa-user' },
-  side: { name: 'Side', icon: 'fa-duotone fa-regular fa-person-walking' },
-  top: { name: 'Top', icon: 'fa-duotone fa-regular fa-arrow-down-to-line' },
-};
-
-/**
- * What a body part's two drawing planes show of the creature. The part's own
- * plane depends on how its bone lies (a quadruped's body is drawn as its
- * profile), so each view is named by the way it looks at the creature in its
- * rest pose: from the front, the side or the top.
- */
-function boneViews(b: BoneRT): [BoneView, BoneView] {
-  const rot = new THREE.Matrix3().setFromMatrix4(b.restGroup);
-  // how well a view looking along `normal` counts as each kind (a slight lean towards front, then side)
-  const scores = (normal: THREE.Vector3): Record<ViewKind, number> => {
-    const n = normal.applyMatrix3(rot).normalize();
-    return { front: Math.abs(n.z) * 1.15, side: Math.abs(n.x), top: Math.abs(n.y) * 0.85 };
-  };
-  const best = (s: Record<ViewKind, number>, not?: ViewKind) =>
-    (Object.keys(s) as ViewKind[]).filter((k) => k !== not).sort((a, c) => s[c] - s[a])[0];
-  const across = (v: THREE.Vector3) => Math.abs(v.applyMatrix3(rot).normalize().x) > 0.7;
-  const own = best(scores(new THREE.Vector3(0, 0, 1)));
-  // the two views are a quarter turn apart: never call them the same thing
-  const turned = best(scores(new THREE.Vector3(1, 0, 0)), own);
-  return [
-    { kind: own, mirrored: across(new THREE.Vector3(1, 0, 0)) },
-    { kind: turned, mirrored: across(new THREE.Vector3(0, 0, 1)) },
-  ];
-}
-export let drawState: DrawState | null = null;
-
-const DRAW_PREFS_KEY = 'creature-creator/draw';
-// symmetry is remembered separately for body parts and for stuff (letters,
-// badges... are rarely symmetric, so stuff starts with it off)
-const drawPrefs: { symmetry: boolean; pieceSymmetry: boolean; smoothing: number } = (() => {
-  try {
-    return { symmetry: true, pieceSymmetry: false, smoothing: 0.5, ...JSON.parse(localStorage.getItem(DRAW_PREFS_KEY) ?? '{}') };
-  } catch {
-    return { symmetry: true, pieceSymmetry: false, smoothing: 0.5 };
-  }
-})();
-/** Is symmetry on for what's being drawn right now? */
-function symOn(): boolean {
-  // the turned view keeps its own setting for this drawing
-  if (drawState?.side) return drawState.sideSym;
-  return drawState?.target.kind === 'piece' ? drawPrefs.pieceSymmetry : drawPrefs.symmetry;
-}
-function saveDrawPrefs() {
-  try {
-    localStorage.setItem(DRAW_PREFS_KEY, JSON.stringify(drawPrefs));
-  } catch {
-    /* ignore */
-  }
-}
-
-function drawHint() {
-  if (!drawState) return;
-  const { label, target } = drawState;
-  if (drawState.stamp) {
-    const what = drawState.tool === 'erase' && drawState.pending ? 'cut out' : 'put down';
-    hint(`Click to ${what} a ${drawState.stamp}, or drag to size it`, 0);
-    return;
-  }
-  if (drawState.pending) {
-    const done = touchScreen() ? 'Done' : 'Done (Enter)';
-    const msg = {
-      draw: target.kind === 'bone' ? `Draw more to add to it (apart = an extra shape). Press ${done} to keep it` : `Draw more to add to the shape. Press ${done} to keep it`,
-      erase: `Draw over the parts to cut away. Press ${done} to keep it`,
-      move: `Drag the shape to move it. Press ${done} to keep it`,
-      scale: touchScreen() ? 'Drag away from the middle to make it bigger' : 'Drag away from the middle to make it bigger (Shift keeps its proportions)',
-      rotate: 'Drag around the middle to turn the shape',
-    }[drawState.tool];
-    hint(msg, 0);
-    return;
-  }
-  // how to look around while the drawing layer is in the way
-  const face = keyLabel('frame');
-  const nav = touchScreen() ? ' · Two fingers move the view' : ` · Right-drag or Space+drag to pan${face ? `, ${face} to face it again` : ''}`;
-  if (target.kind === 'piece') {
-    hint((symOn() ? 'Draw a piece: across the dashed line = one symmetric shape, to one side = a mirrored pair' : 'Draw a piece as one closed loop. Erase inside it to make holes') + nav, 0);
-    return;
-  }
-  if (drawState.side) {
-    const from = VIEW_NAMES[drawState.views?.[1].kind ?? 'side'].name.toLowerCase();
-    hint((symOn() ? `Draw one half of the ${label} as seen from the ${from}; it mirrors across the dashed line` : `Draw the ${label} as seen from the ${from}`) + nav, 0);
-    return;
-  }
-  hint((symOn() ? `Draw one half of the ${label}; it mirrors across the dashed line` : `Draw the ${label} as one closed loop`) + nav, 0);
-
-}
-
-function enterDraw(target: DrawTarget = { kind: 'bone', boneId: selected }) {
-  if (drawState) exitDraw();
-  controls.autoRotate = false;
-  $('#spin').classList.remove('on');
-  deselectAttachment();
-  if (target.kind === 'bone') {
-    const b = creature.bones.get(target.boneId);
-    if (!b) return;
-    const reach = Math.max(b.length, b.def.width) * 2.5 + 0.5;
-    // start from the shapes as they are (draw to add, erase to cut), in the view the part was first drawn in
-    const shapes = partShapes(state.parts[b.src]);
-    const side = !!shapes[0]?.side;
-    const views = boneViews(b);
-    const inView = shapes.filter((s) => !!s.side === side).map((s) => structuredClone(s.outline));
-    drawState = {
-      target,
-      frame: boneFrame(b, side),
-      label: partLabel(b.src).toLowerCase(),
-      axis: [[0, b.length / 2 - reach], [0, b.length / 2 + reach]],
-      pts: [],
-      local: [],
-      pen: null,
-      active: false,
-      pending: inView.length ? inView : null,
-      holes: [],
-      tool: 'draw',
-      grab: null,
-      stamp: null,
-      stampDrag: null,
-      original: structuredClone(shapes),
-      side,
-      other: shapes.filter((s) => !!s.side !== side).map((s) => structuredClone(s.outline)),
-      views,
-      // symmetric when it looks the creature in the face, not when it's a profile
-      sideSym: views[1].mirrored,
-    };
-    creature.setDrawFocus(target.boneId, side);
-    // other creatures step aside while you draw on this one
-    for (const c of creatures) if (c !== creature) c.root.visible = false;
-    focusOnBone(b, side);
-  } else {
-    // a piece lifted off the board is redrawn on its own plane
-    const own = target.redraw ? piece() : undefined;
-    const lifted = own?.place;
-    const frame = lifted ? framePiece(own!) : board;
-    drawState = { target, frame, label: 'piece', axis: [[0, -1.3], [0, 1.3]], pts: [], local: [], pen: null, active: false, pending: null, holes: [], tool: 'draw', grab: null, stamp: null, stampDrag: null, side: false, other: [], sideSym: false };
-    if (target.redraw && own) {
-      // start from the shape as it is: draw to add, erase to cut, or move, size and turn it
-      drawState.pending = [structuredClone(own.outline)];
-      drawState.holes = structuredClone(own.holes);
-    }
-    // pieces are drawn flat: show the thing unbent meanwhile
-    syncWorkbench();
-    if (lifted) focusOnPlane(frame);
-    else focusOnBoard();
-  }
-  overlay.classList.add('active');
-  $('#draw-bar').hidden = false;
-  syncDrawBar();
-  updateSkeletonVisibility();
-  drawHint();
-  refreshPieceGizmo();
-}
-
-/** Drawing from the side: a plane standing in the bone's YZ plane (its X axis is the bone's -Z, its Z the bone's X). */
-const sideFrame = new THREE.Object3D();
-sideFrame.rotation.y = Math.PI / 2;
-
-/** The object whose XY plane a body part is drawn on, from the front or the side. */
-function boneFrame(b: BoneRT, side: boolean): THREE.Object3D {
-  if (!side) {
-    sideFrame.removeFromParent();
-    return b.pivot;
-  }
-  b.pivot.add(sideFrame);
-  sideFrame.updateMatrixWorld(true);
-  return sideFrame;
-}
-
-/** Switch a body part's drawing between front and side; the shapes drawn in the other view stay put. */
-function setDrawSide(side: boolean) {
-  const ds = drawState;
-  if (!ds || ds.target.kind !== 'bone' || ds.side === side) return;
-  const b = creature.bones.get(ds.target.boneId);
-  if (!b) return;
-  const here = ds.pending ?? [];
-  ds.pending = ds.other.length ? ds.other : null;
-  ds.other = here;
-  ds.holes = [];
-  ds.side = side;
-  ds.frame = boneFrame(b, side);
-  ds.active = false;
-  ds.pts = [];
-  ds.local = [];
-  ds.grab = null;
-  ds.stampDrag = null;
-  if (!ds.pending) ds.tool = 'draw';
-  creature.setDrawFocus(b.def.id, side);
-  focusOnBone(b, side);
-  previewPending();
-  drawHint();
-}
-
-/** Leave drawing. Unless the shape is being kept (Done), a bone's previewed outline goes back. */
-export function exitDraw(keep = false) {
-  const ds = drawState;
-  drawState = null;
-  overlay.classList.remove('active');
-  $('#draw-bar').hidden = true;
-  if (ds?.target.kind === 'bone' && !keep) {
-    const b = creature.bones.get(ds.target.boneId);
-    if (b) setPartShapes(state.parts[b.src], ds.original ?? []);
-    creature.sync();
-  }
-  sideFrame.removeFromParent();
-  creature.setDrawFocus(null);
-  if (ds?.target.kind === 'piece') syncWorkbench();
-  for (const c of creatures) c.root.visible = mode !== 'stuff';
-  updateSkeletonVisibility();
-  octx.clearRect(0, 0, overlay.width, overlay.height);
-  hint('');
-}
-
-function syncDrawBar() {
-  $<HTMLInputElement>('#sym').checked = symOn();
-  $<HTMLInputElement>('#smooth').value = String(drawPrefs.smoothing);
-  $('#sym-label').classList.toggle('on', symOn());
-  const isBone = drawState?.target.kind === 'bone';
-  $('#draw-view').hidden = !isBone;
-  document.querySelectorAll<HTMLButtonElement>('#draw-view [data-view]').forEach((b) => {
-    const turned = b.dataset.view === 'side';
-    b.classList.toggle('on', turned === !!drawState?.side);
-    // named by what it shows of the creature: a quadruped's own plane is its side
-    const v = VIEW_NAMES[drawState?.views?.[turned ? 1 : 0].kind ?? (turned ? 'side' : 'front')];
-    const key = turned ? keyLabel('side') : '';
-    b.innerHTML = `<i class="${v.icon}" aria-hidden="true"></i> ${v.name}${key ? ` <kbd>${key}</kbd>` : ''}`;
-    b.title = `Draw the part as seen from the ${v.name.toLowerCase()}${key ? ` (${key})` : ''}`;
-  });
-  const has = !!drawState?.pending;
-  // a body part can be kept (or cleared) with shapes in the other view only
-  const any = has || !!drawState?.other.length;
-  $<HTMLButtonElement>('#done-draw').disabled = !any;
-  $<HTMLButtonElement>('#reset-draw').disabled = !any;
-  const tool = drawState?.tool ?? 'draw';
-  document.querySelectorAll<HTMLButtonElement>('#draw-tools [data-tool]').forEach((b) => {
-    b.classList.toggle('on', b.dataset.tool === tool);
-    // everything but drawing needs something to work on
-    b.disabled = b.dataset.tool !== 'draw' && !has;
-  });
-  document.querySelectorAll<HTMLButtonElement>('#draw-bar [data-shape]').forEach((b) => b.classList.toggle('on', b.dataset.shape === drawState?.stamp));
-  const stamping = !!drawState?.stamp;
-  overlay.classList.toggle('erasing', tool === 'erase' && !stamping);
-  overlay.classList.toggle('moving', !stamping && (tool === 'move' || tool === 'scale' || tool === 'rotate'));
-}
-
-function toggleSymmetry() {
-  // the turned view's setting lasts for this drawing (it starts from which way the view faces)
-  if (drawState?.side) drawState.sideSym = !drawState.sideSym;
-  else if (drawState?.target.kind === 'piece') drawPrefs.pieceSymmetry = !drawPrefs.pieceSymmetry;
-  else drawPrefs.symmetry = !drawPrefs.symmetry;
-  if (!symOn()) unlock('wonky');
-  saveDrawPrefs();
-  syncDrawBar();
-  drawHint();
-  renderOverlay();
-}
-
-function partPlane(frame: THREE.Object3D): THREE.Plane {
-  frame.updateMatrixWorld(true);
-  const normal = new THREE.Vector3(0, 0, 1).transformDirection(frame.matrixWorld);
-  return new THREE.Plane().setFromNormalAndCoplanarPoint(normal, frame.getWorldPosition(new THREE.Vector3()));
-}
-
-function screenToLocal(frame: THREE.Object3D, plane: THREE.Plane, x: number, y: number): Vec2 | null {
-  setRay(x, y);
-  const hit = new THREE.Vector3();
-  if (!raycaster.ray.intersectPlane(plane, hit)) return null;
-  const l = frame.worldToLocal(hit);
-  return [Math.round(l.x * 1e4) / 1e4, Math.round(l.y * 1e4) / 1e4];
-}
-
-/** Drawing-plane point -> overlay pixel coordinates. */
-function localToOverlay(frame: THREE.Object3D, [x, y]: Vec2): Vec2 {
-  const v = frame.localToWorld(new THREE.Vector3(x, y, 0)).project(view);
-  return [((v.x + 1) / 2) * overlay.clientWidth, ((1 - v.y) / 2) * overlay.clientHeight];
-}
-
-function strokeToLocal(frame: THREE.Object3D, pts: Vec2[]): Vec2[] {
-  const plane = partPlane(frame);
-  const out: Vec2[] = [];
-  for (const [x, y] of pts) {
-    const p = screenToLocal(frame, plane, x, y);
-    if (!p) continue;
-    const last = out[out.length - 1];
-    if (!last || Math.hypot(p[0] - last[0], p[1] - last[1]) > 0.003) out.push(p);
-  }
-  return out;
-}
-
-function tooSmall(loop: Vec2[], minArea: number, minSize: number) {
-  const bb = loop.length ? bounds(loop) : null;
-  return !bb || loop.length < 6 || Math.abs(signedArea(loop)) < minArea || Math.max(bb.w, bb.h) < minSize;
-}
-
-/** A body part stroke: mirrored across the centre line (if on), then smoothed. */
-function boneLoops(raw: Vec2[]): Vec2[][] {
-  let local = raw;
-  if (local.length >= 6) {
-    if (symOn()) local = symmetrize(local);
-    local = smoothLoop(local, drawPrefs.smoothing);
-  }
-  return [local];
-}
-
-/** A workbench stroke: across the centre line = one symmetric piece, off to one side = a mirrored pair. */
-function pieceLoops(raw: Vec2[]): Vec2[][] {
-  let loops: Vec2[][] = [raw];
-  if (raw.length >= 6 && symOn()) {
-    const crosses = raw.some((p) => p[0] > 0.01) && raw.some((p) => p[0] < -0.01);
-    // a half-outline that starts and ends on the axis also means "one symmetric shape"
-    const tol = Math.max(0.03, bounds(raw).w * 0.15);
-    const half = Math.abs(raw[0][0]) < tol && Math.abs(raw[raw.length - 1][0]) < tol;
-    loops = crosses || half ? [symmetrize(raw)] : [raw, raw.map(([x, y]) => [-x, y] as Vec2).reverse()];
-  }
-  return loops.map((l) => (l.length >= 6 ? smoothLoop(l, drawPrefs.smoothing) : l));
-}
-
-function finishStroke() {
-  if (!drawState) return;
-  const ds = drawState;
-  const raw = strokeToLocal(ds.frame, ds.pts);
-  ds.pts = [];
-  ds.local = [];
-  ds.active = false;
-  // (a part that already has shapes in the other view is added to, not started afresh from a half)
-  if (ds.pending || ds.other.length) {
-    combineStroke(ds, raw);
-    return;
-  }
-  const isPiece = ds.target.kind === 'piece';
-  const loops = isPiece ? pieceLoops(raw) : boneLoops(raw);
-  if (loops.some((l) => (isPiece ? tooSmall(l, 0.0002, 0.02) : tooSmall(l, 0.0015, 0.05)))) {
-    renderOverlay();
-    hint('Too small or too thin: try a bigger loop', 1800, true);
-    return;
-  }
-  // wait for Done: a new stroke replaces this one
-  setPending(loops);
-}
-
-/** Half the size of a basic shape put down with a click (no drag): fits the part, or a handy size on the workbench. */
-function stampSize(ds: DrawState): number {
-  if (ds.target.kind !== 'bone') return 0.25;
-  const b = creature.bones.get(ds.target.boneId)!;
-  return Math.max(b.length * 0.9, b.def.width, 0.12) / 2;
-}
-
-/** A basic shape centred on (cx, cy), r = half its size. Dense, so its corners stay crisp. */
-function shapeLoop(kind: ShapeKind, cx: number, cy: number, r: number): Vec2[] {
-  const size = r * 2;
-  if (kind === 'circle') {
-    return Array.from({ length: 96 }, (_, i) => {
-      const a = (i / 96) * Math.PI * 2 - Math.PI / 2;
-      return [cx + r * Math.cos(a), cy + r * Math.sin(a)] as Vec2;
-    });
-  }
-  const h = kind === 'triangle' ? (size * Math.sqrt(3)) / 2 : size;
-  const corners: Vec2[] =
-    kind === 'triangle'
-      ? [[cx - r, cy - h / 2], [cx + r, cy - h / 2], [cx, cy + h / 2]]
-      : [[cx - r, cy - r], [cx + r, cy - r], [cx + r, cy + r], [cx - r, cy + r]];
-  // counter-clockwise, 24 points per side
-  const out: Vec2[] = [];
-  corners.forEach((a, i) => {
-    const b = corners[(i + 1) % corners.length];
-    for (let k = 0; k < 24; k++) out.push([a[0] + ((b[0] - a[0]) * k) / 24, a[1] + ((b[1] - a[1]) * k) / 24]);
-  });
-  return out;
-}
-
-/**
- * The stamp as it would land: with symmetry on it's mirrored across the centre
- * line (one placed right by the line snaps onto it instead).
- */
-function stampLoops(ds: DrawState): Vec2[][] {
-  const sd = ds.stampDrag;
-  if (!ds.stamp || !sd) return [];
-  let [cx, cy] = sd.centre;
-  // right by the centre line: one symmetric shape on it, not a pair
-  if (symOn() && Math.abs(cx) < sd.r * 0.3) cx = 0;
-  const loop = shapeLoop(ds.stamp, cx, cy, sd.r);
-  return symOn() && cx !== 0 ? [loop, mirrorLoop(loop)] : [loop];
-}
-
-function placeStamp(ds: DrawState) {
-  const loops = stampLoops(ds);
-  const cut = ds.tool === 'erase' && !!ds.pending;
-  // the shape stays armed for another one; Draw (or the shape again) puts it away
-  ds.stampDrag = null;
-  applyLoops(ds, loops, cut);
-  syncDrawBar();
-  drawHint();
-  renderOverlay();
-}
-
-function setPending(loops: Vec2[][] | null) {
-  if (!drawState) return;
-  drawState.pending = loops;
-  drawState.holes = [];
-  drawState.tool = 'draw';
-  previewPending();
-  drawHint();
-}
-
-/**
- * A stroke once there's a shape: add it on (Draw) or cut it away (Erase).
- * With symmetry on, the stroke is mirrored across the centre line too.
- */
-function combineStroke(ds: DrawState, raw: Vec2[]) {
-  const loop = raw.length >= 6 ? smoothLoop(raw, drawPrefs.smoothing) : raw;
-  if (tooSmall(loop, 0.0001, 0.01)) {
-    renderOverlay();
-    return;
-  }
-  applyLoops(ds, symOn() ? [loop, mirrorLoop(loop)] : [loop], ds.tool === 'erase');
-}
-
-const mirrorLoop = (l: Vec2[]) => l.map(([x, y]) => [-x, y] as Vec2).reverse();
-
-/** Add loops to the shape (or cut them out of it); the first ones simply become the shape. */
-function applyLoops(ds: DrawState, loops: Vec2[][], cut: boolean) {
-  if (!ds.pending) {
-    if (cut) return;
-    // overlapping mirror images merge into one
-    setPending(loops.length > 1 ? combineLoops([], [], loops, false).outers : loops);
-    return;
-  }
-  const res = combineLoops(ds.pending, ds.holes, loops, cut);
-  if (!res.outers.length) {
-    setPending(null);
-    hint('Erased it all: draw a new shape', 2000);
-    return;
-  }
-  // a body part can be several shapes, but each one is solid
-  if (ds.target.kind === 'bone' && res.holes.length) hint("A body part can't have holes: draw it as separate shapes instead", 2400);
-  ds.pending = res.outers;
-  ds.holes = ds.target.kind === 'bone' ? [] : res.holes;
-  previewPending();
-  drawHint();
-}
-
-/**
- * After moving, scaling or turning: pieces pushed into each other (a mirrored
- * pair slid across the centre line, say) fuse into one instead of overlapping.
- */
-function mergeOverlaps(ds: DrawState) {
-  const loops = ds.pending;
-  if (!loops || loops.length < 2) return;
-  const bbs = loops.map(bounds);
-  const near = bbs.some((a, i) => bbs.some((b, j) => j > i && a.minX <= b.maxX && b.minX <= a.maxX && a.minY <= b.maxY && b.minY <= a.maxY));
-  if (!near) return;
-  const res = combineLoops(loops, ds.holes, [], false);
-  // boxes can overlap without the shapes touching: then leave them be
-  if (res.outers.length >= loops.length) return;
-  ds.pending = res.outers;
-  ds.holes = ds.target.kind === 'piece' ? res.holes : [];
-  previewPending();
-}
-
-function pendingShape(ds: DrawState): { outers: Vec2[][]; holes: Vec2[][] } {
-  return { outers: ds.pending ?? [], holes: ds.holes };
-}
-
-/** The pending shape as workbench pieces: each outer loop with the holes that fall inside it. */
-function pendingPieces(ds: DrawState): { outline: Vec2[]; holes: Vec2[][] }[] {
-  const { outers, holes } = pendingShape(ds);
-  return outers.map((outline) => ({ outline, holes: holesInside({ outline } as Piece, holes) }));
-}
-
-/**
- * Move / Scale / Rotate: reshape the shape from how it was when the drag began.
- * With symmetry on, the two sides stay mirror images: loops either side of
- * the centre line move (and turn) in opposite ways, a loop across it only moves
- * up and down, and scaling is about the centre line.
- */
-function transformShape(ds: DrawState, p: Vec2, keepProportions: boolean) {
-  const g = ds.grab;
-  if (!g) return;
-  const [cx, cy] = g.centre;
-  const r4 = (v: number) => Math.round(v * 1e4) / 1e4;
-  // which side of the centre line a loop is on: 1, -1, or 0 if it's across it
-  const side = (l: Vec2[]) => {
-    if (!symOn()) return 1;
-    const bb = bounds(l);
-    return bb.minX < -1e-3 && bb.maxX > 1e-3 ? 0 : (bb.minX + bb.maxX) / 2 >= 0 ? 1 : -1;
-  };
-  const grabSide = symOn() && g.start[0] < 0 ? -1 : 1;
-  let fn: (l: Vec2[]) => Vec2[];
-  if (ds.tool === 'move') {
-    const dx = p[0] - g.start[0], dy = p[1] - g.start[1];
-    fn = (l) => {
-      const sd = side(l);
-      const mx = symOn() ? dx * sd * grabSide : dx;
-      return l.map(([x, y]) => [r4(x + mx), r4(y + dy)] as Vec2);
-    };
-  } else if (ds.tool === 'scale') {
-    // the grabbed point follows the pointer; near the middle on one axis, that axis stays put
-    const ax = g.start[0] - cx, ay = g.start[1] - cy;
-    const bx = p[0] - cx, by = p[1] - cy;
-    const bb = bounds(g.outers.flat());
-    const ratio = (a: number, b: number, span: number) => (Math.abs(a) > span * 0.12 ? Math.max(0.05, Math.abs(b) / Math.abs(a)) : 1);
-    let sx = ratio(ax, bx, bb.w), sy = ratio(ay, by, bb.h);
-    if (keepProportions) sx = sy = Math.max(0.05, Math.hypot(bx, by) / Math.max(1e-6, Math.hypot(ax, ay)));
-    fn = (l) => l.map(([x, y]) => [r4(cx + (x - cx) * sx), r4(cy + (y - cy) * sy)] as Vec2);
-  } else {
-    const a = Math.atan2(p[1] - cy, p[0] - cx) - Math.atan2(g.start[1] - cy, g.start[0] - cx);
-    fn = (l) => {
-      const sd = side(l);
-      // a pair turns each loop about its own middle, in mirror image
-      let ox = cx, oy = cy, ang = a;
-      if (symOn() && sd !== 0) {
-        const bb = bounds(l);
-        ox = (bb.minX + bb.maxX) / 2;
-        oy = (bb.minY + bb.maxY) / 2;
-        ang = a * sd * grabSide;
-      }
-      const c = Math.cos(ang), s = Math.sin(ang);
-      return l.map(([x, y]) => [r4(ox + (x - ox) * c - (y - oy) * s), r4(oy + (x - ox) * s + (y - oy) * c)] as Vec2);
-    };
-  }
-  ds.pending = g.outers.map(fn);
-  ds.holes = g.holes.map(fn);
-}
-
-/** A body part's shapes as drawn so far, front and side (the front ones first). */
-function drawnShapes(ds: DrawState): PartShape[] {
-  const here = (ds.pending ?? []).map((outline) => ({ outline, side: ds.side }));
-  const there = ds.other.map((outline) => ({ outline, side: !ds.side }));
-  return ds.side ? [...there, ...here] : [...here, ...there];
-}
-
-/** Show the pending shape: inflated live on the part being drawn, or on the workbench. */
-function previewPending() {
-  const ds = drawState;
-  if (!ds) return;
-  if (ds.target.kind === 'bone') {
-    const b = creature.bones.get(ds.target.boneId);
-    if (b) {
-      setPartShapes(state.parts[b.src], drawnShapes(ds));
-      creature.sync();
-      // the rebuilt part keeps the see-through drawing look
-      creature.setDrawFocus(ds.target.boneId, ds.side);
-    }
-  } else {
-    syncWorkbench();
-  }
-  syncDrawBar();
-  renderOverlay();
-}
-
-let previewQueued = false;
-function schedulePreview() {
-  if (previewQueued) return;
-  previewQueued = true;
-  requestAnimationFrame(() => {
-    previewQueued = false;
-    previewPending();
-  });
-}
-
-/** Done: keep the pending shape. */
-function finishDraw() {
-  const ds = drawState;
-  if (!ds?.pending && !ds?.other.length) return;
-  if (!symOn()) unlock('wonky');
-  if (ds.target.kind === 'piece' && ds.target.redraw) {
-    replacePiece(ds.target.redraw, pendingPieces(ds));
-    return;
-  }
-  if (ds.target.kind === 'piece') {
-    addPieces(pendingPieces(ds));
-    return;
-  }
-  const b = creature.bones.get(ds.target.boneId)!;
-  setPartShapes(state.parts[b.src], drawnShapes(ds));
-  exitDraw(true);
-  creature.sync();
-  commit();
-  renderCreatureBar();
-  flashPart();
-  hintOnce('Inflated! Drag to look around, or pick another part', 2200);
-}
-
-function addStrokePoint(p: Vec2) {
-  if (!drawState) return;
-  drawState.pts.push(p);
-  const l = screenToLocal(drawState.frame, partPlane(drawState.frame), p[0], p[1]);
-  if (l) drawState.local.push(l);
-}
-
-overlay.addEventListener('pointerdown', (e) => {
-  if (!drawState || e.button !== 0) return;
-  overlay.setPointerCapture(e.pointerId);
-  const at = screenToLocal(drawState.frame, partPlane(drawState.frame), e.clientX, e.clientY);
-  if (drawState.stamp) {
-    if (at) drawState.stampDrag = { centre: at, r: stampSize(drawState), x: e.clientX, y: e.clientY };
-    renderOverlay();
-    return;
-  }
-  if ((drawState.tool === 'move' || drawState.tool === 'scale' || drawState.tool === 'rotate') && drawState.pending) {
-    if (!at) return;
-    const bb = bounds(drawState.pending.flat());
-    // with symmetry on, everything stays centred on the centre line
-    const centre: Vec2 = [symOn() ? 0 : (bb.minX + bb.maxX) / 2, (bb.minY + bb.maxY) / 2];
-    drawState.grab = { start: at, outers: drawState.pending, holes: drawState.holes, centre };
-    hint('');
-    return;
-  }
-  drawState.active = true;
-  drawState.pts = [];
-  drawState.local = [];
-  drawState.pen = [e.clientX, e.clientY];
-  addStrokePoint([e.clientX, e.clientY]);
-  hint('');
-});
-overlay.addEventListener('pointermove', (e) => {
-  const sd = drawState?.stampDrag;
-  if (sd) {
-    // dragging out from where it was pressed sizes it; a click keeps the handy size
-    const p = screenToLocal(drawState!.frame, partPlane(drawState!.frame), e.clientX, e.clientY);
-    if (p && Math.hypot(e.clientX - sd.x, e.clientY - sd.y) > 6) sd.r = Math.max(0.01, Math.hypot(p[0] - sd.centre[0], p[1] - sd.centre[1]));
-    renderOverlay();
-    return;
-  }
-  if (drawState?.grab) {
-    const p = screenToLocal(drawState.frame, partPlane(drawState.frame), e.clientX, e.clientY);
-    if (!p) return;
-    transformShape(drawState, p, e.shiftKey);
-    schedulePreview();
-    return;
-  }
-  if (!drawState?.active || !drawState.pen) return;
-  // Stabiliser: the pen trails the pointer, ironing out touchpad wobble.
-  const follow = 1 - 0.88 * drawPrefs.smoothing;
-  const pen = drawState.pen;
-  const events = e.getCoalescedEvents?.() ?? [e];
-  for (const ev of events.length ? events : [e]) {
-    pen[0] += (ev.clientX - pen[0]) * follow;
-    pen[1] += (ev.clientY - pen[1]) * follow;
-    const last = drawState.pts[drawState.pts.length - 1];
-    if (Math.hypot(pen[0] - last[0], pen[1] - last[1]) >= 2) addStrokePoint([pen[0], pen[1]]);
-  }
-  renderOverlay();
-});
-overlay.addEventListener('pointerup', () => {
-  if (drawState?.stampDrag) {
-    placeStamp(drawState);
-  } else if (drawState?.grab) {
-    drawState.grab = null;
-    mergeOverlaps(drawState);
-    drawHint();
-  } else if (drawState?.active) finishStroke();
-});
-overlay.addEventListener('wheel', (e) => {
-  canvas.dispatchEvent(new WheelEvent('wheel', e));
-  e.preventDefault();
-}, { passive: false });
-// While drawing, the right (or middle) button still moves the view: the
-// press is handed to the camera controls under the drawing layer, which then
-// follow the pointer until it's let go.
-overlay.addEventListener('pointerdown', (e) => {
-  if (!drawState || e.button === 0) return;
-  canvas.dispatchEvent(new PointerEvent('pointerdown', e));
-});
-overlay.addEventListener('contextmenu', (e) => e.preventDefault());
-
-// On a touch screen a second finger means "move the view": whatever the first
-// finger had started is dropped and both touches go to the camera controls,
-// which follow them (on the document) until they're lifted.
-const drawTouches = new Map<number, PointerEvent>();
-let touchView = false;
-overlay.addEventListener('pointerdown', (e) => {
-  if (!drawState || e.pointerType !== 'touch') return;
-  drawTouches.set(e.pointerId, e);
-  if (!touchView && drawTouches.size < 2) return;
-  e.stopImmediatePropagation();
-  if (!touchView) {
-    touchView = true;
-    const ds = drawState;
-    ds.active = false;
-    ds.pts = [];
-    ds.local = [];
-    ds.stampDrag = null;
-    if (ds.grab) {
-      ds.pending = ds.grab.outers;
-      ds.holes = ds.grab.holes;
-      ds.grab = null;
-      schedulePreview();
-    }
-    renderOverlay();
-    for (const t of drawTouches.values()) canvas.dispatchEvent(new PointerEvent('pointerdown', t));
-  } else canvas.dispatchEvent(new PointerEvent('pointerdown', e));
-}, { capture: true });
-overlay.addEventListener('pointermove', (e) => {
-  if (drawTouches.has(e.pointerId)) drawTouches.set(e.pointerId, e);
-}, { capture: true });
-for (const type of ['pointerup', 'pointercancel'] as const) {
-  window.addEventListener(type, (e) => {
-    drawTouches.delete(e.pointerId);
-    if (!drawTouches.size) touchView = false;
-  });
-}
-
-// Hold Space to pan with the left button (while drawing, the drawing layer steps aside meanwhile).
-// Outside drawing, Shift+drag pans as well: OrbitControls does that itself.
-let spacePan = false;
-function setSpacePan(on: boolean) {
-  if (spacePan === on) return;
-  spacePan = on;
-  overlay.style.pointerEvents = on ? 'none' : '';
-  controls.mouseButtons.LEFT = on ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE;
-  gizmo.enabled = !on;
-  viewport.classList.toggle('space-pan', on);
-}
-window.addEventListener('keyup', (e) => {
-  if (e.code === 'Space') setSpacePan(false);
-});
-window.addEventListener('blur', () => setSpacePan(false));
-
-export function renderOverlay() {
-  const dpr = overlay.width / overlay.clientWidth || 1;
-  octx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  octx.clearRect(0, 0, overlay.clientWidth, overlay.clientHeight);
-  if (!drawState) return;
-  const frame = drawState.frame;
-  octx.lineJoin = octx.lineCap = 'round';
-
-  if (symOn()) {
-    const a = localToOverlay(frame, drawState.axis[0]);
-    const z = localToOverlay(frame, drawState.axis[1]);
-    octx.setLineDash([10, 8]);
-    octx.strokeStyle = 'rgba(59,130,246,.75)';
-    octx.lineWidth = 2;
-    octx.beginPath();
-    octx.moveTo(a[0], a[1]);
-    octx.lineTo(z[0], z[1]);
-    octx.stroke();
-    octx.setLineDash([]);
-  }
-
-  // the shape waiting for Done (faded while a replacement is being drawn)
-  if (drawState.pending) {
-    octx.globalAlpha = drawState.active ? 0.35 : 1;
-    octx.fillStyle = 'rgba(255,107,74,.12)';
-    octx.strokeStyle = '#ff6b4a';
-    octx.lineWidth = 3;
-    const { outers, holes } = pendingShape(drawState);
-    octx.beginPath();
-    for (const loop of [...outers, ...holes]) {
-      loop.forEach((p, i) => {
-        const [sx, sy] = localToOverlay(frame, p);
-        if (i) octx.lineTo(sx, sy);
-        else octx.moveTo(sx, sy);
-      });
-      octx.closePath();
-    }
-    octx.fill('evenodd');
-    octx.stroke();
-    octx.globalAlpha = 1;
-  }
-
-  // a basic shape being dragged out
-  if (drawState.stampDrag) {
-    const cutting = drawState.tool === 'erase' && !!drawState.pending;
-    octx.fillStyle = cutting ? 'rgba(58,51,64,.12)' : 'rgba(255,107,74,.12)';
-    octx.strokeStyle = cutting ? '#3a3340' : '#ff6b4a';
-    octx.lineWidth = 3;
-    if (cutting) octx.setLineDash([8, 6]);
-    for (const loop of stampLoops(drawState)) {
-      octx.beginPath();
-      loop.forEach((q, i) => {
-        const [sx, sy] = localToOverlay(frame, q);
-        if (i) octx.lineTo(sx, sy);
-        else octx.moveTo(sx, sy);
-      });
-      octx.closePath();
-      octx.fill();
-      octx.stroke();
-    }
-    octx.setLineDash([]);
-  }
-
-  if (drawState.pts.length < 2) return;
-  const r = overlay.getBoundingClientRect();
-  const pts = drawState.pts.map(([x, y]) => [x - r.left, y - r.top]);
-  // erasing draws in ink, dashed, so it reads as cutting away
-  const erasing = drawState.tool === 'erase' && !!drawState.pending;
-  const ink = erasing ? '#3a3340' : '#ff6b4a';
-  const inkSoft = erasing ? 'rgba(58,51,64,' : 'rgba(255,107,74,';
-
-  if (symOn() && drawState.local.length > 1) {
-    // live preview of the mirrored half
-    octx.strokeStyle = inkSoft + '.45)';
-    octx.lineWidth = 3;
-    octx.beginPath();
-    drawState.local.forEach(([x, y], i) => {
-      const [sx, sy] = localToOverlay(frame, [-x, y]);
-      if (i) octx.lineTo(sx, sy);
-      else octx.moveTo(sx, sy);
-    });
-    octx.stroke();
-  } else {
-    // closing segment preview
-    octx.setLineDash([6, 8]);
-    octx.strokeStyle = inkSoft + '.6)';
-    octx.lineWidth = 2;
-    octx.beginPath();
-    octx.moveTo(pts[pts.length - 1][0], pts[pts.length - 1][1]);
-    octx.lineTo(pts[0][0], pts[0][1]);
-    octx.stroke();
-    octx.setLineDash([]);
-  }
-  octx.fillStyle = symOn() ? 'transparent' : inkSoft + '.12)';
-  octx.strokeStyle = ink;
-  octx.lineWidth = 4;
-  if (erasing) octx.setLineDash([8, 6]);
-  octx.beginPath();
-  pts.forEach(([x, y], i) => (i ? octx.lineTo(x, y) : octx.moveTo(x, y)));
-  if (!symOn()) octx.fill();
-  octx.stroke();
-  octx.setLineDash([]);
-}
-
-$<HTMLInputElement>('#sym').onchange = () => toggleSymmetry();
-$<HTMLInputElement>('#smooth').oninput = (e) => {
-  drawPrefs.smoothing = parseFloat((e.target as HTMLInputElement).value);
-  saveDrawPrefs();
-};
-document.querySelectorAll<HTMLButtonElement>('#draw-bar [data-shape]').forEach((b) => {
-  b.onclick = () => {
-    if (!drawState) return;
-    // arm the shape (again to put it away); it's placed by clicking in the drawing
-    const kind = b.dataset.shape as ShapeKind;
-    drawState.stamp = drawState.stamp === kind ? null : kind;
-    // shapes add (or cut, while erasing)
-    if (drawState.tool !== 'erase') drawState.tool = 'draw';
-    syncDrawBar();
-    drawHint();
-  };
-});
-$('#reset-draw').onclick = () => {
-  // a body part starts again from nothing, front and side
-  if (drawState) drawState.other = [];
-  setPending(null);
-};
-document.querySelectorAll<HTMLButtonElement>('#draw-view [data-view]').forEach((b) => {
-  b.onclick = () => setDrawSide(b.dataset.view === 'side');
-});
-function setDrawTool(tool: DrawTool) {
-  if (!drawState || (tool !== 'draw' && !drawState.pending)) return;
-  // Draw with a shape armed: back to drawing freehand
-  if (tool === 'draw' && drawState.stamp) {
-    drawState.stamp = null;
-    drawState.tool = 'draw';
-    syncDrawBar();
-    drawHint();
-    return;
-  }
-  // tapping the active tool again goes back to drawing
-  drawState.tool = drawState.tool === tool ? 'draw' : tool;
-  // moving, scaling or turning puts any armed shape away
-  if (drawState.tool !== 'draw' && drawState.tool !== 'erase') drawState.stamp = null;
-  syncDrawBar();
-  drawHint();
-}
-document.querySelectorAll<HTMLButtonElement>('#draw-tools [data-tool]').forEach((b) => {
-  b.onclick = () => setDrawTool(b.dataset.tool as DrawTool);
-});
-$('#done-draw').onclick = () => finishDraw();
-
-// stuff workbench
-
-// The board sits at chest height; its XY plane is the drawing plane and its
-// origin (the crosshair) is where the thing will attach to a body part.
-const board = new THREE.Group();
-board.position.set(0, 1, 0);
-board.visible = false;
-scene.add(board);
-const boardGrid = new THREE.Group();
-{
-  // opaque lines (pre-faded colors) so glass pieces show the grid through them;
-  // glass only refracts opaque things
-  const grid = new THREE.GridHelper(2.4, 24, 0xc4bcc0, 0xe3dacd);
-  grid.rotation.x = Math.PI / 2;
-  boardGrid.add(grid);
-  const ring = new THREE.Mesh(
-    new THREE.RingGeometry(0.035, 0.05, 32),
-    new THREE.MeshBasicMaterial({ color: 0x3b82f6, depthTest: false, transparent: true }),
-  );
-  ring.renderOrder = 999;
-  boardGrid.add(ring);
-  const cross = new THREE.LineSegments(
-    new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(-0.09, 0, 0), new THREE.Vector3(0.09, 0, 0),
-      new THREE.Vector3(0, -0.09, 0), new THREE.Vector3(0, 0.09, 0),
-    ]),
-    new THREE.LineBasicMaterial({ color: 0x3b82f6, depthTest: false, transparent: true }),
-  );
-  cross.renderOrder = 999;
-  boardGrid.add(cross);
-  board.add(boardGrid);
-}
-let bench: THREE.Group | null = null;
-let benchKey = '';
-let selectedPiece = '';
-
-export function workbench(): Thing {
-  world.workbench ??= newThing();
-  return world.workbench;
-}
-
-function piece(): Piece | undefined {
-  return workbench().pieces.find((p) => p.id === selectedPiece);
-}
-
-/** Holes from `loops` that actually sit inside piece `p`. */
-function holesInside(p: Piece, loops: Vec2[][]): Vec2[][] {
-  return loops.filter((l) => {
-    const [cx, cy] = l.reduce((a, q) => [a[0] + q[0] / l.length, a[1] + q[1] / l.length], [0, 0]);
-    return pointInPolygon(cx, cy, p.outline);
-  });
-}
-
-/**
- * The workbench as shown: while drawing on it, flat (strokes are drawn flat)
- * and with any shape that's waiting for Done.
- */
-function benchThing(): Thing {
-  const wb = workbench();
-  const ds = drawState;
-  if (!ds || ds.target.kind !== 'piece') return wb;
-  const shown: Thing = { ...wb, bend: 0 };
-  const redraw = ds.target.redraw;
-  if (redraw) {
-    shown.pieces = wb.pieces.flatMap((p) =>
-      p.id !== redraw ? [p] : pendingPieces(ds).map((pp, i) => ({ ...p, outline: pp.outline, holes: pp.holes, id: i ? `preview${i}` : p.id })),
-    );
-    return shown;
-  }
-  if (!ds.pending) return shown;
-  const target = piece();
-  shown.pieces = [...wb.pieces, ...pendingPieces(ds).map((pp, i) => ({ ...newPiece(pp.outline, target), holes: pp.holes, id: `preview${i}` }))];
-  return shown;
-}
-
-/** On the workbench, a thing that inherits its material shows the creature's. */
-function benchWearer(): Wearer {
-  return { style: state.style, settingsFor: (s) => creature.settingsFor(s) };
-}
-
-export function syncWorkbench() {
-  const thing = benchThing();
-  const key = JSON.stringify([thing.pieces, thing.markings, thing.pictures, thing.ownMaterial, thing.inherit, thing.materialSettings, thing.bend, thing.bendMode, state.materialSettings, state.style, getMeshDetail()]);
-  if (key === benchKey) {
-    refreshPieceGizmo();
-    return;
-  }
-  piecePivot = null;
-  benchKey = key;
-  if (bench) {
-    board.remove(bench);
-    disposeThing(bench);
-  }
-  bench = buildThing(thing, benchWearer());
-  board.add(bench);
-  refreshPieceGizmo();
-}
-
-// ---- moving, turning and resizing a piece after it's drawn ----
-// The selected piece is wrapped in a pivot at its middle (inside a holder
-// that carries its 3D placement), so it turns and grows about itself.
-// 2D keeps it flat on its own plane and bakes the change into its outline;
-// 3D lifts and tilts the plane itself, leaving the drawing as it is.
-
-type PieceMode = 'translate' | 'rotate' | 'scale';
-let pieceMode: PieceMode = 'translate';
-let pieceDim: '2d' | '3d' = '2d';
-let piecePivot: THREE.Group | null = null;
-
-function refreshPieceGizmo() {
-  const p = piece();
-  const on = mode === 'stuff' && !drawState && !!p && !!bench && !markToolsOut();
-  $('#piece-bar').hidden = !on;
-  if (!on) {
-    if (piecePivot && gizmo.object === piecePivot) gizmo.detach();
-    piecePivot = null;
-    unwrapPieces();
-    return;
-  }
-  // still wrapped round this piece's current mesh: nothing to do
-  if (piecePivot && piecePivot.parent?.parent === bench && piecePivot.userData.pieceId === p.id && gizmo.object === piecePivot) {
-    setPieceMode(pieceMode);
-    return;
-  }
-  // a piece picked before (and left unchanged) is still in its pivot: put it back first
-  unwrapPieces();
-  const mesh = bench!.children.find((m) => m.userData.pieceId === p.id);
-  if (!mesh) return;
-  const b = bounds(p.outline);
-  const c = new THREE.Vector2((b.minX + b.maxX) / 2, (b.minY + b.maxY) / 2);
-  // holder = the piece's plane in the thing; pivot = its middle on that plane
-  const holder = new THREE.Group();
-  holder.userData.pieceHolder = true;
-  holder.position.copy(mesh.position);
-  holder.quaternion.copy(mesh.quaternion);
-  const pivot = new THREE.Group();
-  pivot.userData.pieceId = p.id;
-  pivot.userData.center = c;
-  pivot.position.set(c.x, c.y, 0);
-  bench!.add(holder);
-  holder.add(pivot);
-  pivot.add(mesh);
-  mesh.position.set(-c.x, -c.y, 0);
-  mesh.quaternion.identity();
-  piecePivot = pivot;
-  // Mirror: the other side follows the gizmo, mirrored, while it's dragged
-  const tw = twinOf(p);
-  const twinMesh = tw && bench!.children.find((m) => m.userData.pieceId === tw.id);
-  if (twinMesh) {
-    twinMesh.updateMatrix();
-    pivot.userData.twinMesh = twinMesh;
-    pivot.userData.twinBase = twinMesh.matrix.clone();
-  }
-  gizmo.attach(pivot);
-  setPieceMode(pieceMode);
-  $('#piece-name').textContent = `Piece ${workbench().pieces.indexOf(p) + 1}`;
-}
-
-/** Take every piece out of the pivot it was wrapped in for the gizmo, back onto the bench where it sits. */
-function unwrapPieces() {
-  if (!bench) return;
-  for (const holder of bench.children.filter((o) => o.userData.pieceHolder)) {
-    holder.traverse((o) => o.updateMatrix());
-    const pivot = holder.children[0];
-    for (const mesh of [...(pivot?.children ?? [])]) {
-      // its spot on the bench: the holder's, carried through the pivot
-      mesh.matrix.premultiply(pivot.matrix).premultiply(holder.matrix);
-      mesh.matrix.decompose(mesh.position, mesh.quaternion, mesh.scale);
-      bench.add(mesh);
-    }
-    bench.remove(holder);
-  }
-}
-
-function setPieceMode(m: PieceMode) {
-  const p = piece();
-  // flat, a turned piece is spun round the centre line: it can only slide up and down, or grow
-  const turned2d = p?.kind === 'turned' && pieceDim === '2d';
-  if (turned2d && m === 'rotate') m = 'translate';
-  pieceMode = m;
-  gizmo.setMode(m);
-  gizmo.setSpace('local');
-  if (pieceDim === '3d' && m !== 'scale') {
-    gizmo.showX = gizmo.showY = gizmo.showZ = true;
-  } else {
-    // everything happens in the piece's own plane (resizing always does)
-    gizmo.showX = m === 'scale' || (m === 'translate' && !turned2d);
-    gizmo.showY = m !== 'rotate';
-    gizmo.showZ = m === 'rotate';
-  }
-  document.querySelectorAll<HTMLButtonElement>('#piece-bar [data-piece]').forEach((b) => {
-    b.classList.toggle('on', b.dataset.piece === m);
-    if (b.dataset.piece === 'rotate') b.disabled = turned2d;
-  });
-  document.querySelectorAll<HTMLButtonElement>('#piece-bar [data-dim]').forEach((b) => b.classList.toggle('on', b.dataset.dim === pieceDim));
-  $('#piece-flat').hidden = !p?.place;
-  const both = !!p && !!twinOf(p);
-  $<HTMLInputElement>('#piece-mirror').checked = both;
-  $('#piece-mirror-label').classList.toggle('on', both);
-  invalidate();
-}
-
-function setPieceDim(d: '2d' | '3d') {
-  pieceDim = d;
-  setPieceMode(pieceMode);
-  if (d === '3d') hintOnce('3D: lift pieces off the board and tilt them any way', 2200);
-}
-
-/** Make the gizmo's change permanent. */
-function bakePiece() {
-  const p = piece();
-  const pivot = piecePivot;
-  const holder = pivot?.parent;
-  if (!p || !pivot || !holder || pivot.userData.pieceId !== p.id) return;
-  pivot.updateMatrix();
-  holder.updateMatrix();
-  const c = pivot.userData.center as THREE.Vector2;
-  if (pivot.matrix.equals(new THREE.Matrix4().makeTranslation(c.x, c.y, 0))) return;
-  const r = (n: number, k = 1e4) => Math.round(n * k) / k;
-  if (pieceDim === '3d' && pieceMode !== 'scale') {
-    // 3D: move the piece's plane; its drawing stays as drawn
-    const m = holder.matrix.clone().multiply(pivot.matrix).multiply(new THREE.Matrix4().makeTranslation(-c.x, -c.y, 0));
-    const pos = new THREE.Vector3();
-    const q = new THREE.Quaternion();
-    m.decompose(pos, q, new THREE.Vector3());
-    const flat = pos.lengthSq() < 1e-8 && Math.abs(q.w) > 1 - 1e-9;
-    if (flat) delete p.place;
-    else p.place = { position: pos.toArray().map((v) => r(v)) as [number, number, number], quaternion: q.toArray().map((v) => r(v, 1e6)) as [number, number, number, number] };
-  } else {
-    // 2D (and resizing): run the outline and holes through the move, on the piece's own plane
-    const v = new THREE.Vector3();
-    const move = ([x, y]: Vec2): Vec2 => {
-      v.set(x - c.x, y - c.y, 0).applyMatrix4(pivot.matrix);
-      return [r(v.x), r(v.y)];
-    };
-    // a flip (negative size) turns the outline inside out: keep its direction
-    const flip = pivot.scale.x * pivot.scale.y < 0;
-    const fix = (l: Vec2[]) => (flip ? l.map(move).reverse() : l.map(move));
-    p.outline = fix(p.outline);
-    p.holes = p.holes.map(fix);
-  }
-  syncTwin(p);
-  // rebuilt from the new shape; the gizmo wraps the new mesh
-  piecePivot = null;
-  syncWorkbench();
-  commit();
-  autosaveThing();
-}
-
-/** Put a lifted piece back down flat on the board. */
-function layPieceFlat() {
-  const p = piece();
-  if (!p?.place) return;
-  delete p.place;
-  syncTwin(p);
-  piecePivot = null;
-  syncWorkbench();
-  commit();
-  autosaveThing();
-  hint('Back flat on the board', 1500);
-}
-
-// ---- Mirror: a piece and its mirror image, kept in step ----
-
-/** A piece's other side, if it has one. */
-function twinOf(p: Piece): Piece | undefined {
-  return p.twin ? workbench().pieces.find((q) => q.id === p.twin) : undefined;
-}
-
-/** After `p` changed: its other side becomes its mirror image again (shape, place, color, everything). */
-function syncTwin(p: Piece | undefined) {
-  if (!p?.twin) return;
-  const wb = workbench();
-  const i = wb.pieces.findIndex((q) => q.id === p.twin);
-  if (i < 0) {
-    delete p.twin;
-    return;
-  }
-  const t: Piece = { ...structuredClone(p), id: p.twin, twin: p.id, ...mirrorShape(p) };
-  if (!t.place) delete t.place;
-  wb.pieces[i] = t;
-}
-
-/** Where a piece's middle sits across the board (0 = on the centre line). */
-function pieceMiddleX(p: Piece): number {
-  const b = bounds(p.outline);
-  // a turned piece is spun round its own centre line
-  const v = new THREE.Vector3(p.kind === 'turned' ? 0 : (b.minX + b.maxX) / 2, (b.minY + b.maxY) / 2, 0);
-  if (p.place) v.applyQuaternion(new THREE.Quaternion(...p.place.quaternion)).add(new THREE.Vector3(...p.place.position));
-  return v.x;
-}
-
-/** Mirror on: a mirror image of the picked piece on the other side. Off: the two go their own ways. */
-function setPieceMirror(on: boolean) {
-  const p = piece();
-  if (!p || drawState || on === !!twinOf(p)) return;
-  const wb = workbench();
-  if (on) {
-    if (Math.abs(pieceMiddleX(p)) < Math.max(0.005, bounds(p.outline).w * 0.1)) {
-      hint('This piece sits on the centre line: move it to one side first', 2400, true);
-      setPieceMode(pieceMode);
-      return;
-    }
-    const t: Piece = { ...structuredClone(p), id: uid() };
-    p.twin = t.id;
-    wb.pieces.splice(wb.pieces.indexOf(p) + 1, 0, t);
-    syncTwin(p);
-  } else {
-    delete twinOf(p)!.twin;
-    delete p.twin;
-    hint('Now two separate pieces', 1500);
-  }
-  syncWorkbench();
-  commit();
-  renderStuffPanel();
-  autosaveThing();
-}
-$<HTMLInputElement>('#piece-mirror').onchange = (e) => setPieceMirror((e.target as HTMLInputElement).checked);
-
-const MIRROR_X = new THREE.Matrix4().makeScale(-1, 1, 1);
-/** While a piece is dragged: put its other side where the same change, mirrored, takes it. */
-function mirrorTwinLive() {
-  const pivot = piecePivot;
-  const mesh = pivot?.userData.twinMesh as THREE.Object3D | undefined;
-  const holder = pivot?.parent;
-  if (!pivot || !mesh || !holder) return;
-  holder.updateMatrix();
-  pivot.updateMatrix();
-  const c = pivot.userData.center as THREE.Vector2;
-  // the change since the piece was picked, on the bench: holder * pivot * (pivot at rest)^-1 * holder^-1
-  const change = holder.matrix.clone().multiply(pivot.matrix).multiply(new THREE.Matrix4().makeTranslation(-c.x, -c.y, 0)).multiply(holder.matrix.clone().invert());
-  const m = MIRROR_X.clone().multiply(change).multiply(MIRROR_X).multiply(pivot.userData.twinBase as THREE.Matrix4);
-  m.decompose(mesh.position, mesh.quaternion, mesh.scale);
-}
-
-/** A tilted piece's own plane in the scene, for cutting holes into it. */
-const pieceFrame = new THREE.Group();
-board.add(pieceFrame);
-function framePiece(p: Piece): THREE.Object3D {
-  if (!p.place) return board;
-  pieceFrame.position.set(...p.place.position);
-  pieceFrame.quaternion.set(...p.place.quaternion);
-  pieceFrame.updateMatrixWorld(true);
-  return pieceFrame;
-}
-
-document.querySelectorAll<HTMLButtonElement>('#piece-bar [data-piece]').forEach((b) => {
-  b.onclick = () => setPieceMode(b.dataset.piece as PieceMode);
-});
-document.querySelectorAll<HTMLButtonElement>('#piece-bar [data-dim]').forEach((b) => {
-  b.onclick = () => setPieceDim(b.dataset.dim as '2d' | '3d');
-});
-$('#piece-flat').onclick = () => layPieceFlat();
-
-// ---- auto-save: the thing on the workbench is kept in My stuff as you go ----
-
-let thingSaveTimer = 0;
-export function autosaveThing() {
-  if (!world.workbench?.pieces.length) return;
-  clearTimeout(thingSaveTimer);
-  thingSaveTimer = window.setTimeout(saveWorkbenchNow, 450);
-}
-
-/** Put the workbench thing in the collection now (with a fresh picture), and update anything wearing it. */
-function saveWorkbenchNow() {
-  clearTimeout(thingSaveTimer);
-  const wb = world.workbench;
-  if (!wb?.pieces.length) return;
-  // a shape waiting for Done would end up in the picture: wait for it
-  if (drawState) {
-    autosaveThing();
-    return;
-  }
-  const saved: Thing = { ...structuredClone(wb), name: wb.name.trim() || 'Thing' };
-  saved.thumb = mode === 'stuff' ? captureThumb() : collection().find((t) => t.id === wb.id)?.thumb;
-  const ok = putThing(saved);
-  const badge = $('#thing-saved');
-  if (ok) iconLabel(badge, fa('check'), 'Saved');
-  else badge.textContent = 'Storage full: download it to keep it';
-  badge.classList.toggle('warn', !ok);
-  if (!ok) return;
-  // creatures already wearing it get the new shape; how its material looks
-  // stays each wearer's own choice
-  world.creatures.forEach((s, i) => {
-    let changed = false;
-    for (const a of s.attachments ?? []) {
-      if (a.thing.id !== wb.id) continue;
-      const { inherit, ownMaterial, materialSettings, scaleMaterial } = a.thing;
-      a.thing = { ...stripThumb(saved), inherit, ownMaterial, materialSettings, scaleMaterial };
-      changed = true;
-    }
-    if (changed) creatures[i]?.sync();
-  });
-  save();
-  // My stuff is saved with the creation
-  queueCreationSave();
-  renderCollection();
-}
-
-/** Put a thing on the workbench (saving the one that was there first). */
-function openOnBench(t: Thing) {
-  saveWorkbenchNow();
-  world.workbench = stripThumb(t);
-  selectedPiece = '';
-  $('#thing-saved').textContent = '';
-  syncWorkbench();
-  commit();
-  renderStuffPanel();
-  focusOnBoard();
-}
-
-/** Look straight at a drawing plane (a tilted piece's), from the side it faces. */
-function focusOnPlane(frame: THREE.Object3D) {
-  const c = frame.getWorldPosition(new THREE.Vector3());
-  const n = new THREE.Vector3(0, 0, 1).transformDirection(frame.matrixWorld);
-  // face it from whichever side the camera is already on
-  if (n.dot(camera.position.clone().sub(c)) < 0) n.negate();
-  flyTo(c.clone().addScaledVector(n, 1.4), c);
-}
-
-function focusOnBoard() {
-  const c = board.getWorldPosition(new THREE.Vector3());
-  let r = 0.7;
-  if (bench) {
-    const box = new THREE.Box3().setFromObject(bench);
-    if (!box.isEmpty()) r = Math.max(0.5, box.getSize(new THREE.Vector3()).length() * 0.7);
-  }
-  const dist = r / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
-  flyTo(c.clone().add(new THREE.Vector3(0, 0, Math.max(1.4, dist))), c);
-}
-
-/** Done on the workbench: add the drawn pieces, with any holes erased in them. */
-function addPieces(shapes: { outline: Vec2[]; holes: Vec2[][] }[]) {
-  const wb = workbench();
-  const made = shapes.map((sh) => ({ ...newPiece(sh.outline, piece()), holes: sh.holes }));
-  // drawn with Mirror on, a mirrored pair stays one: Mirror
-  if (symOn()) {
-    for (const a of made) {
-      const b = made.find((q) => q !== a && !q.twin && !a.twin && mirrorPair(a, q));
-      if (b) {
-        a.twin = b.id;
-        b.twin = a.id;
-      }
-    }
-  }
-  wb.pieces.push(...made);
-  selectedPiece = made[0].id;
-  unlock('piece');
-  exitDraw(true);
-  syncWorkbench();
-  commit();
-  renderStuffPanel();
-  flashPart();
-}
-
-/** Whether two pieces are mirror images across the centre line (going by their outlines' extents). */
-function mirrorPair(a: Piece, b: Piece): boolean {
-  const p = bounds(a.outline), q = bounds(b.outline);
-  const eps = 1e-3;
-  return Math.abs(p.minX + q.maxX) < eps && Math.abs(p.maxX + q.minX) < eps && Math.abs(p.minY - q.minY) < eps && Math.abs(p.maxY - q.maxY) < eps;
-}
-
-/** Done redrawing a piece: it keeps its color, material, kind and place, with the new outline. */
-function replacePiece(id: string, shapes: { outline: Vec2[]; holes: Vec2[][] }[]) {
-  const wb = workbench();
-  const i = wb.pieces.findIndex((p) => p.id === id);
-  if (i < 0 || !shapes.length) {
-    exitDraw();
-    return;
-  }
-  const old = wb.pieces[i];
-  const next: Piece[] = shapes.map((sh, k) => ({ ...structuredClone(old), outline: sh.outline, holes: sh.holes, id: k ? uid() : old.id }));
-  // Mirror: the other side follows a redraw, unless it came out as several pieces
-  if (next.length > 1 && old.twin) {
-    const t = twinOf(old);
-    if (t) delete t.twin;
-    for (const q of next) delete q.twin;
-  }
-  wb.pieces.splice(i, 1, ...next);
-  syncTwin(next[0]);
-  selectedPiece = old.id;
-  exitDraw(true);
-  syncWorkbench();
-  commit();
-  renderStuffPanel();
-  flashPart();
-  if (next.length > 1) hint(`Redrawn as ${next.length} pieces`, 1800);
-}
-
-function pickPiece(x: number, y: number): string | null {
-  if (!bench) return null;
-  setRay(x, y);
-  // fuzz and ink sit inside a piece's mesh, and the selected piece sits in a pivot
-  for (const hit of raycaster.intersectObjects(bench.children, true)) {
-    for (let o: THREE.Object3D | null = hit.object; o && o !== bench; o = o.parent) if (o.userData.pieceId) return o.userData.pieceId as string;
-  }
-  return null;
-}
-
-/** Glow the selected piece (k fades 1 -> 0). */
-function flashPiece(k: number) {
-  bench?.traverse((m) => {
-    if (!m.userData.pieceId || !(m as THREE.Mesh).isMesh) return;
-    const mat = (m as THREE.Mesh).material as THREE.MeshStandardMaterial;
-    if (!mat || !('emissive' in mat)) return;
-    glowWithFlash(mat, m.userData.pieceId === selectedPiece && k > 0 ? new THREE.Color(1, 0.42, 0.29).multiplyScalar(0.45 * k) : undefined);
-  });
-}
-
-/** Render just the thing, framed, into a small square image for the collection. */
-function captureThumb(): string {
-  if (!bench) return '';
-  return snapThumb(new THREE.Box3().setFromObject(bench));
-}
-
-/** Render a clean frame and crop a small square round `box` as the camera sees it. */
-function snapThumb(box: THREE.Box3, size = 160): string {
-  if (box.isEmpty()) return '';
-  // pictured from wherever the camera is: crop a square round the thing as it's seen now
-  camera.updateMatrixWorld();
-  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-  for (let k = 0; k < 8; k++) {
-    const v = new THREE.Vector3(k & 1 ? box.max.x : box.min.x, k & 2 ? box.max.y : box.min.y, k & 4 ? box.max.z : box.min.z).project(view);
-    const px = ((v.x + 1) / 2) * canvas.width;
-    const py = ((1 - v.y) / 2) * canvas.height;
-    x0 = Math.min(x0, px);
-    x1 = Math.max(x1, px);
-    y0 = Math.min(y0, py);
-    y1 = Math.max(y1, py);
-  }
-  const side = Math.min(Math.max(x1 - x0, y1 - y0) * 1.15, canvas.width, canvas.height);
-  const sx = THREE.MathUtils.clamp((x0 + x1) / 2 - side / 2, 0, canvas.width - side);
-  const sy = THREE.MathUtils.clamp((y0 + y1) / 2 - side / 2, 0, canvas.height - side);
-  boardGrid.visible = false;
-  const url = withCleanScene(() => {
-    composer.render();
-    const out = document.createElement('canvas');
-    out.width = out.height = size;
-    out.getContext('2d')!.drawImage(canvas, sx, sy, side, side, 0, 0, size, size);
-    return out.toDataURL('image/jpeg', 0.82);
-  });
-  boardGrid.visible = true;
-  // put the grid and handles straight back on screen
-  invalidate();
-  return url;
-}
-
-function stripThumb(t: Thing): Thing {
-  const { thumb: _thumb, ...rest } = structuredClone(t);
-  return rest;
-}
-
-function renderStuffPanel() {
-  const wb = workbench();
-  const nameInput = $<HTMLInputElement>('#thing-name');
-  if (document.activeElement !== nameInput) nameInput.value = wb.name;
-  if (!wb.pieces.some((p) => p.id === selectedPiece)) selectedPiece = wb.pieces[wb.pieces.length - 1]?.id ?? '';
-
-  const list = $('#pieces');
-  list.innerHTML = '';
-  // one row per piece: pick it, redraw it, or throw it away
-  wb.pieces.forEach((p, i) => {
-    const row = document.createElement('div');
-    row.className = 'piece-row';
-    row.classList.toggle('active', p.id === selectedPiece);
-    const pick = document.createElement('button');
-    pick.className = 'piece-pick';
-    pick.innerHTML = `<i style="background:${p.color}"></i>`;
-    pick.insertAdjacentHTML('beforeend', p.kind === 'flat' ? fa('rectangle-wide') : p.kind === 'turned' ? faClassic('jar') : fa('cloud'));
-    pick.append(` Piece ${i + 1}${p.holes.length ? ` (${p.holes.length} hole${p.holes.length > 1 ? 's' : ''})` : ''}`);
-    const t = twinOf(p);
-    if (t) pick.insertAdjacentHTML('beforeend', ` <span class="piece-twin" title="Mirror image of Piece ${wb.pieces.indexOf(t) + 1}">${fa('arrow-right-arrow-left')}</span>`);
-    pick.onclick = () => {
-      selectedPiece = p.id;
-      flashPart();
-      renderStuffPanel();
-    };
-    const edit = document.createElement('button');
-    edit.className = 'piece-icon';
-    edit.innerHTML = fa('pencil');
-    edit.title = 'Redraw this piece: add to it, erase bits (erase inside it for a hole), or move, size and turn it. Or double-click it';
-    edit.onclick = () => {
-      selectedPiece = p.id;
-      renderStuffPanel();
-      enterDraw({ kind: 'piece', redraw: p.id });
-    };
-    const copy = document.createElement('button');
-    copy.className = 'piece-icon';
-    copy.innerHTML = fa('copy');
-    copy.title = 'Copy this piece';
-    copy.onclick = () => copyPiece(p.id);
-    const del = document.createElement('button');
-    del.className = 'piece-icon';
-    del.innerHTML = fa('xmark');
-    del.title = 'Delete this piece';
-    del.onclick = () => deletePiece(p.id);
-    row.append(pick, edit, copy, del);
-    list.append(row);
-  });
-  if (!wb.pieces.length) list.innerHTML = '<p class="muted small">No pieces yet: draw one to start.</p>';
-  $('#thing-bend-card').hidden = !wb.pieces.length;
-  document.querySelectorAll<HTMLButtonElement>('#thing-bend-mode button').forEach((b) => b.classList.toggle('active', b.dataset.bend === (wb.bendMode ?? 'axis')));
-  $<HTMLInputElement>('#thing-bend').value = String(wb.bend ?? 0);
-  $('#thing-wrap-card').hidden = !wb.pieces.length;
-  $<HTMLInputElement>('#thing-wrap-smooth').value = String(wb.wrapSmooth ?? WRAP_SMOOTH);
-  $<HTMLInputElement>('#thing-wrap-strength').value = String(wb.wrapStrength ?? WRAP_STRENGTH);
-
-  const p = piece();
-  $('#piece-card').hidden = !p;
-  if (p) {
-    document.querySelectorAll<HTMLButtonElement>('#piece-kind button').forEach((b) => b.classList.toggle('active', b.dataset.kind === p.kind));
-    const th = $<HTMLInputElement>('#piece-thickness');
-    if (p.kind === 'flat') Object.assign(th, { min: '0.005', max: '0.3', step: '0.001' });
-    else if (p.kind === 'turned') Object.assign(th, { min: '0.003', max: '0.12', step: '0.001' });
-    else Object.assign(th, { min: '0.1', max: '3', step: '0.01' });
-    th.value = String(p.thickness);
-    $('#piece-thickness-label').textContent = p.kind === 'turned' ? 'Wall' : 'Thickness';
-    $('#piece-turned-row').hidden = p.kind !== 'turned';
-    $<HTMLInputElement>('#piece-hollow').checked = !!p.hollow;
-    $<HTMLInputElement>('#piece-open').checked = !!p.open;
-    $<HTMLInputElement>('#piece-open').disabled = !p.hollow;
-    $<HTMLInputElement>('#piece-opacity').value = String(p.opacity ?? 1);
-    $<HTMLInputElement>('#piece-blend-shape').value = String(p.blendShape ?? 0);
-    $<HTMLInputElement>('#piece-blend-color').value = String(p.blendColor ?? 0);
-    $('#piece-round-row').hidden = p.kind !== 'flat';
-    $<HTMLInputElement>('#piece-round').value = String(p.round);
-    $<HTMLInputElement>('#piece-z').value = String(p.z);
-    const sw = $('#piece-swatches');
-    sw.innerHTML = '';
-    for (const c of SWATCHES) {
-      const b = document.createElement('button');
-      b.style.background = c;
-      b.title = c;
-      b.classList.toggle('active', c.toLowerCase() === p.color.toLowerCase());
-      b.onclick = () => updatePieceColor((q) => (q.color = c));
-      sw.append(b);
-    }
-    $<HTMLInputElement>('#piece-color').value = p.color;
-    $<HTMLInputElement>('#piece-glow').value = String(p.glow ?? 0);
-    pieceGlowFollow();
-    // (only something to do with more than one piece)
-    $('#piece-color-scope').hidden = wb.pieces.length < 2;
-    pieceSceneColors();
-    const st = $('#piece-styles');
-    st.innerHTML = '';
-    // an item that inherits its material shows the wearer's instead
-    st.hidden = !!wb.inherit;
-    for (const s of STYLES) {
-      const b = document.createElement('button');
-      b.innerHTML = `<span class="ball ${s.id}"></span>`;
-      b.append(s.name);
-      b.classList.toggle('active', s.id === p.style);
-      b.title = s.desc;
-      b.onclick = () => updatePiece((q) => (q.style = s.id));
-      st.append(b);
-    }
-    renderThingMaterial(wb, [p.style], $('#piece-style-params'), state.style);
-  }
-  pieceMarks.render();
-  renderCollection();
-  refreshPieceGizmo();
-}
-
-function updatePiece(fn: (p: Piece) => void, doCommit = true) {
-  const p = piece();
-  if (!p) return;
-  fn(p);
-  syncTwin(p);
-  syncWorkbench();
-  if (doCommit) {
-    commit();
-    renderStuffPanel();
-  }
-}
-
-function renderCollection() {
-  const current = world.workbench?.id;
-  for (const [sel, forAttach] of [['#thing-list', false], ['#attach-options', true]] as const) {
-    const el = $(sel);
-    el.innerHTML = '';
-    const things = collection();
-    if (forAttach && !things.length) {
-      el.innerHTML = `<p class="muted small">Nothing here yet. Make something in the ${fa('box')} Stuff tab first.</p>`;
-      continue;
-    }
-    const card = (name: string, thumb: string | undefined, onclick: () => void) => {
-      const c = document.createElement('div');
-      c.className = 'thing-card pick';
-      const img = document.createElement(thumb ? 'img' : 'div');
-      img.className = 'thumb';
-      if (thumb) (img as HTMLImageElement).src = thumb;
-      const label = document.createElement('span');
-      label.className = 'thing-name';
-      label.textContent = name;
-      c.title = name;
-      c.append(img, label);
-      c.onclick = onclick;
-      el.append(c);
-      return c;
-    };
-    if (!forAttach) {
-      // start something new (an empty workbench already is something new)
-      const fresh = card('New', undefined, () => {
-        if (world.workbench?.pieces.length) openOnBench(newThing());
-      });
-      fresh.classList.add('new-card');
-      fresh.querySelector('.thumb')!.innerHTML = faClassic('plus');
-      fresh.classList.toggle('current', !things.some((t) => t.id === current));
-    }
-    for (const t of things) {
-      const c = card(t.name, t.thumb, () => {
-        if (forAttach) attachThing(t);
-        else if (t.id !== current) openOnBench(t);
-      });
-      if (forAttach) {
-        c.classList.add('carry');
-        carryFrom(c, () => t, () => (t.thumb ? `<img src="${t.thumb}" alt="" />` : fa('box')));
-      }
-      if (!forAttach) {
-        c.classList.toggle('current', t.id === current);
-        c.append(thingActions(t));
-      }
-    }
-  }
-}
-
-$('#piece-draw').onclick = () => enterDraw({ kind: 'piece' });
-/** A copy of a piece, nudged aside so it shows, right after it and picked. */
-function copyPiece(id: string) {
-  if (drawState) exitDraw();
-  const wb = workbench();
-  const i = wb.pieces.findIndex((p) => p.id === id);
-  if (i < 0) return;
-  const twin: Piece = { ...structuredClone(wb.pieces[i]), id: uid() };
-  delete twin.twin;
-  const nudge = ([x, y]: Vec2): Vec2 => [x + 0.08, y - 0.08];
-  twin.outline = twin.outline.map(nudge);
-  twin.holes = twin.holes.map((l) => l.map(nudge));
-  wb.pieces.splice(i + 1, 0, twin);
-  selectedPiece = twin.id;
-  syncWorkbench();
-  commit();
-  renderStuffPanel();
-  flashPart();
-  autosaveThing();
-}
-
-// Copy and paste (Ctrl+C, Ctrl+V): a part and everything on it, or a stuff
-// piece (both sides when mirrored). Kept while the page is open, so it pastes
-// into another creature or thing too; each paste lands a little further down.
-type Clip = { kind: 'part'; limb: LimbClip; parts: Record<string, PartState>; pastes: number } | { kind: 'piece'; pieces: Piece[]; pastes: number };
-let clip: Clip | null = null;
-
-/** Copy whatever's picked. False when nothing copyable is. */
-function copyPicked(): boolean {
-  if (drawState || selectedAttachment) return false;
-  if (mode === 'stuff') {
-    const p = piece();
-    if (!p) return false;
-    const t = twinOf(p);
-    clip = { kind: 'piece', pieces: structuredClone(t ? [p, t] : [p]), pastes: 0 };
-    hint(t ? 'Copied both sides of the piece' : 'Copied the piece', 1400);
-    return true;
-  }
-  if (idle || placing || !creature.bones.get(selected)) return false;
-  const limb = copyLimb(state.rig, selected);
-  if (!limb) {
-    hint("The first part holds everything else, so it can't be copied", 2000, true);
-    return true;
-  }
-  const parts: Record<string, PartState> = {};
-  for (const d of limb.bones) for (const id of partIds(d)) if (state.parts[id]) parts[id] = structuredClone(state.parts[id]);
-  clip = { kind: 'part', limb, parts, pastes: 0 };
-  hint(limb.bones.length > 1 ? 'Copied the part and everything on it' : 'Copied the part', 1400);
-  return true;
-}
-
-/** Paste what was copied, if it fits where you are (a part in Shape or Look, a piece in Stuff). */
-function pasteClip(): boolean {
-  if (!clip || drawState) return false;
-  if (clip.kind === 'piece') {
-    if (mode !== 'stuff') return false;
-    const n = ++clip.pastes;
-    const ids = new Map(clip.pieces.map((p) => [p.id, uid()]));
-    // a mirrored pair only moves down, so it stays a mirror image
-    const dx = clip.pieces.length > 1 ? 0 : 0.08 * n;
-    const nudge = ([x, y]: Vec2): Vec2 => [x + dx, y - 0.08 * n];
-    const pasted = clip.pieces.map((p): Piece => {
-      const c: Piece = { ...structuredClone(p), id: ids.get(p.id)! };
-      if (p.twin) c.twin = ids.get(p.twin);
-      c.outline = c.outline.map(nudge);
-      c.holes = c.holes.map((l) => l.map(nudge));
-      return c;
-    });
-    workbench().pieces.push(...pasted);
-    selectedPiece = pasted[0].id;
-    syncWorkbench();
-    commit();
-    renderStuffPanel();
-    flashPart();
-    autosaveThing();
-    hint('Pasted', 1000);
-    return true;
-  }
-  if (mode === 'stuff' || placing) return false;
-  const c = clip;
-  // moved down when the original is still here, so the copy shows
-  const here = c.limb.bones.some((d) => state.rig.bones.some((b) => b.id === d.id));
-  const n = here ? ++c.pastes : 0;
-  rigEdit((rig) => {
-    const copies = pasteLimb(rig, c.limb, selected, [0, -0.18 * n, 0]);
-    for (const p of copies) if (c.parts[p.from]) state.parts[p.to] = structuredClone(c.parts[p.from]);
-    return copies;
-  }, true);
-  setIdle(false);
-  updateSkeletonVisibility();
-  flashPart();
-  hint('Pasted', 1000);
-  return true;
-}
-
-function deletePiece(id: string) {
-  if (drawState) exitDraw();
-  const wb = workbench();
-  // a mirrored pair goes together
-  const other = wb.pieces.find((p) => p.id === id)?.twin;
-  wb.pieces = wb.pieces.filter((p) => p.id !== id && p.id !== other);
-  if (selectedPiece === id || selectedPiece === other) selectedPiece = '';
-  if (other) hint('Deleted both sides (turn off Mirror to delete just one)', 2400);
-  syncWorkbench();
-  commit();
-  renderStuffPanel();
-  autosaveThing();
-}
-document.querySelectorAll<HTMLButtonElement>('#piece-kind button').forEach((b) => {
-  b.onclick = () =>
-    updatePiece((p) => {
-      const kind = b.dataset.kind as Piece['kind'];
-      if (kind === p.kind) return;
-      p.kind = kind;
-      p.thickness = kind === 'flat' ? 0.04 : kind === 'turned' ? 0.012 : 0.6;
-      if (kind === 'turned' && p.hollow === undefined) {
-        p.hollow = true;
-        p.open = true;
-      }
-    });
-});
-$<HTMLInputElement>('#piece-hollow').onchange = (e) => updatePiece((p) => (p.hollow = (e.target as HTMLInputElement).checked));
-$<HTMLInputElement>('#piece-open').onchange = (e) => updatePiece((p) => (p.open = (e.target as HTMLInputElement).checked));
-for (const [id, key] of [['#piece-thickness', 'thickness'], ['#piece-round', 'round'], ['#piece-z', 'z'], ['#piece-opacity', 'opacity'], ['#piece-blend-shape', 'blendShape'], ['#piece-blend-color', 'blendColor']] as const) {
-  const input = $<HTMLInputElement>(id);
-  input.oninput = () => updatePiece((p) => (p[key] = parseFloat(input.value)), false);
-  input.onchange = () => commit();
-}
-/** Piece colors go on the picked piece, or (All) on every piece of the thing */
-let pieceColorAll = false;
-/** `updatePiece` for colors and glow: on every piece with All picked */
-function updatePieceColor(fn: (p: Piece) => void, doCommit = true) {
-  updatePiece((p) => {
-    for (const q of pieceColorAll ? workbench().pieces : [p]) fn(q);
-  }, doCommit);
-}
-const pieceColorScope = scopeSeg('#piece-color-scope', () => pieceColorAll, (all) => (pieceColorAll = all));
-const pieceGlowFollow = glowFollowSeg(
-  '#piece-glow-follow',
-  () => piece(),
-  (f) =>
-    updatePieceColor((q) => {
-      if (f) q.glowFollow = f;
-      else delete q.glowFollow;
-    }),
-);
-const pieceSceneColors = sceneColorRow($('#piece-scene-colors'), () => piece()?.color, (c) => updatePieceColor((q) => (q.color = c)));
-glowSlider(
-  '#piece-glow',
-  (v) => {
-    updatePieceColor((p) => {
-      if (v > 0) p.glow = v;
-      else delete p.glow;
-    }, false);
-    pieceGlowFollow();
-  },
-  () => commit(),
-);
-$<HTMLInputElement>('#piece-color').oninput = (e) => updatePieceColor((p) => (p.color = (e.target as HTMLInputElement).value), false);
-$<HTMLInputElement>('#piece-color').onchange = () => {
-  commit();
-  renderStuffPanel();
-};
-$<HTMLInputElement>('#thing-name').oninput = (e) => {
-  workbench().name = (e.target as HTMLInputElement).value;
-};
-$<HTMLInputElement>('#thing-name').onchange = () => commit();
-$<HTMLInputElement>('#thing-bend').oninput = (e) => {
-  workbench().bend = parseFloat((e.target as HTMLInputElement).value);
-  syncWorkbench();
-};
-$<HTMLInputElement>('#thing-bend').onchange = () => commit();
-// wrap only shows where it's worn: settled (and passed on to wearers) on release
-$<HTMLInputElement>('#thing-wrap-smooth').onchange = (e) => {
-  workbench().wrapSmooth = parseFloat((e.target as HTMLInputElement).value);
-  commit();
-};
-$<HTMLInputElement>('#thing-wrap-strength').onchange = (e) => {
-  workbench().wrapStrength = parseFloat((e.target as HTMLInputElement).value);
-  commit();
-};
-document.querySelectorAll<HTMLButtonElement>('#thing-bend-mode button').forEach((b) => {
-  b.onclick = () => {
-    const wb = workbench();
-    wb.bendMode = b.dataset.bend as BendMode;
-    // picking a way to bend with nothing bent yet starts with a visible curve
-    if (!wb.bend) wb.bend = 0.4;
-    syncWorkbench();
-    commit();
-    renderStuffPanel();
-  };
-});
-/** Copy, download and delete buttons on a My stuff card, like the ones on My creations. */
-function thingActions(t: Thing): HTMLElement {
-  const actions = document.createElement('div');
-  actions.className = 'creation-actions thing-card-actions';
-  const action = (icon: string, title: string, fn: () => void) => {
-    const b = document.createElement('button');
-    b.className = 'piece-icon';
-    b.innerHTML = fa(icon);
-    b.title = title;
-    b.onclick = (e) => {
-      // the card itself opens the thing
-      e.stopPropagation();
-      fn();
-    };
-    actions.append(b);
-  };
-  action('copy', 'Make a copy of this thing to change', () => copyThing(t));
-  action('arrow-down-to-line', 'Download as a .stuff file', () => downloadThing(t));
-  action('trash', 'Remove from My stuff', () => deleteThing(t));
-  return actions;
-}
-/** The open thing is the one on the workbench (its latest changes may not be saved yet). */
-const latest = (t: Thing): Thing => (t.id === world.workbench?.id ? workbench() : t);
-function copyThing(t: Thing) {
-  const src = latest(t);
-  if (!src.pieces.length) return;
-  openOnBench({ ...stripThumb(src), id: uid(), name: `${src.name.trim() || 'Thing'} copy` });
-  hint('Made a copy to change', 1800);
-}
-function downloadThing(t: Thing) {
-  const src = latest(t);
-  // one kind of file: a save holding just this thing opens straight into My stuff
-  saveBundle({ creatures: [], stuff: [stripThumb(src)], rigs: [] }, src.name.trim() || 'thing');
-}
-function deleteThing(t: Thing) {
-  const src = latest(t);
-  const name = src.name.trim() || 'this thing';
-  if (src.pieces.length && !confirm(`Delete "${name}" from My stuff? (Creatures already wearing it keep their copy.)`)) return;
-  if (t.id !== world.workbench?.id) {
-    removeThing(t.id);
-    renderStuffPanel();
-    return;
-  }
-  clearTimeout(thingSaveTimer);
-  removeThing(t.id);
-  // carry on with the last thing in the list, or a fresh one
-  const next = collection().at(-1);
-  world.workbench = next ? stripThumb(next) : newThing();
-  selectedPiece = '';
-  $('#thing-saved').textContent = '';
-  syncWorkbench();
-  commit();
-  renderStuffPanel();
-}
-
-// attaching stuff to body parts
-
-/**
- * TransformControls whose centre scale cube follows the mouse sideways: left shrinks, right
- * grows (every 150px halves or doubles). Stock, it measures from the centre, and the cube sits
- * so close to it that there was hardly any room to shrink. The axis handles are the stock ones,
- * kept from going through zero.
- */
-class SideScaleControls extends TransformControls {
-  private scaleFromX = 0;
-  private readonly scaleFrom = new THREE.Vector3();
-
-  pointerDown(pointer: PointerEvent | null) {
-    super.pointerDown(pointer);
-    if (!this.dragging || !this.object || !pointer) return;
-    this.scaleFromX = pointer.x;
-    this.scaleFrom.copy(this.object.scale);
-  }
-
-  pointerMove(pointer: PointerEvent | null) {
-    const axis = this.axis;
-    const obj = this.object;
-    if (this.mode !== 'scale' || !this.dragging || !obj || !pointer || pointer.button !== -1) {
-      super.pointerMove(pointer);
-      return;
-    }
-    if (axis !== 'XYZ') {
-      // stock, an axis dragged through the centre goes to 0 and then negative, and jitter there
-      // flips the thing inside out every frame: stop each axis at 5% of where it started
-      super.pointerMove(pointer);
-      const s = obj.scale;
-      const f = this.scaleFrom;
-      if (s.x >= f.x * 0.05 && s.y >= f.y * 0.05 && s.z >= f.z * 0.05) return;
-      s.set(Math.max(s.x, f.x * 0.05), Math.max(s.y, f.y * 0.05), Math.max(s.z, f.z * 0.05));
-      obj.updateMatrixWorld();
-      this.dispatchEvent({ type: 'change' });
-      this.dispatchEvent({ type: 'objectChange' });
-      return;
-    }
-    // pointer.x runs -1..1 across the canvas
-    const px = ((pointer.x - this.scaleFromX) * (this.domElement as HTMLElement).clientWidth) / 2;
-    obj.scale.copy(this.scaleFrom).multiplyScalar(2 ** (px / 150));
-    obj.updateMatrixWorld();
-    this.dispatchEvent({ type: 'change' });
-    this.dispatchEvent({ type: 'objectChange' });
-  }
-}
-
-export const gizmo = new SideScaleControls(camera, canvas);
-gizmo.setSpace('local');
-gizmo.setSize(0.8);
-scene.add(gizmo.getHelper());
-gizmo.addEventListener('dragging-changed', (e) => {
-  controls.enabled = !(e as unknown as { value: boolean }).value;
-});
-gizmo.addEventListener('objectChange', () => {
-  invalidate();
-  if (markGizmoHeld()) return;
-  if (piecePivot && gizmo.object === piecePivot) {
-    mirrorTwinLive();
-    return;
-  }
-  if (placing) {
-    creature.capturePlacement();
-    fitShadows();
-    return;
-  }
-  const a = currentAttachment();
-  const obj = gizmo.object;
-  if (!a || !obj) return;
-  a.position = obj.position.toArray() as V3;
-  a.quaternion = obj.quaternion.toArray() as [number, number, number, number];
-  a.scale = obj.scale.toArray() as V3;
-  creature.updateTwin(a.id);
-});
-gizmo.addEventListener('mouseDown', () => {
-  if (placing) gapBefore = floorGap();
-});
-gizmo.addEventListener('mouseUp', () => {
-  if (piecePivot && gizmo.object === piecePivot) {
-    bakePiece();
-    return;
-  }
-  // (a marking's gizmo is seen to in src/markingPanel.ts)
-  if (markGizmoHeld()) return;
-  // a rescaled felt attachment regrows its fuzz at the new size
-  if (selectedAttachment) creature.syncAttachments();
-  if (placing && gizmo.mode === 'translate' && lifted()) setKeepFloor(false, true);
-  commit();
-});
-
-export let selectedAttachment = '';
-
-function currentAttachment(): Attachment | undefined {
-  return state.attachments?.find((a) => a.id === selectedAttachment);
-}
-
-export function selectAttachment(id: string) {
-  const obj = creature.attachmentObject(id);
-  if (!obj) return deselectAttachment();
-  stopPlacing();
-  stopMarkTools();
-  selectedAttachment = id;
-  gizmo.showX = gizmo.showY = gizmo.showZ = true;
-  gizmo.attach(obj);
-  $('#attach-bar').hidden = false;
-  syncAttachBar();
-  updateSkeletonVisibility();
-  renderCreatureStuff();
-}
-
-export function deselectAttachment() {
-  selectedAttachment = '';
-  if (!placing) gizmo.detach();
-  $('#attach-bar').hidden = true;
-  $('#attach-mat-pop').hidden = true;
-  // (also called while a world is being swapped, between creatures)
-  if (creature) updateSkeletonVisibility();
-  renderCreatureStuff();
-}
-
-// arranging creatures in the scene: the same gizmo moves, turns and resizes
-// a whole creature anywhere in 3D
-
-export let placing = false;
-type PlaceMode = 'translate' | 'rotate' | 'scale';
-
-function setPlaceMode(m: PlaceMode) {
-  gizmo.setMode(m);
-  // move along the scene's axes; turn and size about the creature's own
-  gizmo.setSpace(m === 'translate' ? 'world' : 'local');
-  document.querySelectorAll<HTMLButtonElement>('#place-bar [data-place]').forEach((b) => b.classList.toggle('on', b.dataset.place === m));
-}
-
-/** Arrange: rest the creature on the floor (its lowest point, stuff included, at floor level). */
-function placeOnFloor() {
-  const box = creatureBox(true);
-  if (box.isEmpty()) return;
-  creature.root.position.y -= box.min.y;
-  creature.capturePlacement();
-  setKeepFloor(true);
-  fitShadows();
-  commit();
-}
-
-export function startPlacing() {
-  if (mode === 'stuff') return;
-  if (selectedAttachment) deselectAttachment();
-  stopMarkTools();
-  placing = true;
-  gizmo.showX = gizmo.showY = gizmo.showZ = true;
-  gizmo.attach(creature.root);
-  setPlaceMode('translate');
-  $('#place-bar').hidden = false;
-  $('#place-name').textContent = creatureLabel(world.active);
-  $('#cr-place').classList.add('on');
-  updateSkeletonVisibility();
-}
-
-export function stopPlacing() {
-  if (!placing) return;
-  placing = false;
-  gizmo.detach();
-  gizmo.setSpace('local');
-  $('#place-bar').hidden = true;
-  $('#cr-place').classList.remove('on');
-  updateSkeletonVisibility();
-}
-
-document.querySelectorAll<HTMLButtonElement>('#place-bar [data-place]').forEach((b) => {
-  b.onclick = () => setPlaceMode(b.dataset.place as PlaceMode);
-});
-$('#place-floor').onclick = () => placeOnFloor();
-$('#place-reset').onclick = () => {
-  // upright, normal size, still facing the same way
-  const yaw = new THREE.Euler().setFromQuaternion(creature.root.quaternion, 'YXZ').y;
-  creature.root.rotation.set(0, yaw, 0);
-  creature.root.scale.setScalar(1);
-  creature.root.position.y = 0;
-  creature.capturePlacement();
-  setKeepFloor(true);
-  settleOnFloor();
-  fitShadows();
-  commit();
-};
-$('#place-done').onclick = () => {
-  stopPlacing();
-  commit(); // records the move if anything changed (no-op otherwise)
-};
-
-// the creature switcher
-
-/** creatures whose parts are shown under their row (the > beside it) */
-export const partsOpen = new WeakSet<CreatureState>();
-
-function renderCreatureBar() {
-  const el = $('#creature-rows');
-  el.innerHTML = '';
-  // with others around, the camera can frame just this one
-  $('#view-bar [data-view="selection"]').hidden = world.creatures.length < 2;
-  // one row per creature, like the pieces in Stuff: pick (or rename) it, copy it, or remove it
-  world.creatures.forEach((s, i) => {
-    const row = document.createElement('div');
-    row.className = 'piece-row creature-row';
-    row.classList.toggle('active', i === world.active && !idle);
-    const pick = document.createElement('button');
-    pick.className = 'piece-pick';
-    const color = Object.values(s.parts)[0]?.color ?? '#ccc';
-    pick.innerHTML = `<i style="background:${color}"></i>`;
-    const name = document.createElement('span');
-    name.className = 'creature-name';
-    name.textContent = creatureLabel(i);
-    pick.append(name);
-    pick.title = i === world.active && !idle ? `${creatureLabel(i)}: click to rename` : creatureLabel(i);
-    pick.onclick = () => {
-      if (i === world.active && !idle) return renameCreatureRow(pick);
-      setIdle(false);
-      activate(i);
-      flashPart();
-      save();
-      renderUI();
-    };
-    const dup = document.createElement('button');
-    dup.className = 'piece-icon';
-    dup.innerHTML = fa('copy');
-    dup.title = 'Copy this creature';
-    dup.onclick = () => duplicateCreature(i);
-    const del = document.createElement('button');
-    del.className = 'piece-icon';
-    del.innerHTML = fa('trash');
-    del.title = world.creatures.length < 2 ? 'The scene needs at least one creature' : 'Remove this creature from the scene';
-    del.disabled = world.creatures.length < 2;
-    del.onclick = () => removeCreature(i);
-    const open = partsOpen.has(s);
-    const fold = document.createElement('button');
-    fold.className = 'piece-icon parts-fold' + (open ? ' open' : '');
-    fold.innerHTML = '<i class="fa-duotone fa-regular fa-chevron-down" aria-hidden="true"></i>';
-    fold.title = open ? 'Hide its parts' : 'Show its parts';
-    fold.setAttribute('aria-expanded', String(open));
-    fold.onclick = () => {
-      if (open) partsOpen.delete(s);
-      else partsOpen.add(s);
-      renderCreatureBar();
-    };
-    row.prepend(fold);
-    row.append(pick, dup, del);
-    el.append(row);
-    if (open) el.append(partRows(i));
-  });
-}
-
-/**
- * One row per part of creature `i` (a pair is one row), each under the part it hangs off and
- * indented a step deeper: its color, name and motion; clicking one picks it, and its icons copy
- * or delete it (with everything on it).
- */
-function partRows(i: number): HTMLElement {
-  const s = world.creatures[i];
-  const c = creatures[i];
-  const list = document.createElement('div');
-  list.className = 'part-rows';
-  const picked = i === world.active && !idle ? creature.bones.get(selected)?.src : undefined;
-  // a pair is listed by its left twin, so a part on the right twin hangs off that row too
-  const row = (b: BoneRT) => (b.def.mirrorOf ? (c.bones.get(b.def.mirrorOf) ?? b) : b);
-  const kids = new Map<BoneRT | null, BoneRT[]>();
-  for (const b of c.list.filter((o) => !o.def.mirrorOf)) {
-    const up = b.parent ? row(b.parent) : null;
-    kids.set(up, [...(kids.get(up) ?? []), b]);
-  }
-  const pickIt = (id: string) => {
-    if (i !== world.active || idle) {
-      setIdle(false);
-      activate(i);
-    }
-    selectPart(id);
-  };
-  const add = (b: BoneRT, depth: number) => {
-    const p = s.parts[b.src];
-    if (p) list.append(partRow(i, b, p, depth, b.src === picked, pickIt));
-    for (const k of kids.get(b) ?? []) add(k, depth + 1);
-  };
-  for (const b of kids.get(null) ?? []) add(b, 0);
-  return list;
-}
-
-function partRow(i: number, b: BoneRT, p: PartState, depth: number, active: boolean, pickIt: (id: string) => void): HTMLElement {
-  const s = world.creatures[i];
-  const c = creatures[i];
-  const twin = c.list.find((o) => o.def.mirrorOf === b.def.id);
-  const anim = s.anims?.[b.def.id] ?? (twin && s.anims?.[twin.def.id]);
-  const kind = anim && ANIM_KINDS.find((k) => k.kind === anim.kind);
-  const name = b.def.sideSign !== 0 ? b.def.name.replace(/ \((L|R)\)$/, '') : b.def.name;
-  const row = document.createElement('div');
-  row.className = 'part-row' + (active ? ' active' : '');
-  row.style.setProperty('--depth', String(depth));
-  row.dataset.bone = b.def.id;
-  const btn = document.createElement('button');
-  btn.className = 'part-pick';
-  btn.innerHTML =
-    `<i style="background:${p.color}"></i><span class="part-name">${name}${twin ? ' ×2' : ''}</span>` +
-    (p.outline ? `<span class="part-mark" title="Drawn">${fa('check')}</span>` : '') +
-    (kind ? `<span class="part-mark" title="Moves: ${kind.name}"><i class="fa-duotone fa-regular fa-${kind.icon}" aria-hidden="true"></i></span>` : '');
-  btn.title = (kind ? `${name}: moves (${kind.name})` : name) + ' · double-click to rename';
-  btn.onclick = () => {
-    // picking re-draws the list, so a double click lands on a new row: tell it by the time between
-    const again = lastPartClick.id === b.def.id && performance.now() - lastPartClick.at < 450;
-    lastPartClick = { id: b.def.id, at: again ? 0 : performance.now() };
-    pickIt(b.def.id);
-    save();
-    if (again) renamePartRow(b.def.id);
-  };
-  // the first part holds everything else: it can't be copied or removed
-  const isRoot = !b.parent;
-  const dup = document.createElement('button');
-  dup.className = 'piece-icon';
-  dup.innerHTML = fa('copy');
-  dup.title = isRoot ? "The first part holds everything else, so it can't be copied" : `Copy ${name} and everything attached to it`;
-  dup.disabled = isRoot;
-  dup.onclick = () => {
-    pickIt(b.def.id);
-    rigEdit((rig) => duplicateLimb(rig, selected), true);
-  };
-  const del = document.createElement('button');
-  del.className = 'piece-icon';
-  del.innerHTML = fa('trash');
-  del.title = isRoot ? "The first part holds everything else, so it can't be removed" : `Remove ${name} and everything attached to it`;
-  del.disabled = isRoot;
-  del.onclick = () => {
-    pickIt(b.def.id);
-    removePart();
-  };
-  row.append(btn, dup, del);
-  return row;
-}
-
-let lastPartClick = { id: '', at: 0 };
-
-/** Turns the picked part's row (in the creature bar) into a name box: Enter or clicking away keeps it, Escape doesn't. */
-function renamePartRow(id: string) {
-  const row = [...document.querySelectorAll<HTMLElement>('#creature-rows .part-row')].find((r) => r.dataset.bone === id);
-  const label = row?.querySelector('.part-name');
-  if (!row || !label) return;
-  const input = document.createElement('input');
-  input.className = 'text chip-name';
-  input.maxLength = 60;
-  input.value = partName();
-  label.replaceWith(input);
-  input.onclick = (e) => e.stopPropagation(); // clicking in the box doesn't pick the part again
-  input.focus();
-  input.select();
-  let done = false;
-  const finish = (keep: boolean) => {
-    if (done) return;
-    done = true;
-    if (keep && input.value.trim() && input.value.trim() !== partName()) setPartName(input.value, true);
-    else renderCreatureBar();
-  };
-  input.onkeydown = (e) => {
-    e.stopPropagation(); // typing a name isn't a shortcut (Backspace would delete the part)
-    if (e.key === 'Enter') finish(true);
-    else if (e.key === 'Escape') finish(false);
-  };
-  input.onblur = () => finish(true);
-}
-
-/** Turns the active creature's row into a name box: Enter or clicking away keeps it, Escape doesn't. */
-function renameCreatureRow(btn: HTMLButtonElement) {
-  const before = state.name;
-  const input = document.createElement('input');
-  input.className = 'text chip-name';
-  input.maxLength = 60;
-  input.placeholder = `Creature ${world.active + 1}`;
-  input.value = state.name ?? '';
-  btn.replaceWith(input);
-  input.focus();
-  input.select();
-  let done = false;
-  const finish = (keep: boolean) => {
-    if (done) return;
-    done = true;
-    state.name = keep ? input.value.trim() || undefined : before;
-    renderCreatureBar();
-    if (keep && state.name !== before) commit();
-  };
-  input.onkeydown = (e) => {
-    e.stopPropagation(); // typing a name isn't a shortcut
-    if (e.key === 'Enter') finish(true);
-    else if (e.key === 'Escape') finish(false);
-  };
-  input.onblur = () => finish(true);
-}
-
-/** A free spot on the floor to the right of everyone else. */
-function freeSpot(): Placement {
-  let maxX = -Infinity;
-  for (const c of creatures) {
-    const box = new THREE.Box3();
-    c.root.updateMatrixWorld(true);
-    for (const m of c.meshes()) box.expandByObject(m);
-    if (!box.isEmpty()) maxX = Math.max(maxX, box.max.x);
-  }
-  return { x: Number.isFinite(maxX) ? Math.round((maxX + 0.9) * 100) / 100 : 0, z: 0, yaw: 0 };
-}
-
-function addCreature(s: CreatureState) {
-  setIdle(false);
-  exitDraw();
-  world.creatures.push(s);
-  creatures.push(makeCreature(s));
-  activate(world.creatures.length - 1);
-  commit();
-  renderUI();
-  frameAll();
-}
-
-$('#cr-add').onclick = () => {
-  const s = defaultState(freshRig(state.rig));
-  s.style = state.style;
-  s.materialSettings = structuredClone(state.materialSettings);
-  s.placement = freeSpot();
-  addCreature(s);
-  hintOnce('Added a new creature: click any creature to switch between them', 2600);
-};
-function duplicateCreature(i: number) {
-  const src = world.creatures[i];
-  const s = structuredClone(src);
-  delete s.workbench;
-  s.name = src.name?.trim() ? `${src.name.trim()} copy` : undefined;
-  // same size, turn and height; just moved over to free floor
-  const spot = freeSpot();
-  s.placement = { ...(src.placement ?? spot), x: spot.x, z: spot.z };
-
-  addCreature(s);
-}
-function removeCreature(i: number) {
-  if (world.creatures.length < 2) return;
-  const label = creatureLabel(i); // no are-you-sure: undo brings it back
-  exitDraw();
-  stopPlacing();
-  if (i !== world.active) activate(i);
-  creatures[i].dispose();
-  creatures.splice(i, 1);
-  world.creatures.splice(i, 1);
-  setCreature(undefined as unknown as Creature); // the old one is gone; don't try to reset it
-  activate(Math.max(0, i - 1));
-  commit();
-  renderUI();
-  hint(`Removed ${label}: Ctrl+Z brings it back`, 2600);
-}
-$('#cr-place').onclick = () => {
-  if (!placing) return startPlacing();
-  stopPlacing();
-  commit();
-};
-
-function syncAttachBar() {
-  const a = currentAttachment();
-  if (!a) return;
-  document.querySelectorAll<HTMLButtonElement>('#attach-bar [data-gizmo]').forEach((b) => b.classList.toggle('on', b.dataset.gizmo === gizmo.mode));
-  const bone = creature.bones.get(a.bone);
-  $('#attach-mirror-label').hidden = !bone || !creature.mirrorBoneOf(bone);
-  $<HTMLInputElement>('#attach-mirror').checked = a.mirror;
-  $('#attach-mirror-label').classList.toggle('on', a.mirror);
-  $<HTMLInputElement>('#attach-wrap').checked = !!a.wrap;
-  $('#attach-wrap-label').classList.toggle('on', !!a.wrap);
-  $('#attach-name').textContent = a.thing.name;
-  if (!$('#attach-mat-pop').hidden) renderAttachMaterial();
-}
-
-/** The piece of the picked stuff its colors go on (picked in its Stuff material popover) */
-let attachPieceId = '';
-function attachPiece(): Piece | undefined {
-  const a = currentAttachment();
-  return a?.thing.pieces.find((p) => p.id === attachPieceId) ?? a?.thing.pieces[0];
-}
-/** Change the picked stuff's color or glow: on its piece, or (All) on every piece of it */
-function updateAttachColor(fn: (p: Piece) => void, doCommit = true) {
-  const a = currentAttachment();
-  const p = attachPiece();
-  if (!a || !p) return;
-  for (const q of pieceColorAll ? a.thing.pieces : [p]) fn(q);
-  creature.sync();
-  if (doCommit) {
-    commit();
-    renderAttachMaterial();
-  }
-}
-const attachColorScope = scopeSeg(
-  '#attach-color-scope',
-  () => pieceColorAll,
-  (all) => {
-    pieceColorAll = all;
-    pieceColorScope();
-  },
-);
-const attachGlowFollow = glowFollowSeg('#attach-glow-follow', attachPiece, (f) =>
-  updateAttachColor((q) => {
-    if (f) q.glowFollow = f;
-    else delete q.glowFollow;
-  }),
-);
-const attachSceneColors = sceneColorRow($('#attach-scene-colors'), () => attachPiece()?.color, (c) => updateAttachColor((q) => (q.color = c)));
-glowSlider(
-  '#attach-glow',
-  (v) => {
-    updateAttachColor((p) => {
-      if (v > 0) p.glow = v;
-      else delete p.glow;
-    }, false);
-    attachGlowFollow();
-  },
-  () => commit(),
-);
-$<HTMLInputElement>('#attach-color').oninput = (e) => updateAttachColor((p) => (p.color = (e.target as HTMLInputElement).value), false);
-$<HTMLInputElement>('#attach-color').onchange = () => {
-  commit();
-  renderAttachMaterial();
-};
-
-function renderAttachMaterial() {
-  const a = currentAttachment();
-  if (!a) return;
-  const p = attachPiece()!;
-  const several = a.thing.pieces.length > 1;
-  // which piece: a button per piece, in its color
-  const pieces = $('#attach-pieces');
-  pieces.hidden = !several;
-  pieces.replaceChildren(
-    ...a.thing.pieces.map((q, i) => {
-      const b = document.createElement('button');
-      b.className = 'piece-pick';
-      b.classList.toggle('active', q === p);
-      b.innerHTML = `<i style="background:${q.color}"></i>`;
-      b.append(` ${i + 1}`);
-      b.title = `Piece ${i + 1}`;
-      b.onclick = () => {
-        attachPieceId = q.id;
-        renderAttachMaterial();
-      };
-      return b;
-    }),
-  );
-  $('#attach-color-scope').hidden = !several;
-  attachColorScope();
-  const sw = $('#attach-swatches');
-  sw.replaceChildren(
-    ...SWATCHES.map((c) => {
-      const b = document.createElement('button');
-      b.style.background = c;
-      b.title = c;
-      b.classList.toggle('active', c.toLowerCase() === p.color.toLowerCase());
-      b.onclick = () => updateAttachColor((q) => (q.color = c));
-      return b;
-    }),
-  );
-  $<HTMLInputElement>('#attach-color').value = p.color;
-  $<HTMLInputElement>('#attach-glow').value = String(p.glow ?? 0);
-  attachGlowFollow();
-  attachSceneColors();
-  const part = state.parts[creature.bones.get(a.bone)?.src ?? ''];
-  renderThingMaterial(a.thing, [...new Set(a.thing.pieces.map((p) => p.style))], $('#attach-mat-body'), part?.style ?? state.style);
-}
-
-function attachThing(t: Thing) {
-  const bone = creature.bones.get(selected);
-  if (!bone) return;
-  const a: Attachment = {
-    id: uid(),
-    bone: selected,
-    thing: stripThumb(t),
-    position: creature.attachPoint(selected),
-    quaternion: [0, 0, 0, 1],
-    scale: [1, 1, 1],
-    mirror: !!creature.twinOf(bone),
-  };
-  state.attachments = [...(state.attachments ?? []), a];
-  creature.sync();
-  commit();
-  $('#attach-pop').hidden = true;
-  selectAttachment(a.id);
-  hintOnce('Drag the arrows to place it; switch to rotate or scale in the top bar', 3000);
-}
-
-// carrying eyes or stuff from a menu onto the creature: while it's over the
-// creature it's really there (exactly where it would land), and letting go
-// keeps it
-
-let carry: {
-  what: 'eyes' | Thing;
-  ghost: HTMLElement;
-  /** the eye pair (index) or attachment (id) standing in while over the creature */
-  preview: number | string | null;
-  /** the thing's extent in its own frame, to sit it on the surface */
-  box?: THREE.Box3;
-} | null = null;
-/** when a carry ended: the click that follows it isn't a click */
-let carriedAt = 0;
-
-/** Press and drag `el` to carry what it stands for onto the creature; a plain click still works as before. */
-function carryFrom(el: HTMLElement, what: () => 'eyes' | Thing | null, ghost: () => string) {
-  // the browser's own drag (of a thumbnail picture) would cancel the pointer and end the carry
-  el.addEventListener('dragstart', (e) => e.preventDefault());
-  el.addEventListener('pointerdown', (e) => {
-    if (e.button !== 0) return;
-    const x0 = e.clientX, y0 = e.clientY;
-    const move = (ev: PointerEvent) => {
-      if (!carry) {
-        if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < 6) return;
-        const w = what();
-        if (!w) return;
-        const g = document.createElement('div');
-        g.className = 'carry-ghost';
-        g.innerHTML = ghost();
-        document.body.append(g);
-        carry = { what: w, ghost: g, preview: null };
-        document.body.classList.add('carrying');
-      }
-      carryTo(ev.clientX, ev.clientY);
-    };
-    const up = (ev: PointerEvent) => {
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
-      window.removeEventListener('pointercancel', up);
-      if (!carry) return;
-      endCarry(ev.type === 'pointerup');
-      carriedAt = performance.now();
-    };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
-    window.addEventListener('pointercancel', up);
-  });
-  el.addEventListener(
-    'click',
-    (e) => {
-      if (performance.now() - carriedAt > 300) return;
-      e.stopImmediatePropagation();
-      e.preventDefault();
-    },
-    true,
-  );
-}
-
-/** Where a carried thing's middle goes, and how it's turned, to sit on the surface at `hit` (in its part's frame). */
-function sitOnSurface(hit: NonNullable<ReturnType<Creature['surfaceAt']>>, box: THREE.Box3): { position: V3; quaternion: [number, number, number, number] } {
-  const rootQ = creature.root.getWorldQuaternion(new THREE.Quaternion());
-  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(rootQ);
-  // upright, facing out from the surface (on top of something: facing the creature's front)
-  const face = hit.normal.clone().addScaledVector(up, -hit.normal.dot(up));
-  if (face.lengthSq() < 0.1) face.set(0, 0, 1).applyQuaternion(rootQ);
-  face.normalize();
-  const side = new THREE.Vector3().crossVectors(up, face);
-  const turn = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(side, up, face));
-  // pushed out until it rests on the surface, just sunk in a little
-  const out = hit.normal.clone().applyQuaternion(turn.clone().invert()).negate();
-  let reach = 0;
-  for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) reach = Math.max(reach, out.x * x + out.y * y + out.z * z);
-  const scale = creature.root.getWorldScale(new THREE.Vector3()).x;
-  const at = hit.point.clone().addScaledVector(hit.normal, reach * scale * 0.85);
-  const pivotQ = hit.bone.pivot.getWorldQuaternion(new THREE.Quaternion());
-  const q = pivotQ.invert().multiply(turn);
-  return { position: round4(hit.bone.pivot.worldToLocal(at)), quaternion: q.toArray().map((v) => Math.round(v * 1e5) / 1e5) as [number, number, number, number] };
-}
-
-/** The extent of something, in its own frame. */
-function ownBox(obj: THREE.Object3D): THREE.Box3 {
-  obj.updateWorldMatrix(true, true);
-  const inv = obj.matrixWorld.clone().invert();
-  const box = new THREE.Box3();
-  const m = new THREE.Matrix4();
-  obj.traverse((o) => {
-    if (!(o instanceof THREE.Mesh)) return;
-    if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
-    box.union(o.geometry.boundingBox!.clone().applyMatrix4(m.multiplyMatrices(inv, o.matrixWorld)));
-  });
-  return box;
-}
-
-/** Take the stand-in off the creature (the pointer has left it). */
-function dropPreview() {
-  if (!carry || carry.preview === null) return;
-  const p = carry.preview;
-  if (typeof p === 'number') state.eyes.pairs.splice(p, 1);
-  else state.attachments = (state.attachments ?? []).filter((a) => a.id !== p);
-  carry.preview = null;
-  creature.sync();
-}
-
-function carryTo(x: number, y: number) {
-  if (!carry) return;
-  carry.ghost.style.transform = `translate(${x}px, ${y}px)`;
-  // only over the 3D view itself (not a menu on top of it)
-  setRay(x, y);
-  const hit = document.elementFromPoint(x, y) === canvas && !idle ? creature.surfaceAt(raycaster) : null;
-  carry.ghost.classList.toggle('landing', !!hit);
-  if (!hit) return dropPreview();
-  if (carry.what === 'eyes') {
-    if (carry.preview === null) {
-      state.eyes.pairs.push({ size: 0.5, spacing: 0.5, height: 0.55 });
-      carry.preview = state.eyes.pairs.length - 1;
-    }
-    const pair = state.eyes.pairs[carry.preview as number];
-    // a limb (one of a mirrored pair, or a stalk) gets a single eye; the head gets a pair
-    const b = hit.bone;
-    const single = b.def.baseId !== state.rig.headId && (b.def.sideSign !== 0 || b.length > 1.6 * b.def.width);
-    if (!!pair.single !== single) pair.single = single || undefined;
-    moveEyesTo(carry.preview as number, 1, x, y);
-    return;
-  }
-  const thing = carry.what;
-  const id = carry.preview;
-  let a = state.attachments?.find((x) => x.id === id);
-  if (!a || a.bone !== hit.bone.def.id) {
-    // a different part: start over on it, so it rides that part
-    dropPreview();
-    a = { id: uid(), bone: hit.bone.def.id, thing: stripThumb(thing), position: [0, 0, 0], quaternion: [0, 0, 0, 1], scale: [1, 1, 1], mirror: !!creature.twinOf(hit.bone) };
-    state.attachments = [...(state.attachments ?? []), a];
-    carry.preview = a.id;
-    creature.sync();
-    const obj = creature.attachmentObject(a.id);
-    if (!carry.box && obj) carry.box = ownBox(obj);
-  }
-  Object.assign(a, sitOnSurface(hit, carry.box ?? new THREE.Box3(new THREE.Vector3(), new THREE.Vector3())));
-  creature.sync();
-}
-
-function endCarry(drop: boolean) {
-  if (!carry) return;
-  const c = carry;
-  if (!drop) dropPreview();
-  carry = null;
-  c.ghost.remove();
-  document.body.classList.remove('carrying');
-  if (c.preview === null) {
-    if (drop) hint(c.what === 'eyes' ? 'Drop the eyes onto your critter' : 'Drop it onto your critter to put it on', 1800);
-    return;
-  }
-  commit();
-  if (typeof c.preview === 'number') {
-    showEyes(c.preview);
-    hint('Drag the eyes to move them', 1800);
-  } else {
-    $('#attach-pop').hidden = true;
-    pickStuff(c.preview);
-  }
-}
-
-carryFrom($('#eyes-add'), () => 'eyes', () => fa('eye'));
-
-/** Everything the creature is wearing, under Parts: picking one goes to Look with it selected, as clicking it would. */
-function renderCreatureStuff() {
-  const el = $('#creature-stuff');
-  el.innerHTML = '';
-  const all = state.attachments ?? [];
-  $('#creature-stuff-sec').hidden = !all.length;
-  for (const a of all) {
-    const btn = document.createElement('button');
-    iconLabel(btn, fa('paperclip'), a.thing.name);
-    const src = creature.bones.get(a.bone)?.src;
-    if (src) btn.title = `On the ${partLabel(src).toLowerCase()}`;
-    btn.classList.toggle('active', a.id === selectedAttachment);
-    btn.onclick = () => (a.id === selectedAttachment ? deselectAttachment() : pickStuff(a.id));
-    el.append(btn);
-  }
-}
-
-/** Pick a piece of stuff in Shape or Look, with the part it's on picked too (that part's handles stay hidden meanwhile). */
-function pickStuff(id: string) {
-  const a = state.attachments?.find((x) => x.id === id);
-  if (a && creature.bones.has(a.bone)) selectPart(a.bone, false);
-  selectAttachment(id);
-}
-
-function pickAttachment(x: number, y: number): string | null {
-  setRay(x, y);
-  const hit = raycaster.intersectObjects(creature.attachmentMeshes(), false)[0];
-  return hit ? (hit.object.userData.attachmentId as string) : null;
-}
-
-$('#attach-pop-close').onclick = () => ($('#attach-pop').hidden = true);
-$('#rig-attach').onclick = () => {
-  closeTopPopovers();
-  $('#attach-pop').hidden = false;
-  renderCollection();
-};
-$('#attach-mat').onclick = () => {
-  const pop = $('#attach-mat-pop');
-  pop.hidden = !pop.hidden;
-  if (!pop.hidden) {
-    closeTopPopovers();
-    renderAttachMaterial();
-  }
-};
-$('#attach-mat-close').onclick = () => ($('#attach-mat-pop').hidden = true);
-document.querySelectorAll<HTMLButtonElement>('#attach-bar [data-gizmo]').forEach((b) => {
-  b.onclick = () => {
-    gizmo.setMode(b.dataset.gizmo as 'translate' | 'rotate' | 'scale');
-    syncAttachBar();
-  };
-});
-$<HTMLInputElement>('#attach-mirror').onchange = (e) => {
-  const a = currentAttachment();
-  if (!a) return;
-  a.mirror = (e.target as HTMLInputElement).checked;
-  creature.sync();
-  commit();
-  selectAttachment(a.id);
-};
-$<HTMLInputElement>('#attach-wrap').onchange = (e) => {
-  const a = currentAttachment();
-  if (!a) return;
-  a.wrap = (e.target as HTMLInputElement).checked || undefined;
-  creature.sync();
-  commit();
-  selectAttachment(a.id);
-};
-function removeAttachment() {
-  state.attachments = (state.attachments ?? []).filter((a) => a.id !== selectedAttachment);
-  deselectAttachment();
-  creature.sync();
-  commit();
-}
-$('#attach-remove').onclick = removeAttachment;
-// a copy lands a little to one side of the original, so it can be seen and dragged off it
-$('#attach-copy').onclick = () => {
-  const a = currentAttachment();
-  if (!a) return;
-  const [x, y, z] = a.position;
-  const copy: Attachment = { ...structuredClone(a), id: uid(), position: [x + 0.08, y + 0.08, z] };
-  state.attachments = [...(state.attachments ?? []), copy];
-  creature.sync();
-  commit();
-  selectAttachment(copy.id);
-};
-$('#attach-done').onclick = () => deselectAttachment();
-
-// files
-
-// The top-bar menus share the same corner of the viewport, so only one is open at a time.
-const POPOVERS: [button: string, pop: string][] = [['#trophy-btn', '#trophy-pop'], ['#library-btn', '#library-pop'], ['#file-btn', '#file-pop'], ['#settings-btn', '#settings-pop']];
-/** Open (or, if it's already open, close) one top-bar menu. Returns whether it's now open. */
-function togglePopover(pop: string): boolean {
-  const open = $(pop).hidden !== false;
-  for (const [b, p] of POPOVERS) {
-    $(p).hidden = !(open && p === pop);
-    $(b).classList.toggle('on', open && p === pop);
-  }
-  // one menu at a time: the Attach popups would sit under Creations or Trophies
-  if (open) {
-    closeAttachPops();
-    closeShortcutSheet();
-  }
-  return open;
-}
-function closeTopPopovers() {
-  for (const [b, p] of POPOVERS) {
-    $(p).hidden = true;
-    $(b).classList.remove('on');
-  }
-}
-function closeAttachPops() {
-  $('#attach-pop').hidden = true;
-  $('#attach-mat-pop').hidden = true;
-}
-
-$('#file-btn').onclick = () => {
-  if (!togglePopover('#file-pop')) return;
-  $<HTMLInputElement>('#creature-name').value = state.name ?? '';
-};
-$<HTMLInputElement>('#creature-name').oninput = (e) => {
-  state.name = (e.target as HTMLInputElement).value;
-  renderCreatureBar();
-};
-$<HTMLInputElement>('#creature-name').onchange = () => commit();
-/** Files are named after who's in the scene: "Bimble", or "Bimble-Twin-Creature 3". */
-function sceneFileName(): string {
-  return world.creatures.map((_, i) => creatureLabel(i)).join('-');
-}
-
-/** A creature as it goes into a file (the workbench isn't part of it). */
-function forFile(s: CreatureState): CreatureState {
-  const { workbench: _wb, ...data } = s;
-  return data;
-}
-
-// One kind of save: a .creature file holds everything (creatures, My stuff,
-// saved body plans and the backdrop). Opening one lets you pick what to bring in.
-
-/** The backdrop, floor, lights and depth of field. */
-interface SceneLook {
-  backdrop: string;
-  floor: typeof floorPrefs;
-  light: number;
-  dof: typeof dof;
-  /** where the view was: the camera, the spot it orbits, and whether it was flat (ortho) */
-  camera?: { pos: V3; target: V3; ortho?: boolean };
-}
-
-/** What a save holds. Older files (.scene, .stuff, .collection, single creatures) are read into one too. */
-interface Bundle {
-  name?: string;
-  active?: number;
-  creatures: CreatureState[];
-  stuff: Thing[];
-  rigs: RigState[];
-  look?: SceneLook;
-}
-
-function currentLook(): SceneLook {
-  const look: SceneLook = { backdrop, floor: { ...floorPrefs }, light: lightTurn, dof: { ...dof } };
-  // (the workbench has a view of its own; mid-flight, where it's flying to)
-  if (mode !== 'stuff') {
-    const r4 = (v: THREE.Vector3) => v.toArray().map((x) => Math.round(x * 1e4) / 1e4) as V3;
-    look.camera = { pos: r4(tween?.p1 ?? camera.position), target: r4(tween?.t1v ?? controls.target), ortho: sceneOrtho };
-  }
-  return look;
-}
-
-function saveBundle(b: Bundle, name: string) {
-  unlock('save');
-  downloadText(`${safeFileName(name, 'my-creatures')}.creature`, JSON.stringify(envelope('creature', b)));
-}
-
-$('#file-save').onclick = () => {
-  // its card in My creations shows it's saved
-  flushCreationSave();
-  saveBundle(
-    { active: world.active, creatures: world.creatures.map(forFile), stuff: collection(), rigs: savedRigs(), look: currentLook() },
-    sceneFileName(),
-  );
-  if (opened.id) noteSaved([opened.id], 'file');
-};
-$('#file-open').onclick = () => $<HTMLInputElement>('#file-input').click();
-$<HTMLInputElement>('#file-input').onchange = async (e) => {
-  const input = e.target as HTMLInputElement;
-  const file = input.files?.[0];
-  input.value = '';
-  if (!file) return;
-  try {
-    openFile(await file.text(), file.name);
-  } catch (err) {
-    hint(`${file.name}: ${(err as Error).message}`, 3500, true);
-  }
-};
-
-/** Read any CritterKiln file into a bundle. */
-function bundleFrom(text: string): Bundle {
-  const env = parseEnvelope(text);
-  const d = env.data as Record<string, unknown>;
-  const creaturesOf = (raw: unknown[]) => raw.map(migrate).filter((s): s is CreatureState => !!s);
-  if (env.kind === 'creature' && Array.isArray(d.creatures)) {
-    return {
-      name: d.name as string | undefined,
-      active: d.active as number | undefined,
-      creatures: creaturesOf(d.creatures),
-      stuff: ((d.stuff as Thing[] | undefined) ?? []).filter((t) => Array.isArray(t?.pieces)),
-      rigs: (d.rigs as RigState[] | undefined) ?? [],
-      look: d.look as SceneLook | undefined,
-    };
-  }
-  if (env.kind === 'creature') return { creatures: creaturesOf([d]), stuff: [], rigs: [] };
-  if (env.kind === 'scene') return { name: d.name as string | undefined, active: d.active as number | undefined, creatures: creaturesOf((d.creatures as unknown[]) ?? []), stuff: [], rigs: [] };
-  if (env.kind === 'stuff') {
-    if (!Array.isArray(d.pieces)) throw new Error('The stuff in this file could not be read.');
-    return { creatures: [], stuff: [d as unknown as Thing], rigs: [] };
-  }
-  return { creatures: [], stuff: (d.things as Thing[] | undefined) ?? [], rigs: (d.rigs as RigState[] | undefined) ?? [] };
-}
-
-function openFile(text: string, fileName = '') {
-  const env = parseEnvelope(text);
-  if (env.kind === 'library') {
-    void importCreations(env.data as LibraryFile);
-    return;
-  }
-  const b = bundleFrom(text);
-  for (const s of b.creatures) delete s.workbench; // the workbench belongs to the scene, not the file
-  if (!b.creatures.length && !b.stuff.length && !b.rigs.length && !b.look) throw new Error('There was nothing in this file that could be read.');
-  // a single thing comes straight into My stuff; anything with a creature asks
-  // whether it joins the scene or replaces it
-  if (!b.creatures.length && b.stuff.length === 1 && !b.rigs.length) {
-    loadBundle(b, { creatures: b.creatures.map(() => true), stuff: b.stuff.map(() => true), rigs: [], look: false }, false);
-    return;
-  }
-  showLoadPicker(b, b.name?.trim() || fileName.replace(/\.[^.]+$/, ''));
-}
-
-interface LoadChoice {
-  creatures: boolean[];
-  stuff: boolean[];
-  rigs: boolean[];
-  look: boolean;
-}
-
-/** Bring the chosen parts of a bundle in: alongside what's here, or in place of the scene. */
-/** Stuff these creatures are wearing (and any other things) joins My stuff, so it can be moved or worn again. */
-function keepInCollection(creatures: CreatureState[], things: Thing[] = []) {
-  const have = new Set(collection().map((t) => t.id));
-  for (const t of [...creatures.flatMap((s) => (s.attachments ?? []).map((a) => a.thing)), ...things]) {
-    if (have.has(t.id)) continue;
-    putThing(t);
-    have.add(t.id);
-  }
-}
-
-function loadBundle(b: Bundle, pick: LoadChoice, replace: boolean) {
-  const incoming = b.creatures.filter((_, i) => pick.creatures[i]);
-  const things = b.stuff.filter((_, i) => pick.stuff[i]);
-  const rigs = b.rigs.filter((_, i) => pick.rigs[i]);
-  exitDraw();
-  deselectAttachment();
-  stopPlacing();
-  for (const r of rigs) saveRig(r, r.name);
-
-  if (incoming.length && replace) {
-    // a new creation: the scene it replaces stays in My creations
-    leaveScene();
-    const active = Math.max(0, incoming.indexOf(b.creatures[b.active ?? 0]));
-    replaceWorld({ creatures: incoming, active, name: b.name }, []);
-    beginCreation(null, true);
-  }
-  // after the old scene is saved, so it keeps its own backdrop
-  // (the file's view only when it's the whole scene: added creatures are framed where they land)
-  const viewed = pick.look && b.look ? applyLook(b.look, replace && incoming.length > 0) : false;
-  keepInCollection(incoming, things);
-  if (incoming.length && !replace) {
-    // keep the file's own arrangement, shifted to free floor on the right
-    const spot = freeSpot();
-    const minX = Math.min(...incoming.map((s) => s.placement?.x ?? 0));
-    for (const s of incoming) {
-      s.placement = { ...s.placement, x: spot.x + ((s.placement?.x ?? 0) - minX), z: s.placement?.z ?? 0, yaw: s.placement?.yaw ?? 0 };
-      world.creatures.push(s);
-      creatures.push(makeCreature(s));
-    }
-    activate(world.creatures.length - 1);
-  }
-  commit();
-  renderUI();
-  renderCollection();
-  renderRigs();
-  if (incoming.length && mode !== 'stuff' && !viewed) {
-    if (replace) freshView();
-    else frameAll();
-  }
-
-  const bits = [
-    incoming.length === 1 ? incoming[0].name || 'a creature' : incoming.length ? `${incoming.length} creatures` : '',
-    things.length === 1 ? `"${things[0].name || 'a thing'}"` : things.length ? `${things.length} things` : '',
-    rigs.length ? `${rigs.length} body plan${rigs.length > 1 ? 's' : ''}` : '',
-    pick.look && b.look ? 'the backdrop' : '',
-  ].filter(Boolean);
-  hint(`${replace && incoming.length ? 'Opened' : 'Added'} ${bits.join(', ').replace(/, ([^,]*)$/, ' and $1')}`, 2400);
-}
-
-/** Put a saved look back; with `view`, its camera too. Whether the view was put back (else it wants framing). */
-function applyLook(l: SceneLook, view = true): boolean {
-  setBackdrop(l.backdrop);
-  Object.assign(floorPrefs, l.floor);
-  saveFloor();
-  applyFloor();
-  setLightTurn(l.light ?? 0);
-  applyLighting();
-  try {
-    localStorage.setItem(LIGHT_KEY, JSON.stringify({ turn: lightTurn }));
-  } catch {
-    /* ignore */
-  }
-  Object.assign(dof, l.dof);
-  saveDof();
-  applyDof();
-  renderBackdropUI();
-  if (!view || !l.camera) return false;
-  putView(l.camera, true);
-  return true;
-}
-
-/** Look at a scene the way it was saved: flown to, or (not `fly`) straight there. */
-function putView(v: NonNullable<SceneLook['camera']>, fly: boolean) {
-  setSceneOrtho(!!v.ortho);
-  try {
-    localStorage.setItem(ORTHO_KEY, sceneOrtho ? '1' : '0');
-  } catch {
-    /* ignore */
-  }
-  if (mode !== 'stuff') setOrtho(sceneOrtho);
-  const pos = new THREE.Vector3(...v.pos), target = new THREE.Vector3(...v.target);
-  if (fly) return flyTo(pos, target);
-  tween = null;
-  camera.position.copy(pos);
-  controls.target.copy(target);
-  controls.update();
-  invalidate();
-}
-
-/** The "what do you want from this file?" picker. */
-function showLoadPicker(b: Bundle, title: string) {
-  const pick: LoadChoice = {
-    creatures: b.creatures.map(() => true),
-    stuff: b.stuff.map(() => true),
-    rigs: b.rigs.map(() => true),
-    look: !!b.look,
-  };
-  // just one thing to bring in: no checklist, only "add or replace?"
-  const single = b.creatures.length + b.stuff.length + b.rigs.length + (b.look ? 1 : 0) === 1;
-  if (single && b.creatures[0]?.name?.trim()) title = b.creatures[0].name.trim();
-  $('#load-title').textContent = title ? `Open “${title}”` : 'Open';
-  $('#load-note').hidden = !single;
-  $('#load-all-row').hidden = single;
-  $('#load-list').hidden = single;
-  const list = $('#load-list');
-  list.innerHTML = '';
-  const boxes: HTMLInputElement[] = [];
-  const sync = () => {
-    const n = [...pick.creatures, ...pick.stuff, ...pick.rigs, pick.look && !!b.look].filter(Boolean).length;
-    const all = $<HTMLInputElement>('#load-all');
-    all.checked = n === boxes.length;
-    all.indeterminate = n > 0 && n < boxes.length;
-    $<HTMLButtonElement>('#load-add').disabled = n === 0;
-    // replacing the scene needs someone to replace it with
-    $<HTMLButtonElement>('#load-replace').disabled = !pick.creatures.some(Boolean);
-  };
-  const group = (label: string) => {
-    const h = document.createElement('div');
-    h.className = 'pop-sub';
-    h.textContent = label;
-    list.append(h);
-  };
-  const row = (icon: string, name: string, get: () => boolean, set: (v: boolean) => void) => {
-    const l = document.createElement('label');
-    l.className = 'load-row';
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.checked = get();
-    cb.onchange = () => {
-      set(cb.checked);
-      sync();
-    };
-    boxes.push(cb);
-    const ic = document.createElement('span');
-    ic.className = 'load-icon';
-    ic.innerHTML = icon;
-    const nm = document.createElement('span');
-    nm.textContent = name;
-    l.append(cb, ic, nm);
-    list.append(l);
-  };
-  if (b.creatures.length) {
-    group('Creatures');
-    b.creatures.forEach((s, i) => {
-      const color = Object.values(s.parts)[0]?.color ?? '#ccc';
-      row(`<i class="load-dot" style="background:${color}"></i>`, s.name?.trim() || `Creature ${i + 1}`, () => pick.creatures[i], (v) => (pick.creatures[i] = v));
-    });
-  }
-  if (b.stuff.length) {
-    group('Stuff');
-    b.stuff.forEach((t, i) => {
-      const icon = t.thumb ? `<img src="${t.thumb}" alt="" />` : fa('box');
-      row(icon, t.name?.trim() || 'Thing', () => pick.stuff[i], (v) => (pick.stuff[i] = v));
-    });
-  }
-  if (b.rigs.length) {
-    group('Body plans');
-    b.rigs.forEach((r, i) => row(faClassic('bone'), r.name, () => pick.rigs[i], (v) => (pick.rigs[i] = v)));
-  }
-  if (b.look) {
-    group('Scene');
-    row(`<i class="load-dot" style="background:${b.look.backdrop}"></i>`, b.look.camera ? 'Backdrop, lighting & view' : 'Backdrop & lighting', () => pick.look, (v) => (pick.look = v));
-  }
-  $<HTMLInputElement>('#load-all').onchange = (e) => {
-    const on = (e.target as HTMLInputElement).checked;
-    pick.creatures.fill(on);
-    pick.stuff.fill(on);
-    pick.rigs.fill(on);
-    pick.look = on && !!b.look;
-    for (const cb of boxes) cb.checked = on;
-    sync();
-  };
-  const close = () => ($('#load-pop').hidden = true);
-  $('#load-close').onclick = close;
-  $('#load-add').onclick = () => {
-    close();
-    loadBundle(b, pick, false);
-  };
-  $('#load-replace').onclick = () => {
-    close();
-    loadBundle(b, pick, true);
-  };
-  sync();
-  for (const [btn, p] of POPOVERS) {
-    $(p).hidden = true;
-    $(btn).classList.remove('on');
-  }
-  $('#load-pop').hidden = false;
-}
+initControls();
+initDrawing();
+initWorkbench();
+initAttach();
+initArrange();
+initCreatureBar();
+initAttachPanel();
+initCarry();
+initFiles();
 
 // My creations: the open scene saves itself into the library (src/library.ts)
 // as you go, and the library lists everything you've made
@@ -4521,7 +300,7 @@ interface CreationData {
 }
 type SavedCreation = Creation<CreationData>;
 /** A backup of the whole library, as one file. */
-interface LibraryFile {
+export interface LibraryFile {
   creations: SavedCreation[];
 }
 
@@ -4558,7 +337,7 @@ function saveCreationWhenSettled() {
 }
 
 /** Save straight away if a save is waiting (before the scene is swapped for another). */
-function flushCreationSave() {
+export function flushCreationSave() {
   if (opened.timer) saveCreationNow();
 }
 
@@ -4566,7 +345,7 @@ function flushCreationSave() {
  * Before the scene is swapped for another: the thing on the workbench goes in
  * My stuff, and the scene (My stuff too) is saved to My creations.
  */
-function leaveScene() {
+export function leaveScene() {
   exitDraw();
   saveWorkbenchNow();
   // My stuff belongs to the scene now: one with stuff in it is worth keeping
@@ -4633,7 +412,7 @@ async function writeCreation(record: SavedCreation) {
 }
 
 /** The open scene becomes creation `id` (null: not in the library yet). Undo starts over. */
-function beginCreation(id: string | null, keep: boolean, from?: SavedCreation) {
+export function beginCreation(id: string | null, keep: boolean, from?: SavedCreation) {
   clearTimeout(opened.timer);
   opened.timer = 0;
   opened.id = id;
@@ -4656,11 +435,11 @@ function beginCreation(id: string | null, keep: boolean, from?: SavedCreation) {
  * Swap every creature in the scene for these, and My stuff for `stuff`. The
  * workbench starts empty. Call leaveScene first to keep the old scene.
  */
-function replaceWorld(next: World, stuff: Thing[]) {
+export function replaceWorld(next: World, stuff: Thing[]) {
   exitDraw();
   clearTimeout(thingSaveTimer);
   setCollection(stuff);
-  selectedPiece = '';
+  setSelectedPiece('');
   $('#thing-saved').textContent = '';
   deselectAttachment();
   stopPlacing();
@@ -4800,7 +579,7 @@ function saveStatus(c: SavedCreation): { ok: boolean; text: string; title: strin
 }
 
 /** These creations just went into a file: their cards stop asking for a backup. */
-function noteSaved(ids: string[], how: SavedHow) {
+export function noteSaved(ids: string[], how: SavedHow) {
   const at = Date.now();
   opened.writing = opened.writing
     .then(() => markSaved(ids, how, at))
@@ -4980,7 +759,7 @@ $('#library-backup').onclick = () => void backupCreations();
 $('#library-import').onclick = () => $<HTMLInputElement>('#file-input').click();
 
 /** Bring a backup's creations into the library (where yours aren't newer). */
-async function importCreations(f: LibraryFile) {
+export async function importCreations(f: LibraryFile) {
   const incoming = (f.creations ?? []).filter((c) => c?.id && Array.isArray(c.data?.creatures));
   if (!incoming.length) return hint('There were no creations in this file', 2500, true);
   let added = 0;
@@ -5043,7 +822,7 @@ document.addEventListener('visibilitychange', () => {
 
 // UI
 
-const SWATCHES = [
+export const SWATCHES = [
   '#f26b5b', '#ff9f6b', '#f7c873', '#fff1c9', '#9fd98b', '#5fbf9f', '#7cc6e8', '#6d8fe0',
   '#b9a3e3', '#f6a5b5', '#e86aa6', '#c98b5e', '#8d6e63', '#fdfaf4', '#9a9aa6', '#3a3340',
 ];
@@ -5075,7 +854,7 @@ function sceneColors(): string[] {
 }
 
 /** A color picker's "In the scene" row, kept up to date as colors change anywhere. */
-function sceneColorRow(el: HTMLElement, current: () => string | undefined, pick: (c: string) => void): () => void {
+export function sceneColorRow(el: HTMLElement, current: () => string | undefined, pick: (c: string) => void): () => void {
   const render = () => {
     const colors = sceneColors();
     const now = current()?.toLowerCase();
@@ -5109,7 +888,7 @@ setSceneColors(sceneColors);
  * Where a glow comes from (Even / Bright / Dark, under its Glow slider; only
  * shown while it glows). Returns its redraw.
  */
-function glowFollowSeg(id: string, get: () => { glow?: number; glowFollow?: GlowFollow; markings?: Marking[] } | undefined, set: (f: GlowFollow | undefined) => void): () => void {
+export function glowFollowSeg(id: string, get: () => { glow?: number; glowFollow?: GlowFollow; markings?: Marking[] } | undefined, set: (f: GlowFollow | undefined) => void): () => void {
   const el = $(id);
   const buttons = [...el.querySelectorAll<HTMLButtonElement>('button')];
   const render = () => {
@@ -5132,7 +911,7 @@ function glowFollowSeg(id: string, get: () => { glow?: number; glowFollow?: Glow
 }
 
 /** A Glow slider: `set` while it's dragged, `done` when let go. */
-function glowSlider(id: string, set: (v: number) => void, done: () => void) {
+export function glowSlider(id: string, set: (v: number) => void, done: () => void) {
   const input = $<HTMLInputElement>(id);
   input.oninput = () => {
     set(parseFloat(input.value));
@@ -5141,7 +920,7 @@ function glowSlider(id: string, set: (v: number) => void, done: () => void) {
   input.onchange = () => done();
 }
 
-function partLabel(src: string): string {
+export function partLabel(src: string): string {
   const b = creature.bones.get(src)!;
   return b.def.sideSign !== 0 ? b.def.name.replace(/ \((L|R)\)$/, '') : b.def.name;
 }
@@ -5154,7 +933,7 @@ function selPart() {
   return state.parts[creature.bones.get(selected)!.src];
 }
 
-function selectPart(id: string, tips = true) {
+export function selectPart(id: string, tips = true) {
   setIdle(false);
   setSelected(id);
   creature.select(id);
@@ -5170,11 +949,11 @@ function shapeTips() {
 }
 
 let flashStart = 0;
-function flashPart() {
+export function flashPart() {
   flashStart = performance.now();
 }
 
-function renderRigs() {
+export function renderRigs() {
   const el = $('#rigs');
   el.innerHTML = '';
   const options = [
@@ -5286,7 +1065,7 @@ type SettingsOwner = { materialSettings?: CreatureState['materialSettings'] };
  * material of whatever wears it (type and settings: the body part it's on);
  * otherwise each piece keeps its own material, with sliders just for this item.
  */
-function renderThingMaterial(thing: Thing, styles: StyleId[], el: HTMLElement, wearerStyle: StyleId) {
+export function renderThingMaterial(thing: Thing, styles: StyleId[], el: HTMLElement, wearerStyle: StyleId) {
   el.innerHTML = '';
   // items from before inheriting meant this shared the creature's settings:
   // give them their own copy, looking just as they do now
@@ -5424,7 +1203,7 @@ let eyesFolded = (() => {
     return false;
   }
 })();
-function setEyesFolded(on: boolean) {
+export function setEyesFolded(on: boolean) {
   eyesFolded = on;
   try {
     localStorage.setItem(EYES_FOLD_KEY, on ? '1' : '0');
@@ -5606,7 +1385,7 @@ function colorParts(): PartState[] {
 }
 
 /** A Part | Everything toggle: shows `get()`, and `set`s it when clicked. */
-function scopeSeg(id: string, get: () => boolean, set: (all: boolean) => void): () => void {
+export function scopeSeg(id: string, get: () => boolean, set: (all: boolean) => void): () => void {
   const buttons = [...$(id).querySelectorAll<HTMLButtonElement>('button')];
   const render = () => {
     for (const b of buttons) b.classList.toggle('active', (b.dataset.scope === 'all') === get());
@@ -5742,7 +1521,7 @@ function renderMarkings() {
 }
 
 /** The workbench thing's markings, by piece. */
-const pieceMarks = new MarkingPanel(
+export const pieceMarks = new MarkingPanel(
   {
     unit: 'piece',
     whole: 'thing',
@@ -5824,7 +1603,7 @@ function setStyle(id: StyleId) {
  * template (or saved rig), so new creatures get its latest version. An edited
  * skeleton is kept as it is.
  */
-function freshRig(rig: RigState): RigState {
+export function freshRig(rig: RigState): RigState {
   if (rig.base.startsWith('saved:')) return structuredClone(savedRigs().find((r) => r.base === rig.base) ?? rig);
   const t = RIGS.find((r) => r.id === rig.base);
   return t ? rigFromTemplate(t) : structuredClone(rig);
@@ -5914,7 +1693,7 @@ function tintMode() {
 
 /** Apply a skeleton edit, give new bones a look, rebuild, and select the first new bone. */
 /** Give parts made by a rig edit their looks (and, for a split pair's right side, its own eyes). */
-function applyPartCopies(copies: PartCopy[], copyShape: boolean) {
+export function applyPartCopies(copies: PartCopy[], copyShape: boolean) {
   for (const c of copies) {
     const from = state.parts[c.from];
     if (from && !state.parts[c.to]) {
@@ -5931,7 +1710,7 @@ function applyPartCopies(copies: PartCopy[], copyShape: boolean) {
   }
 }
 
-function rigEdit(fn: (rig: RigState) => PartCopy[], copyShape: boolean) {
+export function rigEdit(fn: (rig: RigState) => PartCopy[], copyShape: boolean) {
   const copies = fn(state.rig);
   applyPartCopies(copies, copyShape);
   // an edited skeleton is no longer the saved/template one
@@ -6072,7 +1851,7 @@ export const rigPrefs: { lock: boolean; autoParent: boolean } = (() => {
   }
 })();
 let rigLock = rigPrefs.lock;
-function rigLocked() {
+export function rigLocked() {
   return rigLock;
 }
 function saveRigPrefs() {
@@ -6150,7 +1929,7 @@ export function rehang(c: Creature, rig: RigState, ids: string[]) {
   for (const [id, m] of moves) if (m) moveLimb(rig, id, m);
 }
 export const sceneName = (rig: RigState, id: string) => expandRig(rig).bones.find((b) => b.id === id)?.name ?? id;
-let pickingParent = false;
+export let pickingParent = false;
 function setPickingParent(on: boolean) {
   pickingParent = on;
   $('#set-parent').classList.toggle('on', on);
@@ -6159,7 +1938,7 @@ function setPickingParent(on: boolean) {
   else hint('');
 }
 /** Set parent: the picked part hangs off the part clicked. */
-function parentAt(x: number, y: number) {
+export function parentAt(x: number, y: number) {
   const target = pickPart(x, y);
   const id = selected;
   if (!target || !creature.bones.get(id)?.parent) return setPickingParent(false);
@@ -6214,7 +1993,7 @@ function editBone(fn: (d: BoneDef) => void) {
     creature.sync();
   });
 }
-function commitBoneEdit() {
+export function commitBoneEdit() {
   if (!state.rig.base.startsWith('custom')) state.rig.base = 'custom';
   commit();
   renderRigPanel();
@@ -6228,12 +2007,12 @@ function renameBone(commitIt: boolean) {
   setPartName($<HTMLInputElement>('#rig-title').value, commitIt);
 }
 /** The picked part's name (a pair shares one). */
-function partName() {
+export function partName() {
   const b = creature.bones.get(selected);
   return (b && state.rig.bones.find((d) => d.id === b.def.baseId)?.name) ?? '';
 }
 /** Names the picked part (both of a pair); a blank name is ignored. */
-function setPartName(raw: string, commitIt: boolean) {
+export function setPartName(raw: string, commitIt: boolean) {
   const b = creature.bones.get(selected);
   const def = b && state.rig.bones.find((d) => d.id === b.def.baseId);
   const name = raw.trim();
@@ -6314,7 +2093,7 @@ function mirrorPart() {
 $('#rig-mirror').onclick = () => mirrorPart();
 
 /** Delete the picked part and everything on it (the creature's root part stays). */
-function removePart() {
+export function removePart() {
   if (!creature.bones.get(selected)?.parent) {
     hint("The first part holds everything else, so it can't be removed", 2000, true);
     return;
@@ -6381,7 +2160,7 @@ hintEl.querySelector<HTMLButtonElement>('.hint-close')!.onclick = () => {
 /** Guidance shown since the page loaded: each tip is shown once a session (a reload brings them back). */
 const hintsShown = new Set<string>();
 /** A how-to tip, shown only the first time it comes up. Feedback on what was just done uses hint(). */
-function hintOnce(text: string, ms = 2000) {
+export function hintOnce(text: string, ms = 2000) {
   if (hintsShown.has(text)) return;
   hintsShown.add(text);
   hint(text, ms);
@@ -6516,7 +2295,7 @@ function openShortcutSheet() {
   renderShortcutSheet($('#keys-list'));
   $('#keys-reset').hidden = !hasCustomShortcuts();
 }
-function closeShortcutSheet() {
+export function closeShortcutSheet() {
   stopListening();
   $('#keys-pop').hidden = true;
 }
@@ -6578,7 +2357,7 @@ function setQuality(q: Quality) {
   }
   setCreature(undefined as unknown as Creature); // replaced wholesale
   activate(world.active);
-  benchKey = '';
+  setBenchKey('');
   syncWorkbench();
   fitShadows();
   saveSettings();
@@ -6785,7 +2564,7 @@ sceneColorRow($('#backdrop-scene-colors'), () => backdrop, (c) => {
   renderBackdrops();
 });
 /** The Backdrop section's controls, showing what's set (src/layout.ts puts them wherever the tab has them). */
-function renderBackdropUI() {
+export function renderBackdropUI() {
   renderBackdrops();
   renderFloorUI();
   $<HTMLInputElement>('#light-turn').value = String(lightTurn);
@@ -6884,14 +2663,14 @@ $<HTMLInputElement>('#ao').onchange = (e) => setAO((e.target as HTMLInputElement
 // depth of field: focus follows the orbit target, nudged by `offset`
 
 const DOF_KEY = 'creature-creator/dof';
-const dof: { enabled: boolean; offset: number; blur: number } = (() => {
+export const dof: { enabled: boolean; offset: number; blur: number } = (() => {
   try {
     return { enabled: false, offset: 0, blur: 0.35, ...JSON.parse(localStorage.getItem(DOF_KEY) ?? '{}') };
   } catch {
     return { enabled: false, offset: 0, blur: 0.35 };
   }
 })();
-let pickingFocus = false;
+export let pickingFocus = false;
 let focusMarkerUntil = 0;
 
 // a ring floating on the focus plane, shown briefly while focus changes
@@ -6903,7 +2682,7 @@ focusMarker.renderOrder = 1001;
 focusMarker.visible = false;
 scene.add(focusMarker);
 
-function saveDof() {
+export function saveDof() {
   try {
     localStorage.setItem(DOF_KEY, JSON.stringify(dof));
   } catch {
@@ -6915,7 +2694,7 @@ function focusDistance() {
   return Math.max(0.2, camera.position.distanceTo(controls.target) + dof.offset);
 }
 
-function applyDof() {
+export function applyDof() {
   // the workbench is always sharp; the photo blur comes back with the scene
   bokeh.enabled = dof.enabled && mode !== 'stuff';
   // blur 0..1 maps onto the lens aperture; maxblur caps the spread
@@ -6949,7 +2728,7 @@ function updateFocus(now: number) {
 }
 
 /** Click-to-focus: put the focus plane on whatever is under the pointer. */
-function focusAt(x: number, y: number) {
+export function focusAt(x: number, y: number) {
   setRay(x, y);
   const targets = mode === 'stuff' ? [board] : creatures.map((c) => c.root);
   const hit = raycaster.intersectObjects(targets, true).find((h) => h.object instanceof THREE.Mesh && h.object.visible);
@@ -7176,35 +2955,7 @@ $('#eye-front').onclick = () => {
   renderEyes();
   hint('Eyes facing front', 1400);
 };
-
-$('#reset-pose').onclick = () => {
-  creature.resetPose();
-  settleOnFloor();
-  commit();
-  hint('Pose reset', 1400);
-};
-$('#drop-floor').onclick = () => dropToFloor();
-$<HTMLInputElement>('#keep-floor').onchange = (e) => {
-  setKeepFloor((e.target as HTMLInputElement).checked);
-  settleOnFloor();
-  commit();
-};
-document.querySelectorAll<HTMLButtonElement>('#view-bar [data-view]').forEach((b) => (b.onclick = () => viewFrom(b.dataset.view!)));
-document.querySelectorAll<HTMLButtonElement>('#view-proj [data-proj]').forEach((b) => {
-  b.onclick = () => {
-    const on = b.dataset.proj === 'ortho';
-    // on the workbench it's just for now; in Shape and Look it's remembered
-    if (mode !== 'stuff') {
-      setSceneOrtho(on);
-      try {
-        localStorage.setItem(ORTHO_KEY, on ? '1' : '0');
-      } catch {
-        /* ignore */
-      }
-    }
-    setOrtho(on);
-  };
-});
+initFraming();
 
 $('#undo').onclick = undo;
 $('#redo').onclick = redo;
@@ -7216,7 +2967,7 @@ $('#spin').onclick = () => {
 $('#new').onclick = () => newCreation();
 
 /** Render one clean frame without handles or guides, then restore. */
-function withCleanScene<T>(fn: () => T): T {
+export function withCleanScene<T>(fn: () => T): T {
   const skel = handlesVisible();
   const helper = gizmo.getHelper();
   const gizmoShown = helper.visible;
@@ -7468,7 +3219,7 @@ function viewMenu(x: number, y: number) {
   if (mode === 'stuff') {
     const id = pickPiece(x, y);
     if (id) {
-      selectedPiece = id;
+      setSelectedPiece(id);
       flashPart();
       renderStuffPanel();
     }
@@ -7741,7 +3492,7 @@ function loop(now: number) {
     camera.position.lerpVectors(tween.p0, tween.p1, k);
     controls.target.lerpVectors(tween.t0v, tween.t1v, k);
     if (t >= 1) {
-      tween = null;
+      setTween(null);
       viewChanged();
     }
     invalidate(2);
@@ -7800,7 +3551,7 @@ let animT = 0;
 let animLast = 0;
 let animKey = '';
 export const animSecs = () => world.animSecs ?? 1.5;
-function animOn() {
+export function animOn() {
   return mode === ANIM_TAB;
 }
 const animMoving = () => animOn() && animPlaying && creatures.some((c) => c.state.anims && Object.keys(c.state.anims).length);
@@ -7894,7 +3645,7 @@ function stuffHere(): Attachment[] {
     return x.mirror && !!b && creature.mirrorBoneOf(b)?.def.id === selected;
   });
 }
-function pickAnimStuff(id: string) {
+export function pickAnimStuff(id: string) {
   const a = state.attachments?.find((x) => x.id === id);
   if (!a) return;
   if (creature.bones.has(a.bone) && (selected !== a.bone || idle)) selectPart(a.bone, false);
