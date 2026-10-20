@@ -1175,6 +1175,64 @@ export function duplicateLimb(rig: RigState, sceneId: string): PartCopy[] {
   return parts;
 }
 
+/** A bone and everything hanging off it, taken out to paste later (maybe into another creature). */
+export interface LimbClip {
+  /** definitions, the top one first */
+  bones: BoneDef[];
+}
+
+/** Copy out a bone and everything hanging off it. Null for the first part (it holds everything else). */
+export function copyLimb(rig: RigState, sceneId: string): LimbClip | null {
+  const f = findDef(rig, sceneId);
+  if (!f || !f.def.parent) return null;
+  const defs = subtreeDefs(rig, sceneId);
+  const bones = rig.bones.filter((b) => defs.has(b.id)).map((b) => structuredClone(b));
+  const top = bones.find((b) => b.id === f.def.id)!;
+  return { bones: [top, ...bones.filter((b) => b !== top)] };
+}
+
+/**
+ * Paste a copied limb: it hangs off the part it hung off when that's here,
+ * otherwise off scene bone `fallback`, moved by `offset`. Reports which
+ * copied parts (scene ids) became which new ones.
+ */
+export function pasteLimb(rig: RigState, clip: LimbClip, fallback: string, offset: V3): PartCopy[] {
+  const scene = expandRig(rig).bones;
+  const top = clip.bones[0];
+  const has = (id: string | undefined) => !!id && (scene.some((b) => b.id === id) || rig.bones.some((b) => b.id === id));
+  let parent = top.parent;
+  if (!has(parent)) {
+    const fb = scene.find((b) => b.id === fallback) ?? scene.find((b) => !b.parent)!;
+    // a pair hangs off a pair as a whole; anything else off one side
+    parent = top.mirror && fb.sideSign !== 0 ? fb.baseId : fb.id;
+  }
+  const idMap = new Map<string, string>();
+  const copies: BoneDef[] = [];
+  for (const d of clip.bones) {
+    const all = { ...rig, bones: [...rig.bones, ...copies] };
+    const taken = new Set(all.bones.flatMap((b) => [b.id, b.id + 'L', b.id + 'R']));
+    const nid = taken.has(d.id) || taken.has(d.id + 'L') ? uniqueId(all, d.id) : d.id;
+    idMap.set(d.id, nid);
+    copies.push({ ...structuredClone(d), id: nid, start: round3(add3(d.start, offset)), end: round3(add3(d.end, offset)) });
+  }
+  const remap = (p: string | undefined) => {
+    if (!p) return p;
+    if (idMap.has(p)) return idMap.get(p);
+    const m = p.match(/^(.*)([LR])$/); // single bone attached to one twin of a copied pair
+    if (m && idMap.has(m[1])) return idMap.get(m[1]) + m[2];
+    return p;
+  };
+  for (const c of copies) c.parent = remap(c.parent);
+  copies[0].parent = parent;
+  rig.bones.push(...copies);
+  const parts: PartCopy[] = [];
+  clip.bones.forEach((d, i) => {
+    const from = partIds(d), to = partIds(copies[i]);
+    to.forEach((t, j) => parts.push({ from: from[j] ?? from[0], to: t }));
+  });
+  return parts;
+}
+
 /** Remove a bone and everything hanging off it. Returns removed definition ids. */
 export function deleteLimb(rig: RigState, sceneId: string): BoneDef[] {
   const f = findDef(rig, sceneId);

@@ -91,6 +91,7 @@ import {
   RIGS,
   addLimb,
   canParent,
+  copyLimb,
   deleteLimb,
   deleteSavedRig,
   detachBone,
@@ -102,6 +103,7 @@ import {
   mirrorTarget,
   moveJoint,
   partIds,
+  pasteLimb,
   reattachBone,
   moveLimb,
   movedBases,
@@ -115,6 +117,7 @@ import {
   splitBone,
   unlinkPair,
   type BoneDef,
+  type LimbClip,
   type PartCopy,
   type PartSizes,
   type RigState,
@@ -3874,6 +3877,81 @@ function copyPiece(id: string) {
   flashPart();
   autosaveThing();
 }
+
+// Copy and paste (Ctrl+C, Ctrl+V): a part and everything on it, or a stuff
+// piece (both sides when mirrored). Kept while the page is open, so it pastes
+// into another creature or thing too; each paste lands a little further down.
+type Clip = { kind: 'part'; limb: LimbClip; parts: Record<string, PartState>; pastes: number } | { kind: 'piece'; pieces: Piece[]; pastes: number };
+let clip: Clip | null = null;
+
+/** Copy whatever's picked. False when nothing copyable is. */
+function copyPicked(): boolean {
+  if (drawState || selectedAttachment) return false;
+  if (mode === 'stuff') {
+    const p = piece();
+    if (!p) return false;
+    const t = twinOf(p);
+    clip = { kind: 'piece', pieces: structuredClone(t ? [p, t] : [p]), pastes: 0 };
+    hint(t ? 'Copied both sides of the piece' : 'Copied the piece', 1400);
+    return true;
+  }
+  if (idle || placing || !creature.bones.get(selected)) return false;
+  const limb = copyLimb(state.rig, selected);
+  if (!limb) {
+    hint("The first part holds everything else, so it can't be copied", 2000, true);
+    return true;
+  }
+  const parts: Record<string, PartState> = {};
+  for (const d of limb.bones) for (const id of partIds(d)) if (state.parts[id]) parts[id] = structuredClone(state.parts[id]);
+  clip = { kind: 'part', limb, parts, pastes: 0 };
+  hint(limb.bones.length > 1 ? 'Copied the part and everything on it' : 'Copied the part', 1400);
+  return true;
+}
+
+/** Paste what was copied, if it fits where you are (a part in Shape or Look, a piece in Stuff). */
+function pasteClip(): boolean {
+  if (!clip || drawState) return false;
+  if (clip.kind === 'piece') {
+    if (mode !== 'stuff') return false;
+    const n = ++clip.pastes;
+    const ids = new Map(clip.pieces.map((p) => [p.id, uid()]));
+    // a mirrored pair only moves down, so it stays a mirror image
+    const dx = clip.pieces.length > 1 ? 0 : 0.08 * n;
+    const nudge = ([x, y]: Vec2): Vec2 => [x + dx, y - 0.08 * n];
+    const pasted = clip.pieces.map((p): Piece => {
+      const c: Piece = { ...structuredClone(p), id: ids.get(p.id)! };
+      if (p.twin) c.twin = ids.get(p.twin);
+      c.outline = c.outline.map(nudge);
+      c.holes = c.holes.map((l) => l.map(nudge));
+      return c;
+    });
+    workbench().pieces.push(...pasted);
+    selectedPiece = pasted[0].id;
+    syncWorkbench();
+    commit();
+    renderStuffPanel();
+    flashPart();
+    autosaveThing();
+    hint('Pasted', 1000);
+    return true;
+  }
+  if (mode === 'stuff' || placing) return false;
+  const c = clip;
+  // moved down when the original is still here, so the copy shows
+  const here = c.limb.bones.some((d) => state.rig.bones.some((b) => b.id === d.id));
+  const n = here ? ++c.pastes : 0;
+  rigEdit((rig) => {
+    const copies = pasteLimb(rig, c.limb, selected, [0, -0.18 * n, 0]);
+    for (const p of copies) if (c.parts[p.from]) state.parts[p.to] = structuredClone(c.parts[p.from]);
+    return copies;
+  }, true);
+  idle = false;
+  updateSkeletonVisibility();
+  flashPart();
+  hint('Pasted', 1000);
+  return true;
+}
+
 function deletePiece(id: string) {
   if (drawState) exitDraw();
   const wb = workbench();
@@ -8146,6 +8224,10 @@ window.addEventListener('keydown', (e) => {
       e.preventDefault();
       removePart();
     }
+  } else if (is(e, 'copy') && !document.getSelection()?.toString()) {
+    if (copyPicked()) e.preventDefault();
+  } else if (is(e, 'paste')) {
+    if (pasteClip()) e.preventDefault();
   } else if (is(e, 'move') || is(e, 'rotate') || is(e, 'scale')) {
     const m = is(e, 'move') ? 'translate' : is(e, 'rotate') ? 'rotate' : 'scale';
     if (mode === 'stuff' && piecePivot) setPieceMode(m);

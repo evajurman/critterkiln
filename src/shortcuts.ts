@@ -7,7 +7,7 @@ import { tipOf } from './tooltip';
 
 export type ShortcutId =
   | 'shape' | 'look' | 'stuff'
-  | 'undo' | 'redo'
+  | 'undo' | 'redo' | 'copy' | 'paste'
   | 'frame' | 'frameAll'
   | 'draw' | 'mirror' | 'delete' | 'help'
   | 'move' | 'rotate' | 'scale'
@@ -34,6 +34,8 @@ const SHORTCUTS: Shortcut[] = [
   { id: 'help', group: 'Getting around', label: 'Keyboard shortcuts', keys: ['?'] },
   { id: 'undo', group: 'Editing', label: 'Undo', keys: ['ctrl+z'] },
   { id: 'redo', group: 'Editing', label: 'Redo', keys: ['ctrl+shift+z', 'ctrl+y'] },
+  { id: 'copy', group: 'Editing', label: 'Copy', note: 'The picked part and everything on it, or the picked piece', keys: ['ctrl+c'] },
+  { id: 'paste', group: 'Editing', label: 'Paste', note: 'A part hangs off the part it came from, or the picked part when that isn’t here; works in another creature or thing too', keys: ['ctrl+v'] },
   { id: 'draw', group: 'Editing', label: 'Draw', note: 'A new part, or a stuff piece. While drawing: the Draw tool', keys: ['d'] },
   { id: 'mirror', group: 'Editing', label: 'Mirror', note: 'Both sides of a pair change together; while drawing, one half is copied across the centre line; on a stuff piece, a mirror image on the other side; while painting, paint both sides', keys: ['m'] },
   { id: 'delete', group: 'Editing', label: 'Delete', note: 'The picked part, stuff or piece', keys: ['delete', 'backspace'] },
