@@ -5,7 +5,8 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { bendOf, carryOnBend, Creature, partShapes, setPartShapes, type BoneRT, type CreatureState, type Planted } from '../creature';
+import { Creature, partShapes, setPartShapes, type BoneRT, type CreatureState, type Planted } from '../creature';
+import { bendOf, carryOnBend } from '../bend';
 import { type Vec2 } from '../inflate';
 import { markToolsOut } from '../markingPanel';
 import { gizmos, setLayoutIdle } from '../layout';
