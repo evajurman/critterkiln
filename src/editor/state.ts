@@ -6,7 +6,7 @@ import { migrateMarkings } from '../markings';
 import { stopMarkTools } from '../markingPanel';
 import { type Tab } from '../layout';
 import { RIGS, expandRig, movedBases, reparentAll, rigFromTemplate, type RigState, type V3 } from '../rigs';
-import { animSecs, hint, invalidate, queueCreationSave, rehang, renderSceneColors, renderUI, rigPrefs, sceneName, sizesIn } from '../main';
+import { animSecs, invalidate } from '../main';
 import { $ } from './dom';
 import { key, KEY_AT, lightSpin, scene } from './stage';
 import { updateSkeletonVisibility } from './controls';
@@ -15,6 +15,11 @@ import { autosaveThing, syncWorkbench, workbench } from './workbench';
 import { deselectAttachment, selectAttachment, selectedAttachment } from './attach';
 import { placing, startPlacing, stopPlacing } from './arrange';
 import { partsOpen } from './creatureBar';
+import { queueCreationSave } from './creations';
+import { renderSceneColors } from './widgets';
+import { renderUI } from './panels';
+import { rehang, rigPrefs, sceneName, sizesIn } from './rigEdit';
+import { hint } from './hints';
 
 // state + history
 

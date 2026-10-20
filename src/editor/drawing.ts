@@ -4,7 +4,6 @@ import { unlock } from '../achievements';
 import { bounds, combineLoops, signedArea, smoothLoop, symmetrize, type Vec2 } from '../inflate';
 import { type Piece } from '../stuff';
 import { keyLabel } from '../shortcuts';
-import { flashPart, hint, hintOnce, partLabel } from '../main';
 import { $ } from './dom';
 import { canvas, octx, overlay, view, viewport } from './stage';
 import { commit, creature, creatures, mode, selected, state } from './state';
@@ -13,6 +12,8 @@ import { focusOnBone } from './framing';
 import { addPieces, board, focusOnBoard, focusOnPlane, framePiece, holesInside, piece, refreshPieceGizmo, replacePiece, syncWorkbench } from './workbench';
 import { deselectAttachment, gizmo } from './attach';
 import { renderCreatureBar } from './creatureBar';
+import { flashPart, partLabel } from './partPanel';
+import { hint, hintOnce } from './hints';
 
 // drawing
 

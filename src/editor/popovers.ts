@@ -1,5 +1,5 @@
-import { closeShortcutSheet } from '../main';
 import { $ } from './dom';
+import { closeShortcutSheet } from './settings';
 
 // files
 

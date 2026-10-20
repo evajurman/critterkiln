@@ -1,12 +1,14 @@
 import * as THREE from 'three';
 import { type BoneRT } from '../creature';
 import { moveJoint, type V3 } from '../rigs';
-import { hint, rigLocked, selectPart } from '../main';
 import { $ } from './dom';
 import { camera, ORTHO_KEY, sceneOrtho, setOrtho, setSceneOrtho } from './stage';
 import { buildCreature, commit, creature, creatures, mode, selected, state } from './state';
 import { controls, setKeepFloor, settleOnFloor } from './controls';
 import { bench, board, focusOnBoard } from './workbench';
+import { selectPart } from './partPanel';
+import { rigLocked } from './rigEdit';
+import { hint } from './hints';
 
 // camera tweening
 

@@ -22,22 +22,7 @@ import {
 import { STYLES, glowWithFlash } from '../materials';
 import { markToolsOut } from '../markingPanel';
 import { copyLimb, partIds, pasteLimb, type LimbClip } from '../rigs';
-import {
-  flashPart,
-  glowFollowSeg,
-  glowSlider,
-  hint,
-  hintOnce,
-  invalidate,
-  pieceMarks,
-  queueCreationSave,
-  renderThingMaterial,
-  rigEdit,
-  sceneColorRow,
-  scopeSeg,
-  SWATCHES,
-  withCleanScene,
-} from '../main';
+import { invalidate, withCleanScene } from '../main';
 import { $, fa, faClassic, iconLabel } from './dom';
 import { camera, canvas, key, scene, view } from './stage';
 import { composer } from './post';
@@ -50,6 +35,12 @@ import { placing } from './arrange';
 import { attachThing } from './attachPanel';
 import { carryFrom } from './carry';
 import { saveBundle } from './files';
+import { queueCreationSave } from './creations';
+import { glowFollowSeg, glowSlider, sceneColorRow, scopeSeg, SWATCHES } from './widgets';
+import { flashPart, renderThingMaterial } from './partPanel';
+import { pieceMarks } from './markingsUi';
+import { rigEdit } from './rigEdit';
+import { hint, hintOnce } from './hints';
 
 // stuff workbench
 

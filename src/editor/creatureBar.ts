@@ -2,13 +2,16 @@ import * as THREE from 'three';
 import { Creature, defaultState, type BoneRT, type CreatureState, type PartState, type Placement } from '../creature';
 import { ANIM_KINDS } from '../animate';
 import { duplicateLimb } from '../rigs';
-import { flashPart, freshRig, hint, hintOnce, partName, removePart, renderUI, rigEdit, selectPart, setPartName } from '../main';
 import { $, fa } from './dom';
 import { activate, commit, creature, creatures, idle, makeCreature, save, selected, setCreature, setIdle, state, world } from './state';
 import { creatureLabel } from './controls';
 import { frameAll } from './framing';
 import { exitDraw } from './drawing';
 import { placing, startPlacing, stopPlacing } from './arrange';
+import { flashPart, selectPart } from './partPanel';
+import { renderUI } from './panels';
+import { freshRig, partName, removePart, rigEdit, setPartName } from './rigEdit';
+import { hint, hintOnce } from './hints';
 
 // the creature switcher
 

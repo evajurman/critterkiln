@@ -1,12 +1,14 @@
 import { type Attachment } from '../creature';
 import { uid, type Piece, type Thing } from '../stuff';
-import { glowFollowSeg, glowSlider, hintOnce, renderThingMaterial, sceneColorRow, scopeSeg, SWATCHES } from '../main';
 import { $ } from './dom';
 import { mirror } from './floor';
 import { commit, creature, selected, state } from './state';
 import { pieceColorAll, pieceColorScope, renderCollection, setPieceColorAll, stripThumb } from './workbench';
 import { currentAttachment, deselectAttachment, gizmo, selectAttachment, selectedAttachment } from './attach';
 import { closeTopPopovers } from './popovers';
+import { glowFollowSeg, glowSlider, sceneColorRow, scopeSeg, SWATCHES } from './widgets';
+import { renderThingMaterial } from './partPanel';
+import { hintOnce } from './hints';
 
 export function syncAttachBar() {
   const a = currentAttachment();

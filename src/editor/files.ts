@@ -3,23 +3,7 @@ import { type CreatureState } from '../creature';
 import { unlock } from '../achievements';
 import { collection, downloadText, envelope, parseEnvelope, putThing, safeFileName, type Thing } from '../stuff';
 import { saveRig, savedRigs, type RigState, type V3 } from '../rigs';
-import {
-  applyDof,
-  beginCreation,
-  dof,
-  flushCreationSave,
-  hint,
-  importCreations,
-  invalidate,
-  leaveScene,
-  type LibraryFile,
-  noteSaved,
-  renderBackdropUI,
-  renderRigs,
-  renderUI,
-  replaceWorld,
-  saveDof,
-} from '../main';
+import { applyDof, dof, invalidate, renderBackdropUI, saveDof } from '../main';
 import { $, fa, faClassic } from './dom';
 import { applyLighting, camera, LIGHT_KEY, lightTurn, ORTHO_KEY, sceneOrtho, setLightTurn, setOrtho, setSceneOrtho } from './stage';
 import { applyFloor, backdrop, floorPrefs, saveFloor, setBackdrop } from './floor';
@@ -32,6 +16,11 @@ import { deselectAttachment } from './attach';
 import { stopPlacing } from './arrange';
 import { freeSpot, renderCreatureBar } from './creatureBar';
 import { POPOVERS, togglePopover } from './popovers';
+import { beginCreation, flushCreationSave, leaveScene, type LibraryFile, replaceWorld } from './creations';
+import { importCreations, noteSaved } from './libraryPanel';
+import { renderRigs } from './partPanel';
+import { renderUI } from './panels';
+import { hint } from './hints';
 
 /** Files are named after who's in the scene: "Bimble", or "Bimble-Twin-Creature 3". */
 export function sceneFileName(): string {

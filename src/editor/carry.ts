@@ -2,7 +2,6 @@ import * as THREE from 'three';
 import { Creature } from '../creature';
 import { uid, type Thing } from '../stuff';
 import { type V3 } from '../rigs';
-import { hint, partLabel, selectPart } from '../main';
 import { $, fa, iconLabel } from './dom';
 import { canvas } from './stage';
 import { mirror } from './floor';
@@ -10,6 +9,8 @@ import { commit, creature, idle, state } from './state';
 import { moveEyesTo, raycaster, round4, setRay, showEyes } from './controls';
 import { stripThumb } from './workbench';
 import { deselectAttachment, selectAttachment, selectedAttachment } from './attach';
+import { partLabel, selectPart } from './partPanel';
+import { hint } from './hints';
 
 // carrying eyes or stuff from a menu onto the creature: while it's over the
 // creature it's really there (exactly where it would land), and letting go
