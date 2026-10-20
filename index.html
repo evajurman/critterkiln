@@ -45,8 +45,8 @@
         <div class="modes" role="tablist">
           <button data-mode="shape" class="active" data-shortcut="shape" title="Shape: draw, stretch, grow and pose your creature (1)"><i class="fa-slab-duo fa-regular fa-hand" aria-hidden="true"></i><span class="lbl"> Shape</span></button>
           <button data-mode="look" data-shortcut="look" title="Look: colors, materials and stuff to wear (2)"><i class="fa-slab-duo fa-regular fa-palette" aria-hidden="true"></i><span class="lbl"> Look</span></button>
-          <button data-mode="animate" title="Animate: give parts looping motions, ready to record"><i class="fa-slab-duo fa-regular fa-video" aria-hidden="true"></i><span class="lbl"> Animate</span></button>
-          <button data-mode="stuff" data-shortcut="stuff" title="Stuff: make things to wear and carry (3)"><i class="fa-slab-duo fa-regular fa-briefcase" aria-hidden="true"></i><span class="lbl"> Stuff</span></button>
+          <button data-mode="animate" data-shortcut="animate" title="Animate: give parts looping motions, ready to record (3)"><i class="fa-slab-duo fa-regular fa-video" aria-hidden="true"></i><span class="lbl"> Animate</span></button>
+          <button data-mode="stuff" data-shortcut="stuff" title="Stuff: make things to wear and carry (4)"><i class="fa-slab-duo fa-regular fa-briefcase" aria-hidden="true"></i><span class="lbl"> Stuff</span></button>
         </div>
         <div class="spacer"></div>
         <div class="tools">
@@ -90,12 +90,12 @@
           </div>
           <div class="ck-tool" data-tool="blend">
             <label class="slider wide-label" title="How smoothly touching parts of the same material flow into each other. 0 keeps them separate.">
-              <span>Blend shape</span><input id="merge-radius" type="range" min="0" max="0.25" step="0.005" />
+              <span>Blend shape</span><input id="merge-radius" type="range" data-default="0.1" min="0" max="0.25" step="0.005" />
               <span class="ends"><em>off</em><em>smooth</em></span></label>
           </div>
           <div class="ck-tool" data-tool="opacity">
             <label class="slider wide-label" title="How see-through the picked part is. Parts blended into it are one surface, so they fade with it.">
-              <span>Opacity</span><input id="opacity" type="range" min="0.05" max="1" step="0.01" />
+              <span>Opacity</span><input id="opacity" type="range" data-default="1" min="0.05" max="1" step="0.01" />
               <span class="ends"><em>see-through</em><em>solid</em></span></label>
           </div>
           <div class="ck-tool" data-tool="seamless">
@@ -162,7 +162,7 @@
           <div class="ck-tool" data-tool="swatches"><div id="swatches" class="swatches"></div></div>
           <div class="ck-tool" data-tool="scene-colors"><div class="scene-colors" id="scene-colors"></div></div>
           <div class="ck-tool" data-tool="glow">
-            <label class="slider" title="Make the color shine with its own light"><span>Glow</span><input id="glow" type="range" min="0" max="1" step="0.01" />
+            <label class="slider" title="Make the color shine with its own light"><span>Glow</span><input id="glow" type="range" data-default="0" min="0" max="1" step="0.01" />
               <span class="ends"><em>off</em><em>bright</em></span></label>
             <div class="seg glow-follow" id="glow-follow" title="Where the glow comes from">
               <button data-follow="even" title="Glow evenly all over">Even</button>
@@ -172,7 +172,7 @@
           </div>
           <div class="ck-tool" data-tool="color-blend">
             <label class="slider wide-label" id="color-blend-row" title="Also merge touching parts of different colors, fading one color into the other. 0 keeps colors apart.">
-              <span>Blend colors</span><input id="color-blend" type="range" min="0" max="0.4" step="0.005" />
+              <span>Blend colors</span><input id="color-blend" type="range" data-default="0.12" min="0" max="0.4" step="0.005" />
               <span class="ends"><em>off</em><em>soft fade</em></span></label>
           </div>
           <div class="ck-tool" data-tool="materials"><div id="styles" class="styles"></div></div>
@@ -215,27 +215,27 @@
                   <label class="check" title="One eye in the middle instead of a pair"><input id="eye-single" type="checkbox" /> One eye</label>
                 </div>
                 <div id="eye-sliders">
-                  <label class="slider"><span>Size</span><input id="eye-size" type="range" min="0" max="1" step="0.01" /></label>
-                  <label class="slider" id="eye-spacing-row"><span>Spacing</span><input id="eye-spacing" type="range" min="0" max="1" step="0.01" /></label>
-                  <label class="slider" id="eye-height-row"><span>Height</span><input id="eye-height" type="range" min="0.05" max="0.95" step="0.01" /></label>
+                  <label class="slider"><span>Size</span><input id="eye-size" type="range" data-default="0.5" min="0" max="1" step="0.01" /></label>
+                  <label class="slider" id="eye-spacing-row"><span>Spacing</span><input id="eye-spacing" type="range" data-default="0.5" min="0" max="1" step="0.01" /></label>
+                  <label class="slider" id="eye-height-row"><span>Height</span><input id="eye-height" type="range" data-default="0.55" min="0.05" max="0.95" step="0.01" /></label>
                   <p id="eye-placed" class="muted small eye-placed" hidden>Placed by hand: drag an eye to move them. <button id="eye-unplace" class="link" title="Go back to placing them with Spacing and Height">Use sliders</button></p>
-                  <label class="slider" title="How far this pair stands off the face"><span>Stand-off</span><input id="eye-lift" type="range" min="0" max="1" step="0.01" />
+                  <label class="slider" title="How far this pair stands off the face"><span>Stand-off</span><input id="eye-lift" type="range" data-default="0" min="0" max="1" step="0.01" />
                     <span class="ends"><em>on the face</em><em>lifted</em></span></label>
-                  <label class="slider" title="Turn the eyes round their part. They stick to it, so rolling the part turns them too"><span>Facing</span><input id="eye-turn" type="range" min="-180" max="180" step="1" />
+                  <label class="slider" title="Turn the eyes round their part. They stick to it, so rolling the part turns them too"><span>Facing</span><input id="eye-turn" type="range" data-default="0" min="-180" max="180" step="1" />
                     <span class="ends"><em>one way</em><em>the other</em></span></label>
                   <button id="eye-front" class="ghost" title="Turn the eyes back to the creature's front, even if their part is rolled"><i class="fa-slab-duo fa-regular fa-face-smile" aria-hidden="true"></i> Face front</button>
                 </div>
                 <div id="eye-pupil-look">
                   <div class="sub-title" id="eye-pupil-title">Googly look</div>
-                  <label class="slider" id="eye-shine-row" title="A shiny plastic eyeball, or a soft matte one"><span>Shine</span><input id="eye-shine" type="range" min="0" max="1" step="0.01" />
+                  <label class="slider" id="eye-shine-row" title="A shiny plastic eyeball, or a soft matte one"><span>Shine</span><input id="eye-shine" type="range" data-default="1" min="0" max="1" step="0.01" />
                     <span class="ends"><em>matte</em><em>glossy</em></span></label>
-                  <label class="slider"><span>Pupil</span><input id="eye-pupil" type="range" min="0" max="1" step="0.01" />
+                  <label class="slider"><span>Pupil</span><input id="eye-pupil" type="range" data-default="0.5" min="0" max="1" step="0.01" />
                     <span class="ends"><em>small</em><em>big</em></span></label>
-                  <label class="slider" title="Where the pupils point, side to side"><span>Look</span><input id="eye-look-x" type="range" min="-1" max="1" step="0.01" />
+                  <label class="slider" title="Where the pupils point, side to side"><span>Look</span><input id="eye-look-x" type="range" data-default="0" min="-1" max="1" step="0.01" />
                     <span class="ends"><em>one way</em><em>the other</em></span></label>
-                  <label class="slider" title="Where the pupils point, up and down"><span>Look up</span><input id="eye-look-y" type="range" min="-1" max="1" step="0.01" />
+                  <label class="slider" title="Where the pupils point, up and down"><span>Look up</span><input id="eye-look-y" type="range" data-default="0" min="-1" max="1" step="0.01" />
                     <span class="ends"><em>down</em><em>up</em></span></label>
-                  <label class="slider" id="eye-cross-row" title="Pupils looking away from each other, or meeting in front of the nose"><span>Crossed</span><input id="eye-cross" type="range" min="-1" max="1" step="0.01" />
+                  <label class="slider" id="eye-cross-row" title="Pupils looking away from each other, or meeting in front of the nose"><span>Crossed</span><input id="eye-cross" type="range" data-default="0" min="-1" max="1" step="0.01" />
                     <span class="ends"><em>apart</em><em>crossed</em></span></label>
                 </div>
                 <div id="eye-look">
@@ -253,7 +253,7 @@
                   <div class="swatches eye-swatches" id="eye-swatches"></div>
                   <label class="color-pick"><input id="eye-color" type="color" /> Eye color</label>
                   <div class="scene-colors" id="eye-scene-colors"></div>
-                  <label class="slider glow-slider" title="Make the color shine with its own light"><span>Glow</span><input id="eye-glow" type="range" min="0" max="1" step="0.01" />
+                  <label class="slider glow-slider" title="Make the color shine with its own light"><span>Glow</span><input id="eye-glow" type="range" data-default="0" min="0" max="1" step="0.01" />
               <span class="ends"><em>off</em><em>bright</em></span></label>
                   <div class="seg glow-follow" id="eye-glow-follow" title="Where the glow comes from">
                     <button data-follow="even" title="Glow evenly all over">Even</button>
@@ -261,13 +261,13 @@
                   </div>
                   <div id="eye-shape">
                     <div class="sub-title">Expression</div>
-                    <label class="slider" title="Bring the upper lid down over the eye"><span>Upper lid</span><input id="eye-lid-top" type="range" min="-0.8" max="1" step="0.01" />
+                    <label class="slider" title="Bring the upper lid down over the eye"><span>Upper lid</span><input id="eye-lid-top" type="range" data-default="1" min="-0.8" max="1" step="0.01" />
                       <span class="ends"><em>low</em><em>open</em></span></label>
-                    <label class="slider" title="Bring the lower lid up over the eye"><span>Lower lid</span><input id="eye-lid-bottom" type="range" min="-1" max="0.8" step="0.01" />
+                    <label class="slider" title="Bring the lower lid up over the eye"><span>Lower lid</span><input id="eye-lid-bottom" type="range" data-default="-1" min="-1" max="0.8" step="0.01" />
                       <span class="ends"><em>open</em><em>high</em></span></label>
-                    <label class="slider" title="Bend both lids: down into a cup, or up into a happy crescent"><span>Crescent</span><input id="eye-crescent" type="range" min="-1" max="1" step="0.01" />
+                    <label class="slider" title="Bend both lids: down into a cup, or up into a happy crescent"><span>Crescent</span><input id="eye-crescent" type="range" data-default="0" min="-1" max="1" step="0.01" />
                       <span class="ends"><em>cup</em><em>arch</em></span></label>
-                    <label class="slider" title="Lean the eyes: inner corners up, or down toward the nose"><span>Tilt</span><input id="eye-tilt" type="range" min="-1" max="1" step="0.01" />
+                    <label class="slider" title="Lean the eyes: inner corners up, or down toward the nose"><span>Tilt</span><input id="eye-tilt" type="range" data-default="0" min="-1" max="1" step="0.01" />
                       <span class="ends"><em>worried</em><em>angry</em></span></label>
                     <button id="eye-shape-reset" class="ghost" title="Back to round, open eyes"><i class="fa-slab-duo fa-regular fa-circle" aria-hidden="true"></i> Reset expression</button>
                   </div>
@@ -286,7 +286,7 @@
                   <button data-speed="1">×1</button><button data-speed="2">×2</button><button data-speed="3">×3</button><button data-speed="4">×4</button>
                 </div>
               </div>
-              <label class="slider" title="Start later in the motion: shift parts against each other, like feet"><span>Timing</span><input id="anim-phase" type="range" min="0" max="1" step="0.01" />
+              <label class="slider" title="Start later in the motion: shift parts against each other, like feet"><span>Timing</span><input id="anim-phase" type="range" data-default="0" min="0" max="1" step="0.01" />
                 <span class="ends"><em>0</em><em>a whole time round</em></span></label>
               <label class="check" id="anim-reverse-row" hidden title="Go round the other way"><input id="anim-reverse" type="checkbox" /> Reverse</label>
               <label class="check" id="anim-reach-row" title="Like a knee: the tip follows the path for real and the part above bends to reach it (so a foot can lift). Off: it just swings from its base"><input id="anim-reach" type="checkbox" /> Bend the part above</label>
@@ -324,14 +324,14 @@
               <button data-floor="material" title="A real floor in one of the materials">Material</button>
             </div>
             <div id="floor-mirror-opts" hidden>
-              <label class="slider dof-slider"><span>Reflect</span><input id="floor-reflect" type="range" min="0.05" max="1" step="0.01" /></label>
+              <label class="slider dof-slider"><span>Reflect</span><input id="floor-reflect" type="range" data-default="0.55" min="0.05" max="1" step="0.01" /></label>
             </div>
             <div id="floor-material-opts" hidden>
               <div class="mini-styles" id="floor-styles"></div>
               <div class="swatches floor-swatches" id="floor-swatches"></div>
               <label class="color-pick"><input id="floor-color" type="color" /> Floor color</label>
               <div class="scene-colors" id="floor-scene-colors"></div>
-              <label class="slider glow-slider" title="Make the color shine with its own light"><span>Glow</span><input id="floor-glow" type="range" min="0" max="1" step="0.01" />
+              <label class="slider glow-slider" title="Make the color shine with its own light"><span>Glow</span><input id="floor-glow" type="range" data-default="0" min="0" max="1" step="0.01" />
               <span class="ends"><em>off</em><em>bright</em></span></label>
               <div class="seg glow-follow" id="floor-glow-follow" title="Where the glow comes from">
                 <button data-follow="even" title="Glow evenly all over">Even</button>
@@ -340,16 +340,16 @@
             </div>
           </div>
           <div class="ck-tool" data-tool="light-turn">
-            <label class="slider" title="Turn the lights around the scene"><span>Lights</span><input id="light-turn" type="range" min="-180" max="180" step="1" />
+            <label class="slider" title="Turn the lights around the scene"><span>Lights</span><input id="light-turn" type="range" data-default="0" min="-180" max="180" step="1" />
               <span class="ends"><em>left</em><em>right</em></span></label>
           </div>
           <div class="ck-tool" data-tool="ao"><label class="check"><input id="ao" type="checkbox" checked /> Ambient occlusion</label></div>
           <div class="ck-tool" data-tool="dof">
             <label class="check"><input id="dof" type="checkbox" /> Depth of field (photo look)</label>
             <div id="dof-controls">
-              <label class="slider dof-slider"><span>Focus</span><input id="dof-focus" type="range" min="-3" max="3" step="0.01" />
+              <label class="slider dof-slider"><span>Focus</span><input id="dof-focus" type="range" data-default="0" min="-3" max="3" step="0.01" />
                 <span class="ends"><em>nearer</em><em>farther</em></span></label>
-              <label class="slider dof-slider"><span>Blur</span><input id="dof-blur" type="range" min="0" max="1" step="0.01" /></label>
+              <label class="slider dof-slider"><span>Blur</span><input id="dof-blur" type="range" data-default="0.35" min="0" max="1" step="0.01" /></label>
               <div class="row">
                 <button id="dof-pick" class="ghost" title="Then click the spot that should be sharp"><i class="fa-duotone fa-regular fa-crosshairs" aria-hidden="true"></i> Click to focus</button>
                 <button id="dof-reset" class="link" title="Focus on the orbit centre">Reset focus</button>
@@ -389,14 +389,14 @@
               <button data-bend="axis" title="Curve away from the dashed centre line: shields, wings, bracers"><i class="fa-slab-duo fa-regular fa-shield" aria-hidden="true"></i> Centre line</button>
               <button data-bend="radial" title="Curve evenly all round the crosshair, like a dome"><i class="fa-slab-duo fa-regular fa-umbrella" aria-hidden="true"></i> Dome</button>
             </div>
-            <label class="slider"><span>Bend</span><input id="thing-bend" type="range" min="-1" max="1" step="0.01" />
+            <label class="slider"><span>Bend</span><input id="thing-bend" type="range" data-default="0" min="-1" max="1" step="0.01" />
               <span class="ends"><em>edges forward</em><em>edges back</em></span></label>
           </div>
           <div class="card thing-bend" id="thing-wrap-card">
             <div class="sub-title">Wrap onto the body <i class="fa-duotone fa-regular fa-circle-info tip-i" title="When it's worn with Wrap on, it's pressed onto the creature instead of bent."></i></div>
-            <label class="slider" title="How widely the body's surface is evened out first: low follows every dip and rib, high just the overall shape"><span>Smoothness</span><input id="thing-wrap-smooth" type="range" min="0" max="1" step="0.01" />
+            <label class="slider" title="How widely the body's surface is evened out first: low follows every dip and rib, high just the overall shape"><span>Smoothness</span><input id="thing-wrap-smooth" type="range" data-default="0.3" min="0" max="1" step="0.01" />
               <span class="ends"><em>every dip</em><em>overall shape</em></span></label>
-            <label class="slider" title="How far it's pressed onto the body: part way keeps some of its flat shape"><span>Strength</span><input id="thing-wrap-strength" type="range" min="0" max="1" step="0.01" />
+            <label class="slider" title="How far it's pressed onto the body: part way keeps some of its flat shape"><span>Strength</span><input id="thing-wrap-strength" type="range" data-default="1" min="0" max="1" step="0.01" />
               <span class="ends"><em>flat</em><em>hugs the body</em></span></label>
           </div>
 
@@ -412,10 +412,10 @@
               <label class="check"><input id="piece-open" type="checkbox" /> Open top</label>
             </div>
             <label class="slider" id="piece-round-row"><span>Rounded</span><input id="piece-round" type="range" min="0" max="1" step="0.01" /></label>
-            <label class="slider"><span>Layer</span><input id="piece-z" type="range" min="-0.2" max="0.2" step="0.002" /></label>
-            <label class="slider"><span>Opacity</span><input id="piece-opacity" type="range" min="0.05" max="1" step="0.01" /></label>
-            <label class="slider" title="Fuse into the pieces this one touches with a smooth fillet. 0 keeps them separate."><span>Blend shape</span><input id="piece-blend-shape" type="range" min="0" max="1" step="0.01" /></label>
-            <label class="slider" title="Fade into the colors of the pieces this one touches. 0 keeps colors apart."><span>Blend colors</span><input id="piece-blend-color" type="range" min="0" max="1" step="0.01" /></label>
+            <label class="slider"><span>Layer</span><input id="piece-z" type="range" data-default="0" min="-0.2" max="0.2" step="0.002" /></label>
+            <label class="slider"><span>Opacity</span><input id="piece-opacity" type="range" data-default="1" min="0.05" max="1" step="0.01" /></label>
+            <label class="slider" title="Fuse into the pieces this one touches with a smooth fillet. 0 keeps them separate."><span>Blend shape</span><input id="piece-blend-shape" type="range" data-default="0" min="0" max="1" step="0.01" /></label>
+            <label class="slider" title="Fade into the colors of the pieces this one touches. 0 keeps colors apart."><span>Blend colors</span><input id="piece-blend-color" type="range" data-default="0" min="0" max="1" step="0.01" /></label>
             <div class="paint-row">
               <label class="color-pick"><input id="piece-color" type="color" /> Custom</label>
               <div class="seg scope-seg" id="piece-color-scope">
@@ -425,7 +425,7 @@
             </div>
             <div class="swatches" id="piece-swatches"></div>
             <div class="scene-colors" id="piece-scene-colors"></div>
-            <label class="slider glow-slider" title="Make the color shine with its own light"><span>Glow</span><input id="piece-glow" type="range" min="0" max="1" step="0.01" />
+            <label class="slider glow-slider" title="Make the color shine with its own light"><span>Glow</span><input id="piece-glow" type="range" data-default="0" min="0" max="1" step="0.01" />
               <span class="ends"><em>off</em><em>bright</em></span></label>
             <div class="seg glow-follow" id="piece-glow-follow" title="Where the glow comes from">
               <button data-follow="even" title="Glow evenly all over">Even</button>
@@ -527,7 +527,7 @@
             </div>
             <div class="swatches" id="attach-swatches"></div>
             <div class="scene-colors" id="attach-scene-colors"></div>
-            <label class="slider glow-slider" title="Make the color shine with its own light"><span>Glow</span><input id="attach-glow" type="range" min="0" max="1" step="0.01" />
+            <label class="slider glow-slider" title="Make the color shine with its own light"><span>Glow</span><input id="attach-glow" type="range" data-default="0" min="0" max="1" step="0.01" />
               <span class="ends"><em>off</em><em>bright</em></span></label>
             <div class="seg glow-follow" id="attach-glow-follow" title="Where the glow comes from">
               <button data-follow="even" title="Glow evenly all over">Even</button>
@@ -616,7 +616,7 @@
             <input id="sym" type="checkbox" /> <i class="fa-slab-duo fa-regular fa-arrow-right-arrow-left" aria-hidden="true"></i> Mirror <kbd>M</kbd>
           </label>
           <label class="bar-slider" title="Steadies the pen while drawing and smooths the finished outline">
-            Smoothing <input id="smooth" type="range" min="0" max="1" step="0.05" />
+            Smoothing <input id="smooth" type="range" data-default="0.5" min="0" max="1" step="0.05" />
           </label>
           <span class="bar-group" id="draw-tools">
             <button data-tool="draw" class="seg-btn" data-shortcut="draw" title="Draw: each stroke adds to the shape (D)"><i class="fa-slab-duo fa-regular fa-pencil" aria-hidden="true"></i> Draw <kbd>D</kbd></button>

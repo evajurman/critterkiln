@@ -3113,6 +3113,21 @@ export class Creature {
   }
 
   /** The parts dragging this one's tip turns (see dragTip): it, and with IK the limb above it. */
+  /** The lowest point of a part's own mesh, in the scene (and the bone it's on). */
+  lowestPoint(b: BoneRT): THREE.Vector3 | null {
+    const m = b.mesh;
+    const pos = m?.geometry.getAttribute('position');
+    if (!m || !pos) return null;
+    m.updateMatrixWorld(true);
+    const v = new THREE.Vector3();
+    let low: THREE.Vector3 | null = null;
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld);
+      if (!low || v.y < low.y) low = v.clone();
+    }
+    return low;
+  }
+
   ikChain(id: string, ik: boolean): BoneRT[] {
     const b = this.bones.get(id)!;
     const chain: BoneRT[] = [b];

@@ -728,6 +728,8 @@ export class MarkingPanel {
       input.max = String(max);
       input.step = '0.01';
       input.value = String(flip ? 1 - m[key] : m[key]);
+      const d = defaultMarking(m.type)[key];
+      input.dataset.default = String(flip ? 1 - d : d);
       input.oninput = () => change({ [key]: flip ? 1 - parseFloat(input.value) : parseFloat(input.value) });
       input.onchange = () => host.commit();
       const name = document.createElement('span');

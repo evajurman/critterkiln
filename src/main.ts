@@ -82,10 +82,11 @@ import { MarkingPanel, followMarkTools, initMarkingTools, markGizmoHeld, markGiz
 import { installScrollbars } from './scrollbars';
 import { applyPalette, GIFEncoder, quantize } from 'gifenc';
 import { ANIM_KINDS, animOffset, animP, canReverse, defaultAnim, leanAt, leanOf, leanQuat, mirrorAnim, reachAt, reachRim, rimLean, orbitOut, STUFF_KINDS, stuffMove, stuffP, type PartAnim, type StuffAnim, type StuffKind } from './animate';
-import { customTabs, gizmos, initLayout, setLayoutIdle, setLayoutTab, setSceneColors, type Tab } from './layout';
+import { arrangeMenu, customTabs, tabNamesMenu, gizmos, initLayout, setLayoutIdle, setLayoutTab, setSceneColors, type Tab } from './layout';
 import { installCursorPress } from './cursorPress';
 import { installTooltips } from './tooltip';
-import { captureShortcut, hasCustomShortcuts, is, keyLabel, labelShortcuts, renderShortcutSheet, resetShortcuts, ridesSurface, stopListening } from './shortcuts';
+import { captureShortcut, hasCustomShortcuts, is, keyLabel, labelShortcuts, renderShortcutSheet, resetShortcuts, ridesSurface, stopListening, type ShortcutId } from './shortcuts';
+import { openContextMenu, SEP, type MenuEntry, type MenuItem } from './contextMenu';
 import { deleteCreation, getCreation, keepStorage, listCreations, markSaved, putCreation, type Creation, type SavedHow } from './library';
 import {
   RIGS,
@@ -2179,6 +2180,36 @@ function dropToFloor() {
   setKeepFloor(true);
   commit();
   hint('Dropped to the floor', 1500);
+}
+
+/**
+ * Move the picked part straight down (or up) until its lowest point touches
+ * the floor: its base slides, as dragging the purple grip, so it keeps its
+ * shape and pose. The first part holds everything: that's the whole creature.
+ */
+function partToFloor(id = selected) {
+  const b = creature.bones.get(id);
+  if (!b) return;
+  if (!b.parent) return dropToFloor();
+  const low = creature.lowestPoint(b);
+  if (!low) return;
+  if (Math.abs(low.y) < 1e-3) {
+    hint('Already on the floor', 1500);
+    return;
+  }
+  // the move in skeleton coordinates (the creature may be turned or posed, as a slid base)
+  b.pivot.updateMatrixWorld(true);
+  const unbent = b.pivot.parent!.matrixWorld.clone().multiply(new THREE.Matrix4().compose(b.pivot.position, b.restQuat, new THREE.Vector3(1, 1, 1)));
+  const toDef = new THREE.Matrix3().setFromMatrix4(b.restWorld.clone().multiply(unbent.invert()));
+  const d = new THREE.Vector3(0, -low.y, 0).applyMatrix3(toDef);
+  moveJoint(state.rig, id, 'start', d.toArray() as V3, rigLocked());
+  if (!state.rig.base.startsWith('custom')) state.rig.base = 'custom';
+  buildCreature();
+  settleOnFloor();
+  creature.boing(id);
+  commit();
+  selectPart(id, false);
+  hint('Down to the floor', 1500);
 }
 
 /** Face the part straight on: from the front, or from the side when it's being drawn from the side. */
@@ -6177,6 +6208,7 @@ function renderStyleParams(style: StyleId, el: HTMLElement = $('#style-params'),
     input.max = String(p.max);
     input.step = String(p.step);
     input.value = String(values[p.key]);
+    input.dataset.default = String(p.value);
     const num = document.createElement('input');
     num.type = 'number';
     num.className = 'num';
@@ -8209,6 +8241,7 @@ window.addEventListener('keydown', (e) => {
   } else if (is(e, 'draw') && mode === 'stuff') enterDraw({ kind: 'piece' });
   else if (is(e, 'draw') && !idle) enterDraw();
   else if (is(e, 'stuff')) setMode('stuff');
+  else if (is(e, 'animate')) setMode('animate');
   else if (is(e, 'mirror') && mode === 'stuff') {
     if (piece()) setPieceMirror(!piece()!.twin);
   } else if (is(e, 'mirror')) setMirror(!rigLock);
@@ -8238,11 +8271,192 @@ window.addEventListener('keydown', (e) => {
     else markGizmoMode(m);
   } else if (is(e, 'shape')) setMode('shape');
   else if (is(e, 'look')) setMode('look');
-  else if (!e.ctrlKey && !e.metaKey && !e.altKey && k >= '4' && k <= '9' && customTabs()[+k - 4]) setMode(customTabs()[+k - 4].id);
+  else if (!e.ctrlKey && !e.metaKey && !e.altKey && k >= '5' && k <= '9' && customTabs()[+k - 5]) setMode(customTabs()[+k - 5].id);
   else if (is(e, 'frame')) {
     if (mode === 'stuff') focusOnBoard();
     else frameCreature();
   } else if (is(e, 'frameAll')) frameAll();
+});
+
+// ---------------------------------------------------------------------------
+// the right-click menu: on a part, a piece or worn stuff in the view, what you
+// can do to it (picking it first); on the tools, arranging them, and on a
+// slider its number and its default. A right-drag still pans the view.
+
+/** A button's own action as a menu item: greyed when the button is, left out when it's hidden. */
+function buttonItem(id: string, icon: string, label?: string): MenuItem | null {
+  const b = document.querySelector<HTMLButtonElement>(id);
+  if (!b || b.hidden || b.closest('[hidden]')) return null;
+  return { label: label ?? (b.textContent ?? '').trim(), icon, disabled: b.disabled, title: b.title, run: () => b.click() };
+}
+const keyOf = (id: ShortcutId) => keyLabel(id) || undefined;
+const ctxSlab = (n: string) => `fa-slab-duo fa-regular fa-${n}`;
+const ctxDuo = (n: string) => `fa-duotone fa-regular fa-${n}`;
+
+/** Move, Rotate and Scale, each doing `set` with its gizmo mode; `on` ticks the one in use. */
+function gizmoItems(set: (m: 'translate' | 'rotate' | 'scale') => void, on: string | null, what = ''): MenuItem[] {
+  return ([['translate', 'Move', 'move', 'arrows-up-down-left-right'], ['rotate', 'Rotate', 'rotate', 'arrows-rotate'], ['scale', 'Scale', 'scale', 'expand']] as const).map(
+    ([m, label, key, icon]) => ({ label: label + what, icon: ctxDuo(icon), checked: on === m || undefined, key: keyOf(key), run: () => set(m) }),
+  );
+}
+
+function viewMenu(x: number, y: number) {
+  if (mode === 'stuff') {
+    const id = pickPiece(x, y);
+    if (id) {
+      selectedPiece = id;
+      flashPart();
+      renderStuffPanel();
+    }
+    const p = id ? piece() : undefined;
+    if (!p) {
+      return openContextMenu(x, y, 'Workbench', [
+        { label: 'Draw a piece', icon: ctxSlab('pencil'), key: keyOf('draw'), run: () => enterDraw({ kind: 'piece' }) },
+        clip?.kind === 'piece' && { label: 'Paste', icon: ctxDuo('paste'), key: keyOf('paste'), run: () => pasteClip() },
+        SEP,
+        { label: 'Frame the workbench', icon: ctxDuo('crosshairs'), key: keyOf('frame'), run: focusOnBoard },
+      ]);
+    }
+    return openContextMenu(x, y, 'Piece', [
+      { label: 'Copy', icon: ctxDuo('copy'), key: keyOf('copy'), run: () => copyPicked() },
+      clip?.kind === 'piece' && { label: 'Paste', icon: ctxDuo('paste'), key: keyOf('paste'), run: () => pasteClip() },
+      { label: 'Duplicate', icon: ctxDuo('clone'), run: () => copyPiece(p.id) },
+      { label: 'Delete', icon: ctxSlab('trash'), key: keyOf('delete'), danger: true, run: () => deletePiece(p.id) },
+      SEP,
+      { label: 'Redraw', icon: ctxSlab('pencil'), run: () => enterDraw({ kind: 'piece', redraw: p.id }) },
+      { label: 'Mirror', icon: ctxSlab('arrow-right-arrow-left'), key: keyOf('mirror'), checked: !!twinOf(p), run: () => setPieceMirror(!twinOf(p)) },
+      SEP,
+      ...gizmoItems(setPieceMode, pieceMode),
+      SEP,
+      { label: 'Frame the workbench', icon: ctxDuo('crosshairs'), key: keyOf('frame'), run: focusOnBoard },
+    ]);
+  }
+
+  // the same picking as a click: another creature, worn stuff, then a part
+  const other = pickOtherCreature(x, y);
+  if (other) {
+    idle = false;
+    activate(other.index);
+    if (other.boneId && creature.bones.has(other.boneId)) selected = other.boneId;
+    creature.select(selected);
+    save();
+    renderUI();
+  }
+  const att = other ? null : pickAttachment(x, y);
+  if (att) {
+    pickStuff(att);
+    return openContextMenu(x, y, 'Worn stuff', [
+      ...gizmoItems((m) => {
+        gizmo.setMode(m);
+        syncAttachBar();
+      }, gizmo.mode),
+      SEP,
+      { label: 'Take it off', icon: ctxSlab('trash'), key: keyOf('delete'), danger: true, run: removeAttachment },
+    ]);
+  }
+  const id = other?.boneId ?? pickPart(x, y);
+  if (id && creature.bones.has(id)) {
+    deselectAttachment();
+    if (placing) stopPlacing();
+    selectPart(id, false);
+  }
+  const place = (m: PlaceMode) => {
+    if (!placing) startPlacing();
+    setPlaceMode(m);
+  };
+  const frame: MenuEntry[] = [
+    { label: 'Frame this creature', icon: ctxDuo('crosshairs'), key: keyOf('frame'), run: () => frameCreature() },
+    creatures.length > 1 && { label: 'Frame everyone', icon: ctxDuo('users'), key: keyOf('frameAll'), run: frameAll },
+  ];
+  if (!id) {
+    return openContextMenu(x, y, creatureLabel(world.active), [
+      clip?.kind === 'part' && !idle && { label: 'Paste', icon: ctxDuo('paste'), key: keyOf('paste'), run: () => pasteClip() },
+      { label: 'Arrange creature', icon: ctxDuo('arrows-up-down-left-right'), sub: gizmoItems(place, placing ? gizmo.mode : null) },
+      buttonItem('#drop-floor', ctxSlab('arrow-down-to-line'), 'Creature to floor'),
+      SEP,
+      ...frame,
+    ]);
+  }
+  const b = creature.bones.get(id)!;
+  const name = b.def.name?.trim() || 'Part';
+  const root = !b.parent;
+  return openContextMenu(x, y, name, [
+    { label: 'Copy', icon: ctxDuo('copy'), key: keyOf('copy'), disabled: root, title: root ? 'The first part holds everything else' : undefined, run: () => copyPicked() },
+    clip?.kind === 'part' && { label: 'Paste onto this part', icon: ctxDuo('paste'), key: keyOf('paste'), run: () => pasteClip() },
+    { label: 'Delete', icon: ctxSlab('trash'), key: keyOf('delete'), danger: true, disabled: root, title: root ? 'The first part holds everything else' : undefined, run: removePart },
+    SEP,
+    { label: 'Draw shape', icon: ctxSlab('pencil'), key: keyOf('draw'), run: () => enterDraw({ kind: 'bone', boneId: id }) },
+    buttonItem('#reset-shape', ctxDuo('rotate-left')),
+    {
+      label: 'Grow',
+      icon: ctxDuo('seedling'),
+      sub: [
+        buttonItem('#rig-bone', ctxDuo('bone')),
+        buttonItem('#rig-extend', ctxDuo('arrow-up-right')),
+        buttonItem('#rig-split', ctxSlab('scissors')),
+        buttonItem('#rig-detach', ctxDuo('link-slash')),
+        buttonItem('#rig-mirror', ctxSlab('arrow-right-arrow-left')),
+      ].filter((i): i is MenuItem => !!i),
+    },
+    { label: 'Mirror both sides', icon: ctxSlab('arrow-right-arrow-left'), key: keyOf('mirror'), checked: rigLock, run: () => setMirror(!rigLock) },
+    SEP,
+    { label: 'Arrange creature', icon: ctxDuo('arrows-up-down-left-right'), sub: gizmoItems(place, placing ? gizmo.mode : null) },
+    buttonItem('#reset-pose', ctxDuo('person')),
+    !root && { label: 'Part to floor', icon: ctxSlab('arrow-down-to-line'), title: 'Move it straight down until its lowest point touches the floor', run: () => partToFloor(id) },
+    buttonItem('#drop-floor', ctxSlab('arrow-down-to-line'), 'Creature to floor'),
+    SEP,
+    ...frame,
+  ]);
+}
+
+canvas.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  // a right-drag panned the view; and nothing to offer while drawing or picking a parent
+  if (pointer.moved || drawState || pickingParent || pickingFocus || gizmo.dragging) return;
+  viewMenu(e.clientX, e.clientY);
+});
+
+/** On a slider: its default back, and the number boxes; on a tool: arranging it. */
+document.addEventListener('contextmenu', (e) => {
+  const t = e.target as HTMLElement;
+  if (t === canvas || t.closest('.ctx-menu-wrap')) return;
+  if (t.closest('.modes button[data-mode]')) {
+    e.preventDefault();
+    return openContextMenu(e.clientX, e.clientY, 'Tabs', tabNamesMenu());
+  }
+  // text boxes keep the browser's own menu (cut, copy, paste)
+  if (t.closest('textarea, input:not([type=range]):not([type=checkbox]):not([type=radio])')) return;
+  const range = (t as HTMLInputElement).type === 'range' ? (t as HTMLInputElement) : t.closest('.slider, .bar-slider')?.querySelector<HTMLInputElement>('input[type=range]');
+  const arrange = arrangeMenu(t);
+  if (!range && !arrange) return;
+  e.preventDefault();
+  const def = range?.dataset.default;
+  const label = range?.closest('.slider')?.querySelector(':scope > span')?.textContent?.trim();
+  const title = label ?? t.closest<HTMLElement>('.ck-sec')?.querySelector('.ck-title')?.textContent?.trim() ?? 'Tools';
+  openContextMenu(e.clientX, e.clientY, title, [
+    range && def !== undefined && {
+      label: 'Reset to default',
+      icon: ctxDuo('rotate-left'),
+      disabled: range.disabled || parseFloat(range.value) === parseFloat(def),
+      run: () => {
+        range.value = def;
+        range.dispatchEvent(new Event('input', { bubbles: true }));
+        range.dispatchEvent(new Event('change', { bubbles: true }));
+        if (settings.numbers) syncSliderNumbers();
+      },
+    },
+    range && {
+      label: 'Show numbers',
+      checked: settings.numbers,
+      run: () => {
+        settings.numbers = !settings.numbers;
+        saveSettings();
+        renderSettings();
+      },
+    },
+    SEP,
+    arrange,
+  ]);
 });
 
 // ---------------------------------------------------------------------------

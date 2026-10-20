@@ -6,7 +6,7 @@
 import { tipOf } from './tooltip';
 
 export type ShortcutId =
-  | 'shape' | 'look' | 'stuff'
+  | 'shape' | 'look' | 'animate' | 'stuff'
   | 'undo' | 'redo' | 'copy' | 'paste'
   | 'frame' | 'frameAll'
   | 'draw' | 'mirror' | 'delete' | 'help'
@@ -28,7 +28,8 @@ interface Shortcut {
 const SHORTCUTS: Shortcut[] = [
   { id: 'shape', group: 'Getting around', label: 'Shape tab', keys: ['1'] },
   { id: 'look', group: 'Getting around', label: 'Look tab', keys: ['2'] },
-  { id: 'stuff', group: 'Getting around', label: 'Stuff tab', keys: ['3'] },
+  { id: 'animate', group: 'Getting around', label: 'Animate tab', keys: ['3'] },
+  { id: 'stuff', group: 'Getting around', label: 'Stuff tab', keys: ['4'] },
   { id: 'frame', group: 'Getting around', label: 'Frame what you’re working on', note: 'While drawing: face the drawing again', keys: ['f'] },
   { id: 'frameAll', group: 'Getting around', label: 'Frame everyone', keys: ['shift+a'] },
   { id: 'help', group: 'Getting around', label: 'Keyboard shortcuts', keys: ['?'] },
@@ -49,14 +50,14 @@ const SHORTCUTS: Shortcut[] = [
 
 /** Keys that always do the same thing, listed on the sheet but not changeable (or takeable). `combo`: a key named as on this computer (⌘ on a Mac). */
 const FIXED: { label: string; keys?: string; combo?: string; group: string; note?: string }[] = [
-  { group: 'Getting around', label: 'Your own tabs', keys: '4 – 9' },
+  { group: 'Getting around', label: 'Your own tabs', keys: '5 – 9' },
   { group: 'Getting around', label: 'Pan the view: drag with Space held, or right-drag. Shift+drag on empty space too (not while drawing)', keys: 'Space' },
   { group: 'Editing', label: 'Keep a dragged grip to one axis', note: 'Hold while dragging: it moves along the creature’s X, Y or Z, whichever you’re mostly moving along', combo: 'shift' },
   { group: 'Editing', label: 'Snap a dragged grip', note: 'Hold while dragging: it jumps onto the base or tip of another part near the pointer', combo: 'ctrl' },
   { group: 'Drawing', label: 'Keep the drawing (Done)', keys: 'Enter' },
   { group: 'Drawing', label: 'Cancel the drawing', keys: 'Esc' },
 ];
-const RESERVED = new Set(['enter', 'escape', 'space', 'tab', '4', '5', '6', '7', '8', '9']);
+const RESERVED = new Set(['enter', 'escape', 'space', 'tab', '5', '6', '7', '8', '9']);
 
 const STORE_KEY = 'critterkiln/shortcuts';
 let custom: Partial<Record<ShortcutId, string[]>> = {};

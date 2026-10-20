@@ -13,6 +13,8 @@
  * more layout, with a name, icon and color, between Look and Stuff.
  */
 
+import type { MenuItem } from './contextMenu';
+
 /** 'shape', 'look', or a made tab's id */
 export type Tab = string;
 /** what a tab started from: its defaults, for Reset */
@@ -255,7 +257,7 @@ const tabs: TabDef[] = (Array.isArray(saved.tabs) ? (saved.tabs as Partial<TabDe
       } as TabDef]
     : [],
 );
-/** Off: the tabs along the top are just their icons (Shape, Look and Stuff too) */
+/** Off: the tabs along the top are just their icons (Shape, Look, Animate and Stuff too) */
 let showTabNames = saved.showTabNames !== false;
 const toolIds = (raw: unknown) => (Array.isArray(raw) ? (raw as unknown[]).filter((id): id is string => typeof id === 'string' && !!TOOLS[id]) : []);
 const layouts: Record<Tab, Layout> = { shape: repair(saved.shape, 'shape'), look: repair(saved.look, 'look'), animate: repair(saved.animate, 'animate') };
@@ -301,6 +303,19 @@ export function setLayoutTab(t: Tab | null) {
   if (!t) editing = false;
   closePops();
   render();
+}
+
+/** The right-click menu on the tabs along the top: their names and icons, or just icons. */
+export function tabNamesMenu(): MenuItem[] {
+  const set = (on: boolean) => {
+    showTabNames = on;
+    save();
+    renderTabs();
+  };
+  return [
+    { label: 'Icons and names', checked: showTabNames, run: () => set(true) },
+    { label: 'Just icons', checked: !showTabNames, run: () => set(false) },
+  ];
 }
 
 /** The tabs people made, in order along the top. */
@@ -386,7 +401,7 @@ function renderTabs() {
   for (const t of tabs) {
     const b = el('button', 'ck-tab', `${tabIcon(t)}<span class="lbl"> ${esc(t.name)}</span>`);
     b.dataset.mode = t.id;
-    const key = tabs.indexOf(t) + 4;
+    const key = tabs.indexOf(t) + 5;
     b.title = key <= 9 ? `${t.name} (${key})` : t.name;
     b.classList.toggle('active', t.id === tab);
     modes.insertBefore(b, stuff);
@@ -702,6 +717,36 @@ function setGizmos(g: Gizmos) {
   save();
   sync();
   onGizmos();
+}
+
+/**
+ * The right-click menu's Arrange choices for the section (and tool) `at` is
+ * in: where the section goes, hiding it, or arranging by dragging. Null when
+ * it isn't in one (or the tab has no layout: Stuff).
+ */
+export function arrangeMenu(at: HTMLElement): MenuItem | null {
+  const secEl = at.closest<HTMLElement>('.ck-sec');
+  const s = tab && secEl ? find(secEl.dataset.sec!) : undefined;
+  if (!s) return null;
+  const toolId = at.closest<HTMLElement>('.ck-tool')?.dataset.tool;
+  const canvas = s.place !== 'side' && s.place !== 'hidden';
+  const sub: MenuItem[] = [
+    { label: 'Drag to arrange…', icon: duo('grip-dots-vertical'), checked: editing || undefined, run: () => setEditing(!editing) },
+    ...PLACE_NAMES.filter(([p]) => p !== 'hidden').map(([p, name]): MenuItem => ({
+      label: name,
+      checked: s.place === p,
+      run: () => moveSection(s.id, p, null),
+    })),
+    { label: `Hide “${s.name}”`, icon: duo('eye-slash'), run: () => moveSection(s.id, 'hidden', null) },
+  ];
+  if (canvas) sub.push({ label: s.fold ? 'Show the whole section' : 'Fold into one button', icon: duo(s.fold ? 'square-chevron-down' : 'square-minus'), run: () => {
+    s.fold = !s.fold || undefined;
+    save();
+    render();
+  } });
+  // one tool on its own: tucked away in a hidden section of its own, like dropping it on the Hidden tray
+  if (toolId && s.tools.length > 1) sub.push({ label: `Hide just “${TOOLS[toolId].name}”`, icon: duo('eye-slash'), run: () => newSection('hidden', [toolId]) });
+  return { label: 'Arrange', icon: duo('arrows-up-down-left-right'), sub };
 }
 
 // ---------------------------------------------------------------------------
