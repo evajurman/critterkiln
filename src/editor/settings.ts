@@ -2,7 +2,6 @@ import { Creature, setSeamlessLowPoly, setSeamlessMode, type SeamlessMode } from
 import { setMeshDetail } from '../inflate';
 import { setFuzzQuality } from '../materials';
 import { hasCustomShortcuts, labelShortcuts, renderShortcutSheet, resetShortcuts, stopListening } from '../shortcuts';
-import { renderMerge, resize } from '../main';
 import { $ } from './dom';
 import { key, quality, type Quality, QUALITY, renderer, setQualityValue } from './stage';
 import { composer, gtao, setAO } from './post';
@@ -13,6 +12,8 @@ import { stopPlacing } from './arrange';
 import { closeAttachPops, closeTopPopovers, togglePopover } from './popovers';
 import { renderUI } from './panels';
 import { fitTopbar } from './topbar';
+import { renderMerge } from './blendPanel';
+import { resize } from './loop';
 
 // settings (remembered in this browser)
 

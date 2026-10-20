@@ -4,7 +4,6 @@ import { bounds } from '../inflate';
 import { placeMatrix } from '../stuff';
 import { onMarkingTexture } from '../markings';
 import { MarkingPanel, initMarkingTools } from '../markingPanel';
-import { invalidate, rayAt } from '../main';
 import { $ } from './dom';
 import { canvas, scene, view } from './stage';
 import { mirror } from './floor';
@@ -17,6 +16,8 @@ import { stopPlacing } from './arrange';
 import { scopeSeg } from './widgets';
 import { partGlowFollow } from './partPanel';
 import { hint, hintOnce } from './hints';
+import { invalidate } from './loop';
+import { rayAt } from './animateTab';
 
 export function selPartId(): string {
   return creature.bones.get(selected)!.src;

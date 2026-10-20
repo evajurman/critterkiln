@@ -22,7 +22,6 @@ import {
 import { STYLES, glowWithFlash } from '../materials';
 import { markToolsOut } from '../markingPanel';
 import { copyLimb, partIds, pasteLimb, type LimbClip } from '../rigs';
-import { invalidate, withCleanScene } from '../main';
 import { $, fa, faClassic, iconLabel } from './dom';
 import { camera, canvas, key, scene, view } from './stage';
 import { composer } from './post';
@@ -41,6 +40,8 @@ import { flashPart, renderThingMaterial } from './partPanel';
 import { pieceMarks } from './markingsUi';
 import { rigEdit } from './rigEdit';
 import { hint, hintOnce } from './hints';
+import { withCleanScene } from './snapshot';
+import { invalidate } from './loop';
 
 // stuff workbench
 

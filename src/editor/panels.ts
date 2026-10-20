@@ -1,7 +1,6 @@
 import { unlock } from '../achievements';
 import { stopMarkTools } from '../markingPanel';
 import { customTabs, setLayoutTab } from '../layout';
-import { ANIM_TAB, applyDof, renderAnim, renderMerge } from '../main';
 import { $ } from './dom';
 import { sceneOrtho, setOrtho } from './stage';
 import { backdrop, paintBackdrop, STUFF_BACKDROP } from './floor';
@@ -20,6 +19,9 @@ import { renderMarkings } from './markingsUi';
 import { renderRigPanel } from './rigEdit';
 import { hintOnce } from './hints';
 import { placeModePill } from './topbar';
+import { applyDof } from './dof';
+import { renderMerge } from './blendPanel';
+import { ANIM_TAB, renderAnim } from './animateTab';
 
 export function renderUI() {
   if (!creature.bones.has(selected)) setSelected(creature.list[0].def.id);

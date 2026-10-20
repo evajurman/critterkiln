@@ -6,7 +6,6 @@ import { markToolsOut } from '../markingPanel';
 import { gizmos, setLayoutIdle } from '../layout';
 import { ridesSurface } from '../shortcuts';
 import { expandRig, moveJoint, rollLimb, scaleBone, unlinkPair, type BoneDef, type RigState, type V3 } from '../rigs';
-import { animOn, focusAt, invalidate, pickAnimStuff, pickingFocus } from '../main';
 import { $ } from './dom';
 import { camera, canvas, scene, view } from './stage';
 import {
@@ -39,6 +38,9 @@ import { setEyesFolded } from './eyesPanel';
 import { renderUI } from './panels';
 import { applyPartCopies, commitBoneEdit, parentAt, pickingParent, rigLocked } from './rigEdit';
 import { hint, hintOnce } from './hints';
+import { focusAt, pickingFocus } from './dof';
+import { invalidate } from './loop';
+import { animOn, pickAnimStuff } from './animateTab';
 
 // controls (our pointer handlers are registered first so they can veto orbiting)
 

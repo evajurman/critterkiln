@@ -1,11 +1,11 @@
 import { followOf, type GlowFollow } from '../materials';
 import { type Marking } from '../markings';
 import { setSceneColors } from '../layout';
-import { invalidate } from '../main';
 import { $ } from './dom';
 import { backdrop, floorPrefs } from './floor';
 import { creature, creatures, mode, sceneColorRows, world } from './state';
 import { workbench } from './workbench';
+import { invalidate } from './loop';
 
 // UI
 

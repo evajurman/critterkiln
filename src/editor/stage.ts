@@ -2,13 +2,13 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { setMeshDetail } from '../inflate';
 import { setFuzzQuality, setGlassEnvironment, setSketchPixelRatio } from '../materials';
-import { invalidate } from '../main';
 import { $ } from './dom';
 import { bokeh, gtao, scenePass } from './post';
 import { fitShadows } from './state';
 import { controls } from './controls';
 import { renderOverlay } from './drawing';
 import { gizmo } from './attach';
+import { invalidate } from './loop';
 
 // renderer / scene
 

@@ -3,7 +3,6 @@ import { TransformControls } from 'three/examples/jsm/controls/TransformControls
 import { type Attachment } from '../creature';
 import { markGizmoHeld, stopMarkTools } from '../markingPanel';
 import { type V3 } from '../rigs';
-import { invalidate } from '../main';
 import { $ } from './dom';
 import { camera, canvas, scene } from './stage';
 import { commit, creature, fitShadows, state } from './state';
@@ -12,6 +11,7 @@ import { bakePiece, mirrorTwinLive, piecePivot } from './workbench';
 import { placing, stopPlacing } from './arrange';
 import { syncAttachBar } from './attachPanel';
 import { renderCreatureStuff } from './carry';
+import { invalidate } from './loop';
 
 // attaching stuff to body parts
 

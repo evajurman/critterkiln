@@ -6,7 +6,6 @@ import { migrateMarkings } from '../markings';
 import { stopMarkTools } from '../markingPanel';
 import { type Tab } from '../layout';
 import { RIGS, expandRig, movedBases, reparentAll, rigFromTemplate, type RigState, type V3 } from '../rigs';
-import { animSecs, invalidate } from '../main';
 import { $ } from './dom';
 import { key, KEY_AT, lightSpin, scene } from './stage';
 import { updateSkeletonVisibility } from './controls';
@@ -20,6 +19,8 @@ import { renderSceneColors } from './widgets';
 import { renderUI } from './panels';
 import { rehang, rigPrefs, sceneName, sizesIn } from './rigEdit';
 import { hint } from './hints';
+import { invalidate } from './loop';
+import { animSecs } from './animateTab';
 
 // state + history
 
