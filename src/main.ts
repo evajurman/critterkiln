@@ -1,16 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
-import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { Reflector } from 'three/examples/jsm/objects/Reflector.js';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
-import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
-import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
-import { BokehPass } from 'three/examples/jsm/postprocessing/BokehPass.js';
-import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
-import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
-import { FullScreenQuad, Pass } from 'three/examples/jsm/postprocessing/Pass.js';
 import {
   bendOf,
   blendWithOf,
@@ -36,7 +27,7 @@ import {
   type Planted,
   type SeamlessMode,
 } from './creature';
-import { bump, checkScene, collect, reach, renderTrophies, setTrophyHandlers, unlock } from './achievements';
+import { collect, reach, renderTrophies, setTrophyHandlers, unlock } from './achievements';
 import { bounds, clipLoop, combineLoops, getMeshDetail, pointInPolygon, setMeshDetail, signedArea, smoothLoop, symmetrize, type Vec2 } from './inflate';
 import {
   buildThing,
@@ -61,31 +52,47 @@ import {
   type Thing,
   type Wearer,
 } from './stuff';
-import {
-  FUR_LAYER,
-  STYLE_PARAMS,
-  STYLES,
-  followOf,
-  glowWithFlash,
-  makeMaterial,
-  setFuzzQuality,
-  setGlassEnvironment,
-  setGlow,
-  setGlowMaskOut,
-  setSketchPixelRatio,
-  styleSettings,
-  type GlowFollow,
-  type StyleId,
-} from './materials';
-import { migrateMarkings, onMarkingTexture, type Marking } from './markings';
+import { STYLE_PARAMS, STYLES, followOf, glowWithFlash, setFuzzQuality, setSketchPixelRatio, styleSettings, type GlowFollow, type StyleId } from './materials';
+import { onMarkingTexture, type Marking } from './markings';
 import { MarkingPanel, followMarkTools, initMarkingTools, markGizmoHeld, markGizmoMode, markToolKey, markToolsOut, stopMarkTools } from './markingPanel';
 import { installScrollbars } from './scrollbars';
 import { applyPalette, GIFEncoder, quantize } from 'gifenc';
-import { ANIM_KINDS, animOffset, animP, canReverse, defaultAnim, leanAt, leanOf, leanQuat, mirrorAnim, reachAt, reachRim, rimLean, orbitOut, STUFF_KINDS, stuffMove, stuffP, type PartAnim, type StuffAnim, type StuffKind } from './animate';
-import { arrangeMenu, customTabs, tabNamesMenu, gizmos, initLayout, setLayoutIdle, setLayoutTab, setSceneColors, type Tab } from './layout';
+import {
+  ANIM_KINDS,
+  animOffset,
+  animP,
+  canReverse,
+  defaultAnim,
+  leanAt,
+  leanOf,
+  leanQuat,
+  mirrorAnim,
+  reachAt,
+  reachRim,
+  rimLean,
+  orbitOut,
+  STUFF_KINDS,
+  stuffMove,
+  stuffP,
+  type PartAnim,
+  type StuffAnim,
+  type StuffKind,
+} from './animate';
+import { arrangeMenu, customTabs, tabNamesMenu, gizmos, initLayout, setLayoutIdle, setLayoutTab, setSceneColors } from './layout';
 import { installCursorPress } from './cursorPress';
 import { installTooltips } from './tooltip';
-import { captureShortcut, hasCustomShortcuts, is, keyLabel, labelShortcuts, renderShortcutSheet, resetShortcuts, ridesSurface, stopListening, type ShortcutId } from './shortcuts';
+import {
+  captureShortcut,
+  hasCustomShortcuts,
+  is,
+  keyLabel,
+  labelShortcuts,
+  renderShortcutSheet,
+  resetShortcuts,
+  ridesSurface,
+  stopListening,
+  type ShortcutId,
+} from './shortcuts';
 import { openContextMenu, SEP, type MenuEntry, type MenuItem } from './contextMenu';
 import { deleteCreation, getCreation, keepStorage, listCreations, markSaved, putCreation, type Creation, type SavedHow } from './library';
 import {
@@ -107,8 +114,6 @@ import {
   pasteLimb,
   reattachBone,
   moveLimb,
-  movedBases,
-  reparentAll,
   rigFromTemplate,
   rollLimb,
   saveRig,
@@ -124,928 +129,106 @@ import {
   type RigState,
   type V3,
 } from './rigs';
-
-const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector(sel) as T;
-
-/**
- * Font Awesome icon markup. Slab where it has the icon, classic regular otherwise; both
- * are the two-tone styles, whose fill only shows in the Color theme (style.css).
- */
-const fa = (name: string) => `<i class="fa-slab-duo fa-regular fa-${name}" aria-hidden="true"></i>`;
-const faClassic = (name: string) => `<i class="fa-duotone fa-regular fa-${name}" aria-hidden="true"></i>`;
-/** Sets an element to an icon followed by text (added as a text node, so names need no escaping). */
-function iconLabel(el: HTMLElement, icon: string, text = '') {
-  el.innerHTML = icon;
-  if (text) el.append(` ${text}`);
-}
-
-// ---------------------------------------------------------------------------
-// renderer / scene
-
-const viewport = $('#viewport');
-const canvas = $<HTMLCanvasElement>('#gl');
-const overlay = $<HTMLCanvasElement>('#overlay');
-const octx = overlay.getContext('2d')!;
-
-// ---------------------------------------------------------------------------
-// performance: how much work each frame and each shape takes (Settings)
-
-type Quality = 'high' | 'balanced' | 'fast';
-const QUALITY: Record<Quality, { dpr: number; detail: number; fuzz: number; samples: number; shadow: number; ao: boolean; aoSamples: number; glass: number }> = {
-  high: { dpr: 2, detail: 1, fuzz: 1, samples: 4, shadow: 2048, ao: true, aoSamples: 16, glass: 1 },
-  balanced: { dpr: 1.5, detail: 0.6, fuzz: 0.67, samples: 4, shadow: 2048, ao: true, aoSamples: 8, glass: 0.75 },
-  fast: { dpr: 1, detail: 0.35, fuzz: 0.34, samples: 2, shadow: 1024, ao: false, aoSamples: 8, glass: 0.5 },
-};
-let quality: Quality = (() => {
-  try {
-    const q = JSON.parse(localStorage.getItem('creature-creator/settings') ?? '{}').quality;
-    return q in QUALITY ? (q as Quality) : 'high';
-  } catch {
-    return 'high';
-  }
-})();
-const pixelRatio = () => Math.min(devicePixelRatio, QUALITY[quality].dpr);
-setMeshDetail(QUALITY[quality].detail);
-setFuzzQuality(QUALITY[quality].fuzz);
-
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
-renderer.setPixelRatio(pixelRatio());
-setSketchPixelRatio(pixelRatio());
-renderer.transmissionResolutionScale = QUALITY[quality].glass;
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.VSMShadowMap;
-// Shadows don't depend on the camera: the loop redraws the map only when a
-// shadow caster or the key light actually changed (see shadowsChanged).
-renderer.shadowMap.autoUpdate = false;
-renderer.toneMapping = THREE.NeutralToneMapping;
-renderer.toneMappingExposure = 1.0;
-
-const scene = new THREE.Scene();
+import { $, fa, faClassic, iconLabel } from './editor/dom';
+import {
+  applyLighting,
+  camera,
+  canvas,
+  hemi,
+  key,
+  LIGHT_KEY,
+  lightTurn,
+  octx,
+  ORTHO_KEY,
+  overlay,
+  pixelRatio,
+  quality,
+  type Quality,
+  QUALITY,
+  renderer,
+  rim,
+  scene,
+  sceneOrtho,
+  setLightTurn,
+  setOrtho,
+  setQualityValue,
+  setSceneOrtho,
+  shadowMat,
+  syncView,
+  view,
+  viewport,
+} from './editor/stage';
+import {
+  applyFloor,
+  backdrop,
+  BACKDROPS,
+  buildFloorMesh,
+  type FloorMode,
+  floorPrefs,
+  initFloor,
+  mirror,
+  neutralTone,
+  paintBackdrop,
+  refreshFloorColors,
+  saveFloor,
+  setBackdrop,
+  sizeMirror,
+  STUFF_BACKDROP,
+  tintForBackdrop,
+} from './editor/floor';
+import { aoTexel, bokeh, composer, gtao, initPost, setAO } from './editor/post';
+import {
+  activate,
+  booted,
+  buildCreature,
+  commit,
+  CREATION_KEY,
+  creature,
+  creatures,
+  eyePair,
+  fitShadows,
+  freshWorld,
+  hIndex,
+  history,
+  idle,
+  initState,
+  loadedWorld,
+  makeCreature,
+  migrate,
+  mode,
+  type Mode,
+  opened,
+  parentsChecked,
+  redo,
+  save,
+  sceneColorRows,
+  selected,
+  setBooted,
+  setCreature,
+  setEyePair,
+  setHIndex,
+  setIdle,
+  setModeValue,
+  setSelected,
+  setState,
+  setWorld,
+  state,
+  undo,
+  world,
+  type World,
+} from './editor/state';
 
 // Render on demand: the loop only draws when something asked for it (any
 // input, a commit, camera motion, a merge or skin update...). A couple of
 // extra frames cover work that lands in a later rAF callback.
 let renderFrames = 3;
-function invalidate(frames = 3) {
+export function invalidate(frames = 3) {
   renderFrames = Math.max(renderFrames, frames);
 }
+initFloor();
+initPost();
+initState();
 
-const pmrem = new THREE.PMREMGenerator(renderer);
-scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-setGlassEnvironment(scene.environment);
-scene.environmentIntensity = 0.3;
-
-// Studio lighting: a warm key casting soft shadows, a cool fill, and a rim to
-// separate the silhouette from the backdrop. Ambient is kept low so form reads.
-const hemi = new THREE.HemisphereLight(0xffffff, 0xbfae98, 0.45);
-scene.add(hemi);
-const key = new THREE.DirectionalLight(0xfff0dc, 3.2);
-key.position.set(2.2, 4.6, 3.0);
-key.castShadow = true;
-key.shadow.mapSize.setScalar(QUALITY[quality].shadow);
-key.shadow.camera.left = key.shadow.camera.bottom = -3;
-key.shadow.camera.right = key.shadow.camera.top = 3;
-key.shadow.camera.near = 0.5;
-key.shadow.camera.far = 14;
-key.shadow.bias = -0.0005;
-key.shadow.normalBias = 0.015;
-key.shadow.radius = 9;
-key.shadow.blurSamples = 16;
-scene.add(key);
-const fill = new THREE.DirectionalLight(0xdce6ff, 0.55);
-scene.add(fill);
-const rim = new THREE.DirectionalLight(0xfff4f8, 1.4);
-scene.add(rim);
-
-// The whole rig of lights can be turned around the scene (Backdrop > Lighting).
-// Where each light sits at a turn of 0; the key's is relative to the creatures.
-const KEY_AT = new THREE.Vector3(2.2, 0, 3.0);
-const FILL_AT = new THREE.Vector3(-4, 1.8, 2.5);
-const RIM_AT = new THREE.Vector3(-1.5, 3, -4.5);
-const LIGHT_KEY = 'creature-creator/light';
-let lightTurn = (() => {
-  try {
-    return Number(JSON.parse(localStorage.getItem(LIGHT_KEY) ?? '{}').turn) || 0;
-  } catch {
-    return 0;
-  }
-})();
-function lightSpin(): THREE.Quaternion {
-  return new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), THREE.MathUtils.degToRad(lightTurn));
-}
-function applyLighting() {
-  const q = lightSpin();
-  fill.position.copy(FILL_AT).applyQuaternion(q);
-  rim.position.copy(RIM_AT).applyQuaternion(q);
-  fitShadows();
-}
-
-// Invisible floor that only shows shadows and contact occlusion, so the
-// backdrop color is seamless in every direction.
-const shadowMat = new THREE.ShadowMaterial({ opacity: 0.55 });
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), shadowMat);
-ground.rotation.x = -Math.PI / 2;
-ground.receiveShadow = true;
-ground.renderOrder = 2; // shadows draw over the mirror veil
-scene.add(ground);
-
-// ---------------------------------------------------------------------------
-// floor options: none / backdrop (shadow catcher) / mirror / material
-
-type FloorMode = 'none' | 'shadow' | 'mirror' | 'material';
-const FLOOR_KEY = 'creature-creator/floor';
-const floorPrefs: { mode: FloorMode; style: StyleId; color: string; glow: number; glowFollow?: GlowFollow; reflect: number } = (() => {
-  const defaults = { mode: 'shadow' as FloorMode, style: 'clay' as StyleId, color: '#d6c7b3', glow: 0, reflect: 0.55 };
-  try {
-    return { ...defaults, ...JSON.parse(localStorage.getItem(FLOOR_KEY) ?? '{}') };
-  } catch {
-    return defaults;
-  }
-})();
-let mirror: Reflector | null = null;
-// A backdrop-colored veil over the mirror: reflection strength fades the
-// reflection toward the backdrop, so the floor stays seamless at the horizon.
-const veil = new THREE.Mesh(
-  new THREE.CircleGeometry(40, 96),
-  new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false }),
-);
-veil.rotation.x = -Math.PI / 2;
-veil.position.y = -0.0005;
-veil.renderOrder = 1;
-veil.visible = false;
-scene.add(veil);
-let floorMesh: THREE.Mesh | null = null;
-let floorKey = '';
-
-function saveFloor() {
-  try {
-    localStorage.setItem(FLOOR_KEY, JSON.stringify(floorPrefs));
-  } catch {
-    /* ignore */
-  }
-}
-
-/** Veil and fog both match the (tone-compensated) backdrop exactly. */
-function refreshFloorColors() {
-  const bg = scene.background as THREE.Color | null;
-  if (!bg) return;
-  (veil.material as THREE.MeshBasicMaterial).color.copy(bg);
-  if (scene.fog) (scene.fog as THREE.Fog).color.copy(bg);
-}
-
-function sizeMirror() {
-  if (!mirror) return;
-  const dpr = pixelRatio();
-  mirror.getRenderTarget().setSize(Math.round(viewport.clientWidth * dpr), Math.round(viewport.clientHeight * dpr));
-}
-
-/** A real floor surface in one of the creature materials. */
-function buildFloorMesh() {
-  const settings = styleSettings(floorPrefs.style, state.materialSettings?.[floorPrefs.style]);
-  const key = JSON.stringify([floorPrefs.style, floorPrefs.color, settings]);
-  if (floorMesh && key === floorKey) {
-    setGlow(floorMesh, floorPrefs.color, floorPrefs.glow, { follow: floorPrefs.glowFollow });
-    return;
-  }
-  floorKey = key;
-  if (floorMesh) {
-    scene.remove(floorMesh);
-    (floorMesh.material as THREE.Material).dispose();
-    floorMesh.geometry.dispose();
-  }
-  let geo: THREE.BufferGeometry = new THREE.PlaneGeometry(50, 50, 100, 100);
-  geo.rotateX(-Math.PI / 2);
-  if (floorPrefs.style === 'lowpoly') {
-    // a gently faceted ground with per-facet shade variation
-    const pos = geo.getAttribute('position');
-    for (let i = 0; i < pos.count; i++) pos.setY(i, (Math.sin(i * 12.9898) * 43758.5453 % 1) * 0.02);
-    geo = geo.toNonIndexed();
-    geo.computeVertexNormals();
-    const n = geo.getAttribute('position').count;
-    const colors = new Float32Array(n * 3);
-    for (let f = 0; f < n; f += 3) {
-      const k = 0.9 + ((Math.sin(f * 78.233) * 43758.5453) % 1 + 1) % 1 * 0.12;
-      for (let j = 0; j < 3; j++) colors.set([k, k, k], (f + j) * 3);
-    }
-    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  }
-  floorMesh = new THREE.Mesh(geo, makeMaterial(floorPrefs.style, floorPrefs.color, settings));
-  floorMesh.position.y = -0.002;
-  floorMesh.receiveShadow = true;
-  setGlow(floorMesh, floorPrefs.color, floorPrefs.glow, { follow: floorPrefs.glowFollow });
-  scene.add(floorMesh);
-}
-
-/**
- * Glass only refracts what's drawn before it, which is the opaque objects, so a
- * see-through shadow catcher would vanish behind a glass jar (a creature in a
- * jar would float with no shadow under it). So the catcher is drawn with the
- * opaque objects, keeping its alpha blending. Over a mirror it has to be drawn
- * after the veil instead, as a normal see-through layer.
- */
-function setShadowCatcher(withOpaque: boolean) {
-  if (shadowMat.transparent === !withOpaque) return;
-  shadowMat.transparent = !withOpaque;
-  shadowMat.blending = withOpaque ? THREE.CustomBlending : THREE.NormalBlending;
-  shadowMat.blendSrc = THREE.SrcAlphaFactor;
-  shadowMat.blendDst = THREE.OneMinusSrcAlphaFactor;
-  // as three's normal blending: the picture's own alpha stays solid
-  shadowMat.blendSrcAlpha = THREE.OneFactor;
-  shadowMat.blendDstAlpha = THREE.OneMinusSrcAlphaFactor;
-  shadowMat.needsUpdate = true;
-}
-
-function applyFloor() {
-  const m = floorPrefs.mode;
-  ground.visible = m === 'shadow' || m === 'mirror';
-  setShadowCatcher(m !== 'mirror');
-
-  if (m === 'mirror' && !mirror) {
-    mirror = new Reflector(new THREE.CircleGeometry(40, 96), { clipBias: 0.003, color: 0xffffff, textureWidth: 1024, textureHeight: 1024 });
-    mirror.rotation.x = -Math.PI / 2;
-    mirror.position.y = -0.001;
-    scene.add(mirror);
-    sizeMirror();
-  }
-  if (mirror) mirror.visible = m === 'mirror';
-  veil.visible = m === 'mirror';
-  (veil.material as THREE.MeshBasicMaterial).opacity = 1 - floorPrefs.reflect;
-  if (m === 'material') buildFloorMesh();
-  if (floorMesh) floorMesh.visible = m === 'material';
-  // a real floor fades into the backdrop instead of ending at a hard edge
-  scene.fog = m === 'material' ? new THREE.Fog(0xffffff, 5, 20) : null;
-  refreshFloorColors();
-}
-
-const BG_KEY = 'creature-creator/bg';
-const BACKDROPS = ['#f5efe4', '#fbe3e1', '#e3efe0', '#dfe9f5', '#ebe3f5', '#fff4c7', '#3a3340', '#1d2433'];
-let backdrop = localStorage.getItem(BG_KEY) ?? BACKDROPS[0];
-
-/** three's Neutral tone mapping (exposure 1), mirrored in JS. */
-function neutralTone([r, g, b]: number[]): number[] {
-  const x = Math.min(r, g, b);
-  const offset = x < 0.08 ? x - 6.25 * x * x : 0.04;
-  let c = [r - offset, g - offset, b - offset];
-  const peak = Math.max(...c);
-  const start = 0.76;
-  if (peak < start) return c;
-  const d = 1 - start;
-  const newPeak = 1 - (d * d) / (peak + d - start);
-  c = c.map((v) => (v * newPeak) / peak);
-  const k = 1 - 1 / (0.15 * (peak - newPeak) + 1);
-  return c.map((v) => v + (newPeak - v) * k);
-}
-
-/** Pre-compensate a color so it comes out of tone mapping unchanged. */
-function untoned(target: THREE.Color): THREE.Color {
-  const want = [target.r, target.g, target.b];
-  let c = want.slice();
-  for (let i = 0; i < 40; i++) {
-    const got = neutralTone(c);
-    c = c.map((v, j) => Math.min(8, Math.max(0, v + (want[j] - got[j]))));
-  }
-  return new THREE.Color(c[0], c[1], c[2]);
-}
-
-/** Tints the shadow toward a deeper, slightly cooler version of the backdrop, and the bounce light toward it. */
-function tintForBackdrop(c: THREE.Color) {
-  const hsl = { h: 0, s: 0, l: 0 };
-  c.getHSL(hsl);
-  shadowMat.color.setHSL((hsl.h + 0.02) % 1, Math.min(1, hsl.s * 0.8 + 0.1), hsl.l * 0.25);
-  hemi.groundColor.copy(c).multiplyScalar(0.8);
-}
-
-/** The Stuff workbench has its own backdrop while it's open; the scene's comes back after. */
-const STUFF_BACKDROP = '#adcfa5';
-function paintBackdrop(hex: string) {
-  const c = new THREE.Color(hex);
-  scene.background = untoned(c);
-  tintForBackdrop(c);
-  refreshFloorColors();
-}
-
-function setBackdrop(hex: string) {
-  backdrop = hex;
-  paintBackdrop(mode === 'stuff' ? STUFF_BACKDROP : hex);
-  try {
-    localStorage.setItem(BG_KEY, hex);
-  } catch {
-    /* ignore */
-  }
-}
-paintBackdrop(backdrop);
-
-const camera = new THREE.PerspectiveCamera(35, 1, 0.05, 100);
-camera.position.set(2.8, 2.0, 4.4);
-// Ortho: the controls still move `camera`; orthoCam follows it, as big as
-// `camera` sees at the orbit centre, so framing and zooming work the same.
-// It draws from behind its spot too (negative near), so nothing close is cut off.
-const orthoCam = new THREE.OrthographicCamera(-1, 1, 1, -1, -20, 100);
-/** whichever of the two draws the scene (and is picked and projected through) */
-let view: THREE.PerspectiveCamera | THREE.OrthographicCamera = camera;
-
-// Post-processing: MSAA scene render, ground-truth ambient occlusion for the
-// creases where parts meet and contact shadows on the floor, then tone mapping.
-const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: QUALITY[quality].samples }));
-
-// Felt fuzz and ambient occlusion: AO darkens whatever pixels it lands on,
-// and the fuzz halo sticks out past the body's edge over the floor's contact
-// shadow, so it would come out with dark smudges along the silhouette. With AO
-// on, the fuzz (shells and stray hairs, flagged `fx`) is hidden for the scene
-// and AO passes and drawn afterwards, on top, by furPass.
-let furHidden: THREE.Object3D[] = [];
-function hideFur() {
-  scene.traverseVisible((o) => {
-    if (o.userData.fx) furHidden.push(o);
-  });
-  for (const o of furHidden) o.visible = false;
-}
-function showFur() {
-  for (const o of furHidden) o.visible = true;
-  furHidden = [];
-}
-
-// Handles and gizmos (drawn with depthTest off, to show through the body)
-// would end up under the fuzz too, so with the fur pass on they're held back
-// as well and drawn last, over the fuzz.
-const OVERLAY_LAYER = 2;
-let overlayHidden: THREE.Object3D[] = [];
-function hideOverlays() {
-  scene.traverseVisible((o) => {
-    const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
-    if (m && (Array.isArray(m) ? m : [m]).some((x) => !x.depthTest)) overlayHidden.push(o);
-  });
-  for (const o of overlayHidden) o.visible = false;
-}
-
-const scenePass = new RenderPass(scene, view);
-const scenePassRender = scenePass.render.bind(scenePass);
-scenePass.render = (...args: Parameters<RenderPass['render']>) => {
-  if (furPass.enabled) {
-    hideFur();
-    hideOverlays();
-  }
-  scenePassRender(...args);
-};
-composer.addPass(scenePass);
-const gtao = new GTAOPass(scene, camera, 1, 1);
-// Stock GTAO counts anything within `thickness` in camera depth as an
-// occluder, cut off sharply. Looking down, the floor behind a leg's edge
-// comes within that depth partway up the leg, so the shade switched on there
-// and moved as the camera did. Here an occluder fades out by its real distance
-// instead: the same from every angle, and soft at the limit.
-gtao.gtaoMaterial.fragmentShader = gtao.gtaoMaterial.fragmentShader
-  .replaceAll('if (abs(viewDelta.z) < thickness) {', '{ float occW = 1. - smoothstep(0.5 * thickness, thickness, length(viewDelta));')
-  .replace(/(cosHorizons\.[xy] \+= max\(0\., \(sampleCosHorizon - cosHorizons\.[xy]\) \* mix\(1\., 2\. \/ float\(j \+ 2\), distanceFallOff\))\);/g, '$1 * occW);');
-gtao.gtaoMaterial.needsUpdate = true;
-gtao.updateGtaoMaterial({ radius: 0.28, distanceExponent: 1.6, thickness: 0.6, scale: 1.3, samples: QUALITY[quality].aoSamples });
-gtao.enabled = QUALITY[quality].ao;
-gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 16 });
-gtao.blendIntensity = 1.0;
-// The AO is worked out from a depth image with no anti-aliasing, then
-// multiplied onto the smoothed picture. An outline's edge pixels are part
-// floor (or whatever's behind) in the picture but all part in the AO, and a
-// part has no AO right at its edge, so they kept the floor's colour with none
-// of its shade: a light, stepped line round everything, glaring on a bright
-// backdrop. Where a pixel is clearly lighter than a neighbour (an edge), it
-// takes half that neighbour's shade, about what a half-and-half pixel needs.
-// Smooth AO, away from edges, is left exactly as it was.
-const aoTexel = new THREE.Vector2(1, 1);
-gtao.blendMaterial.uniforms.texel = { value: aoTexel };
-gtao.blendMaterial.fragmentShader = /* glsl */ `
-  uniform float intensity;
-  uniform sampler2D tDiffuse;
-  uniform vec2 texel;
-  varying vec2 vUv;
-  void main() {
-    vec4 ao = texture2D(tDiffuse, vUv);
-    float darkest = min(
-      min(texture2D(tDiffuse, vUv + vec2(texel.x, 0.0)).r, texture2D(tDiffuse, vUv - vec2(texel.x, 0.0)).r),
-      min(texture2D(tDiffuse, vUv + vec2(0.0, texel.y)).r, texture2D(tDiffuse, vUv - vec2(0.0, texel.y)).r));
-    float edge = smoothstep(0.06, 0.2, ao.r - darkest);
-    ao.rgb = vec3(mix(ao.r, darkest, 0.5 * edge));
-    gl_FragColor = vec4(mix(vec3(1.0), ao.rgb, intensity), ao.a);
-  }`;
-gtao.blendMaterial.needsUpdate = true;
-composer.addPass(gtao);
-
-/**
- * Draws the fuzz over the AO'd image. The image's own depth was lost when AO
- * wrote it out, so AO's depth (the scene without fuzz) is copied in first:
- * fuzz behind the body stays hidden.
- */
-class FurPass extends Pass {
-  private depthCopy = new FullScreenQuad(
-    new THREE.ShaderMaterial({
-      uniforms: { tDepth: { value: null } },
-      vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-      fragmentShader: 'uniform sampler2D tDepth; varying vec2 vUv; void main() { gl_FragDepth = texture2D(tDepth, vUv).x; }',
-      depthTest: true,
-      depthWrite: true,
-      depthFunc: THREE.AlwaysDepth,
-      colorWrite: false,
-    }),
-  );
-
-  constructor() {
-    super();
-    this.needsSwap = false;
-  }
-
-  render(renderer: THREE.WebGLRenderer, _writeBuffer: THREE.WebGLRenderTarget, readBuffer: THREE.WebGLRenderTarget) {
-    const fur = furHidden;
-    const overlays = overlayHidden;
-    overlayHidden = [];
-    showFur();
-    for (const o of overlays) o.visible = true;
-    if (!fur.length && !overlays.length) return;
-    renderer.setRenderTarget(this.renderToScreen ? null : readBuffer);
-    const autoClear = renderer.autoClear;
-    renderer.autoClear = false;
-    renderer.clearDepth();
-    (this.depthCopy.material as THREE.ShaderMaterial).uniforms.tDepth.value = gtao.depthTexture;
-    this.depthCopy.render(renderer);
-    // only the fuzz: no backdrop (it would paint over everything), lights kept
-    const background = scene.background;
-    scene.background = null;
-    const mask = view.layers.mask;
-    if (fur.length) {
-      view.layers.set(FUR_LAYER);
-      renderer.render(scene, view);
-    }
-    // then the handles, on top of it all
-    if (overlays.length) {
-      for (const o of overlays) o.layers.enable(OVERLAY_LAYER);
-      view.layers.set(OVERLAY_LAYER);
-      renderer.render(scene, view);
-      for (const o of overlays) o.layers.disable(OVERLAY_LAYER);
-    }
-    view.layers.mask = mask;
-    scene.background = background;
-    renderer.autoClear = autoClear;
-  }
-}
-const furPass = new FurPass();
-composer.addPass(furPass);
-
-/**
- * Glowing colors (materials.ts glowMaterial) get a soft halo: the scene is
- * drawn again, small, with each glowing thing putting out just its glow (in
- * its own material, so the halo follows its texture too) and everything else
- * black (so it still hides what's behind it), and that is blurred over the
- * picture. Fuzz, see-through things and handles don't hide the glow.
- * Skipped while nothing in view glows.
- */
-class GlowPass extends Pass {
-  private mask = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType });
-  private bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.4, 0, 0);
-  private over = new FullScreenQuad(
-    new THREE.ShaderMaterial({
-      uniforms: { tDiffuse: { value: null }, tBloom: { value: null } },
-      vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-      // the picture with the halo added (its alpha, a transparent photo's, as it was)
-      fragmentShader:
-        'uniform sampler2D tDiffuse; uniform sampler2D tBloom; varying vec2 vUv; void main() { vec4 c = texture2D(tDiffuse, vUv); gl_FragColor = vec4(c.rgb + texture2D(tBloom, vUv).rgb, c.a); }',
-      blending: THREE.NoBlending,
-      depthTest: false,
-      depthWrite: false,
-    }),
-  );
-  /** stands in for anything that hides the glow behind it, per side */
-  private black = new Map<THREE.Side, THREE.MeshBasicMaterial>();
-  /** draws nothing at all */
-  private skip = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false });
-
-  constructor() {
-    super();
-    this.needsSwap = false;
-    // mostly the finest blurs: a halo that hugs what glows, not a haze over the whole picture
-    this.bloom.compositeMaterial.uniforms.bloomFactors.value = [1, 0.4, 0.1, 0.02, 0];
-  }
-
-  setSize(w: number, h: number) {
-    this.mask.setSize(Math.max(1, Math.round(w / 2)), Math.max(1, Math.round(h / 2)));
-    this.bloom.setSize(w, h);
-  }
-
-  private blackMat(side: THREE.Side) {
-    let m = this.black.get(side);
-    if (!m) this.black.set(side, (m = new THREE.MeshBasicMaterial({ color: 0x000000, side })));
-    return m;
-  }
-
-  render(renderer: THREE.WebGLRenderer, writeBuffer: THREE.WebGLRenderTarget, readBuffer: THREE.WebGLRenderTarget) {
-    this.needsSwap = false;
-    const swaps: [THREE.Mesh, THREE.Material | THREE.Material[]][] = [];
-    const hidden: THREE.Object3D[] = [];
-    let glowing = false;
-    scene.traverseVisible((o) => {
-      const mesh = o as THREE.Mesh;
-      if (!mesh.isMesh) {
-        if ((o as THREE.Line).isLine || (o as THREE.Points).isPoints || (o as THREE.Sprite).isSprite) hidden.push(o);
-        return;
-      }
-      // a mirror draws the whole scene again
-      if ((o as THREE.Mesh & { isReflector?: boolean }).isReflector) return void hidden.push(o);
-      const m = mesh.material;
-      let use: THREE.Material = this.skip;
-      if (!Array.isArray(m) && m.visible && !o.userData.fx) {
-        if (m.userData.glow) {
-          // drawn as it is, putting out only its glow (glowMaskOut)
-          glowing = true;
-          return;
-        }
-        if (m.depthTest && m.depthWrite && m.colorWrite && !m.transparent && !(m as THREE.MeshPhysicalMaterial).transmission) use = this.blackMat(m.side);
-      }
-      swaps.push([mesh, m]);
-      mesh.material = use;
-    });
-    if (glowing) {
-      for (const o of hidden) o.visible = false;
-      const background = scene.background, fog = scene.fog;
-      const shadows = renderer.shadowMap.autoUpdate;
-      const clear = renderer.getClearColor(new THREE.Color()), clearAlpha = renderer.getClearAlpha();
-      scene.background = null;
-      scene.fog = null;
-      renderer.shadowMap.autoUpdate = false;
-      renderer.setRenderTarget(this.mask);
-      renderer.setClearColor(0x000000, 1);
-      renderer.clear();
-      setGlowMaskOut(true);
-      renderer.render(scene, view);
-      setGlowMaskOut(false);
-      renderer.setClearColor(clear, clearAlpha);
-      renderer.shadowMap.autoUpdate = shadows;
-      scene.background = background;
-      scene.fog = fog;
-      for (const o of hidden) o.visible = true;
-    }
-    for (const [mesh, m] of swaps) mesh.material = m;
-    if (!glowing) return;
-    // blurred into the bloom's own targets (it also adds itself onto the mask, which is just thrown away)
-    this.bloom.render(renderer, this.mask, this.mask, 0, false);
-    // into the other buffer, not drawn over this one: drawing into the
-    // (multisampled) picture again would undo the ambient occlusion laid on it
-    const u = (this.over.material as THREE.ShaderMaterial).uniforms;
-    u.tDiffuse.value = readBuffer.texture;
-    u.tBloom.value = this.bloom.renderTargetsHorizontal[0].texture;
-    renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
-    this.over.render(renderer);
-    this.needsSwap = true;
-  }
-}
-const glowPass = new GlowPass();
-composer.addPass(glowPass);
-// lights have to share the fuzz's layer to light it
-for (const l of [hemi, key, fill, rim]) l.layers.enable(FUR_LAYER);
-// optional macro-photo depth of field, focused on whatever the camera orbits
-const bokeh = new BokehPass(scene, camera, { focus: 5, aperture: 0.004, maxblur: 0.012 });
-bokeh.enabled = false;
-composer.addPass(bokeh);
-
-const ORTHO_KEY = 'creature-creator/ortho';
-/** Shape and Look's choice (Stuff always opens in ortho) */
-let sceneOrtho = (() => {
-  try {
-    return localStorage.getItem(ORTHO_KEY) === '1';
-  } catch {
-    return false;
-  }
-})();
-
-/** Keep orthoCam on `camera`'s spot, facing the same way, framing what it frames at the orbit centre. */
-function syncView() {
-  if (view !== orthoCam) return;
-  const h = camera.position.distanceTo(controls.target) * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
-  orthoCam.top = h;
-  orthoCam.bottom = -h;
-  orthoCam.right = h * camera.aspect;
-  orthoCam.left = -h * camera.aspect;
-  orthoCam.position.copy(camera.position);
-  orthoCam.quaternion.copy(camera.quaternion);
-  orthoCam.updateProjectionMatrix();
-  orthoCam.updateMatrixWorld();
-}
-
-/** Perspective or ortho, for everything that draws, picks or projects through the camera. */
-function setOrtho(on: boolean) {
-  view = on ? orthoCam : camera;
-  syncView();
-  scenePass.camera = view;
-  gtao.camera = view;
-  bokeh.camera = view;
-  gizmo.camera = view;
-  const persp = on ? 0 : 1;
-  for (const m of [gtao.gtaoMaterial, gtao.depthRenderMaterial, bokeh.materialBokeh]) {
-    m.defines.PERSPECTIVE_CAMERA = persp;
-    m.needsUpdate = true;
-  }
-  document.querySelectorAll<HTMLButtonElement>('#view-proj button').forEach((b) => b.classList.toggle('active', (b.dataset.proj === 'ortho') === on));
-  renderOverlay();
-  invalidate();
-}
-composer.addPass(new OutputPass());
-function setAO(on: boolean) {
-  gtao.enabled = on;
-  // without AO the fuzz is simply drawn with everything else
-  furPass.enabled = on;
-}
-setAO(gtao.enabled);
-
-// ---------------------------------------------------------------------------
-// state + history
-
-/**
- * The whole scene: several creatures, one of which is active. `state` and
- * `creature` always point at the active one, so every panel and tool works on
- * whichever creature is selected.
- */
-interface World {
-  creatures: CreatureState[];
-  active: number;
-  /** the thing on the Stuff workbench (shared by the whole scene) */
-  workbench?: Thing;
-  /** scene name, used for .scene files */
-  name?: string;
-  /** how long one whole animation loop takes, seconds (Animate tab) */
-  animSecs?: number;
-}
-
-const WORLD_KEY = 'creature-creator/world';
-const OLD_KEY = 'creature-creator/v1';
-/** which of My creations the open scene is (kept apart from the world, so undo can't change it) */
-const CREATION_KEY = 'critterkiln/creation';
-const loadedWorld = loadWorld();
-let world: World = loadedWorld ?? freshWorld();
-/** The open scene's place in My creations. */
-const opened = {
-  id: localStorage.getItem(CREATION_KEY),
-  created: 0,
-  thumb: undefined as string | undefined,
-  /** a scene only joins the library once something's been done to it (or it came from somewhere) */
-  keep: false,
-  /** what was last written, so an unchanged scene isn't saved again */
-  savedJson: '',
-  timer: 0,
-  /** how many times the save has waited for a drag or skin to finish */
-  waits: 0,
-  /** writes queue up so they land in order */
-  writing: Promise.resolve(),
-};
-let state: CreatureState = world.creatures[world.active];
-const creatures: Creature[] = [];
-let creature: Creature;
-/** redraws each color picker's "In the scene" row (see sceneColorRow) */
-const sceneColorRows: (() => void)[] = [];
-let selected = '';
-/** Nothing picked: no creature or part shows as selected (no handles, no part editor) until one is clicked. */
-let idle = true;
-/** Shape, Look, a tab people made (src/layout.ts), or Stuff */
-type Mode = Tab | 'stuff';
-let mode: Mode = 'shape';
-let eyePair = 0;
-
-function freshWorld(): World {
-  return { creatures: [defaultState(rigFromTemplate(RIGS[0]))], active: 0 };
-}
-
-function loadWorld(): World | null {
-  try {
-    const raw = localStorage.getItem(WORLD_KEY);
-    if (raw) {
-      const w = JSON.parse(raw) as World;
-      const list = (w.creatures ?? []).map(migrate).filter((s): s is CreatureState => !!s);
-      if (list.length) return { creatures: list, active: Math.min(Math.max(0, w.active ?? 0), list.length - 1), workbench: w.workbench, name: w.name, animSecs: w.animSecs };
-    }
-    // the single-creature autosave from before scenes existed
-    const old = localStorage.getItem(OLD_KEY);
-    const s = old ? migrate(JSON.parse(old)) : null;
-    if (s) {
-      const workbench = s.workbench;
-      delete s.workbench;
-      return { creatures: [s], active: 0, workbench };
-    }
-  } catch {
-    /* fall through to a fresh scene */
-  }
-  return null;
-}
-
-/** Bring a saved creature (autosave or file) up to the current format. */
-function migrate(data: unknown): CreatureState | null {
-  try {
-    const s = data as CreatureState & { rigId?: string };
-    if (!s || typeof s !== 'object' || !s.parts) return null;
-    // saves from before rigs were editable: adopt the template, drop the old-format pose
-    if (!s.rig) {
-      const t = RIGS.find((r) => r.id === s.rigId);
-      if (!t) return null;
-      s.rig = rigFromTemplate(t);
-      s.pose = {};
-      delete s.rigId;
-    }
-    // from the pose-keyframes try: a creature closed mid-Animate gets its own pose back
-    const kf = s as { keys?: unknown; animBase?: { pose: CreatureState['pose']; root: V3 } };
-    if (kf.animBase) {
-      s.pose = kf.animBase.pose;
-      s.rootOffset = kf.animBase.root;
-    }
-    delete kf.animBase;
-    delete kf.keys;
-    const e = s.eyes as Partial<CreatureState['eyes']> & { size?: number; spacing?: number; height?: number };
-    if (!e.pairs) {
-      s.eyes = {
-        enabled: e.enabled ?? true,
-        style: e.style ?? 'googly',
-        pairs: [{ size: e.size ?? 0.5, spacing: e.spacing ?? 0.5, height: e.height ?? 0.55 }],
-      };
-    }
-    return s;
-  } catch {
-    return null;
-  }
-}
-
-function save() {
-  try {
-    localStorage.setItem(WORLD_KEY, JSON.stringify(world));
-  } catch {
-    /* storage full or blocked; nothing to do */
-  }
-  queueCreationSave();
-}
-
-const history: string[] = [];
-let hIndex = -1;
-
-function commit() {
-  invalidate();
-  renderSceneColors();
-  world.creatures[world.active] = state;
-  const snap = JSON.stringify(world);
-  if (snap === history[hIndex]) return;
-  history.splice(hIndex + 1);
-  history.push(snap);
-  if (history.length > 120) history.shift();
-  hIndex = history.length - 1;
-  save();
-  updateUndo();
-  fitShadows();
-  if (mode === 'stuff') autosaveThing();
-  checkScene(world.creatures, world.workbench);
-}
-
-function restore(snap: string) {
-  invalidate();
-  const next = JSON.parse(snap) as World;
-  // Rebuild only creatures whose skeleton changed (or that are new); the rest
-  // just take their restored state.
-  for (let i = 0; i < next.creatures.length; i++) {
-    const s = next.creatures[i];
-    const c = creatures[i];
-    // undo puts parents back as they were: nothing to re-check
-    parentsChecked.set(s, structuredClone(s.rig));
-    if (c && JSON.stringify(c.state.rig) === JSON.stringify(s.rig)) {
-      c.state = s;
-      c.sync();
-      // merge settings may differ without any part or pose changing
-      c.markMergeDirty();
-    } else {
-      c?.dispose();
-      creatures[i] = makeCreature(s);
-    }
-  }
-  while (creatures.length > next.creatures.length) creatures.pop()!.dispose();
-  // (undo brings back copies: their parts lists stay open or closed)
-  next.creatures.forEach((s, i) => {
-    if (world.creatures[i] && partsOpen.has(world.creatures[i])) partsOpen.add(s);
-  });
-  world = next;
-  activate(world.active);
-  syncWorkbench();
-  if (mode === 'stuff') autosaveThing();
-  if (selectedAttachment) selectAttachment(selectedAttachment);
-  save();
-  fitShadows();
-  renderUI();
-}
-
-function undo() {
-  if (hIndex <= 0) return;
-  if (drawState) exitDraw(); // a shape waiting for Done isn't in the history yet
-  restore(history[--hIndex]);
-  updateUndo();
-  bump('undo');
-}
-
-function redo() {
-  if (hIndex >= history.length - 1) return;
-  if (drawState) exitDraw();
-  restore(history[++hIndex]);
-  updateUndo();
-}
-
-function updateUndo() {
-  $<HTMLButtonElement>('#undo').disabled = hIndex <= 0;
-  $<HTMLButtonElement>('#redo').disabled = hIndex >= history.length - 1;
-}
-
-/** past loading: re-hung parts get a hint */
-let booted = false;
-/**
- * Each creature's skeleton as Auto parent last checked it: an edit only
- * re-checks the parts whose base it moved. A creature without one (just
- * opened) has every part checked.
- */
-const parentsChecked = new WeakMap<CreatureState, RigState>();
-function makeCreature(s: CreatureState): Creature {
-  // stone cracks, metal patina and the like used to be material settings: now they're markings
-  migrateMarkings(s);
-  // Auto parent: each part hangs off whatever its base sits on, as you see it (posed)
-  if (rigPrefs.autoParent) {
-    const before = parentsChecked.get(s);
-    const only = before && movedBases(before, s.rig);
-    if (!only || only.size) {
-      // measured on just the skeleton: the creature itself is only built once
-      const probe = new Creature(s, true);
-      const changed = reparentAll(s.rig, sizesIn(probe), only).map((x) => x.id);
-      rehang(probe, s.rig, changed);
-      probe.dispose();
-      if (booted && changed.length) {
-        const b = changed.length === 1 && expandRig(s.rig).bones.find((x) => x.id === changed[0]);
-        if (b && b.parent) hint(`${b.name.replace(/ \((L|R)\)$/, '')} now hangs off ${sceneName(s.rig, b.parent)}`, 2200);
-        else if (!b) hint(`${changed.length} parts now hang off the parts their bases sit on`, 2200);
-      }
-    }
-  }
-  parentsChecked.set(s, structuredClone(s.rig));
-  const c = new Creature(s);
-  scene.add(c.root);
-  c.root.visible = mode !== 'stuff';
-  c.setSkeletonVisible(false);
-  return c;
-}
-
-/** Make creature `i` the one every panel and tool works on. */
-function activate(i: number) {
-  const next = creatures[i];
-  const switching = creature !== next;
-  // gizmos belong to the previous creature (first: leaving Arrange would show its handles again)
-  if (switching) {
-    stopPlacing();
-    // (and a marking's gizmo, or the brush)
-    stopMarkTools();
-  }
-  if (creature && switching) {
-    creature.setSkeletonVisible(false);
-    creature.flash(null, 0);
-  }
-  world.active = i;
-  state = world.creatures[i];
-  creature = next;
-  if (switching) deselectAttachment();
-  if (!creature.bones.has(selected)) selected = creature.list[0].def.id;
-  creature.select(selected);
-  updateSkeletonVisibility();
-}
-
-/** Rebuild the active creature from `state` (after skeleton changes, new files...). */
-function buildCreature() {
-  const i = world.active;
-  const wasPlacing = placing;
-  creatures[i]?.dispose();
-  world.creatures[i] = state;
-  creatures[i] = makeCreature(state);
-  creature = creatures[i];
-  if (!creature.bones.has(selected)) selected = creature.list[0].def.id;
-  creature.select(selected);
-  updateSkeletonVisibility();
-  // gizmos pointed at the old creature's objects
-  if (selectedAttachment) selectAttachment(selectedAttachment);
-  if (wasPlacing) startPlacing();
-}
-
-/** Keep the key light's shadow area covering every creature. */
-function fitShadows() {
-  const box = new THREE.Box3();
-  for (const c of creatures) {
-    c.root.updateMatrixWorld(true);
-    for (const m of c.meshes()) box.expandByObject(m);
-  }
-  const center = box.isEmpty() ? new THREE.Vector3() : box.getCenter(new THREE.Vector3());
-  const half = box.isEmpty() ? 3 : Math.max(3, box.getSize(new THREE.Vector3()).length() / 2 + 1);
-  const cam = key.shadow.camera;
-  cam.left = cam.bottom = -half;
-  cam.right = cam.top = half;
-  cam.far = 14 + half;
-  cam.updateProjectionMatrix();
-  key.target.position.set(center.x, 0, center.z);
-  const off = KEY_AT.clone().applyQuaternion(lightSpin());
-  key.position.set(center.x + off.x, 4.6 + half * 0.3, center.z + off.z);
-  key.target.updateMatrixWorld();
-}
-
-// ---------------------------------------------------------------------------
 // controls (our pointer handlers are registered first so they can veto orbiting)
 
 const raycaster = new THREE.Raycaster();
@@ -1779,9 +962,9 @@ canvas.addEventListener('pointerup', (e) => {
   // clicking a different creature makes it the one being edited
   const other = pickOtherCreature(e.clientX, e.clientY);
   if (other) {
-    idle = false;
+    setIdle(false);
     activate(other.index);
-    if (other.boneId && creature.bones.has(other.boneId)) selected = other.boneId;
+    if (other.boneId && creature.bones.has(other.boneId)) setSelected(other.boneId);
     creature.select(selected);
     flashPart();
     save();
@@ -1792,7 +975,7 @@ canvas.addEventListener('pointerup', (e) => {
   const eye = pickEye(e.clientX, e.clientY);
   if (eye !== null) {
     if (idle) {
-      idle = false;
+      setIdle(false);
       updateSkeletonVisibility();
       renderUI();
     }
@@ -1853,7 +1036,7 @@ function onDoubleClick(x: number, y: number) {
   enterDraw();
 }
 
-const controls = new OrbitControls(camera, canvas);
+export const controls = new OrbitControls(camera, canvas);
 controls.enableDamping = true;
 controls.dampingFactor = 0.12;
 controls.target.set(0, 0.9, 0);
@@ -1975,7 +1158,7 @@ function moveEyesTo(index: number, sgn: number, x: number, y: number): boolean {
 /** Picks the part these eyes are on, with its eye settings open at this pair. */
 function showEyes(pair: number) {
   deselectAttachment();
-  eyePair = pair;
+  setEyePair(pair);
   setEyesFolded(false);
   const on = creature.eyeBones(state.eyes.pairs[pair])[0];
   if (on) selectPart(on.def.id);
@@ -2031,7 +1214,7 @@ function handlesVisible() {
 
 /** Back to nothing picked: clicking empty space in Shape. */
 function deselectAll() {
-  idle = true;
+  setIdle(true);
   stopPlacing();
   deselectAttachment();
   creature.flash(null, 0);
@@ -2047,7 +1230,7 @@ function syncIdle() {
   updateSkeletonVisibility();
 }
 
-function updateSkeletonVisibility() {
+export function updateSkeletonVisibility() {
   // the tab's Gizmos: every part's handles, or just the picked part's
   Creature.handleScope = gizmos() === 'part' ? 'part' : 'all';
   creature.setSkeletonVisible(handlesVisible());
@@ -2055,7 +1238,6 @@ function updateSkeletonVisibility() {
   $('#shape-legend').classList.toggle('off', !handlesVisible());
 }
 
-// ---------------------------------------------------------------------------
 // camera tweening
 
 let tween: { p0: THREE.Vector3; p1: THREE.Vector3; t0v: THREE.Vector3; t1v: THREE.Vector3; start: number; dur: number } | null = null;
@@ -2096,7 +1278,7 @@ function frameAll(fresh = false) {
 /** A scene that kept no view of its own (saved before views were): seen afresh, not from the last scene's angle. */
 function freshView() {
   if (sceneOrtho) {
-    sceneOrtho = false;
+    setSceneOrtho(false);
     try {
       localStorage.setItem(ORTHO_KEY, '0');
     } catch {
@@ -2233,7 +1415,6 @@ function focusOnBone(b: BoneRT, side = false) {
   flyTo(center.clone().addScaledVector(normal, dist), center);
 }
 
-// ---------------------------------------------------------------------------
 // drawing
 
 /** What a stroke is for: a body part's outline, or a piece on the stuff workbench (new, or one being redrawn). */
@@ -2318,7 +1499,7 @@ function boneViews(b: BoneRT): [BoneView, BoneView] {
     { kind: turned, mirrored: across(new THREE.Vector3(0, 0, 1)) },
   ];
 }
-let drawState: DrawState | null = null;
+export let drawState: DrawState | null = null;
 
 const DRAW_PREFS_KEY = 'creature-creator/draw';
 // symmetry is remembered separately for body parts and for stuff (letters,
@@ -2484,7 +1665,7 @@ function setDrawSide(side: boolean) {
 }
 
 /** Leave drawing. Unless the shape is being kept (Done), a bone's previewed outline goes back. */
-function exitDraw(keep = false) {
+export function exitDraw(keep = false) {
   const ds = drawState;
   drawState = null;
   overlay.classList.remove('active');
@@ -3009,7 +2190,7 @@ window.addEventListener('keyup', (e) => {
 });
 window.addEventListener('blur', () => setSpacePan(false));
 
-function renderOverlay() {
+export function renderOverlay() {
   const dpr = overlay.width / overlay.clientWidth || 1;
   octx.setTransform(dpr, 0, 0, dpr, 0, 0);
   octx.clearRect(0, 0, overlay.clientWidth, overlay.clientHeight);
@@ -3160,7 +2341,6 @@ document.querySelectorAll<HTMLButtonElement>('#draw-tools [data-tool]').forEach(
 });
 $('#done-draw').onclick = () => finishDraw();
 
-// ---------------------------------------------------------------------------
 // stuff workbench
 
 // The board sits at chest height; its XY plane is the drawing plane and its
@@ -3197,7 +2377,7 @@ let bench: THREE.Group | null = null;
 let benchKey = '';
 let selectedPiece = '';
 
-function workbench(): Thing {
+export function workbench(): Thing {
   world.workbench ??= newThing();
   return world.workbench;
 }
@@ -3241,7 +2421,7 @@ function benchWearer(): Wearer {
   return { style: state.style, settingsFor: (s) => creature.settingsFor(s) };
 }
 
-function syncWorkbench() {
+export function syncWorkbench() {
   const thing = benchThing();
   const key = JSON.stringify([thing.pieces, thing.markings, thing.pictures, thing.ownMaterial, thing.inherit, thing.materialSettings, thing.bend, thing.bendMode, state.materialSettings, state.style, getMeshDetail()]);
   if (key === benchKey) {
@@ -3515,11 +2695,10 @@ document.querySelectorAll<HTMLButtonElement>('#piece-bar [data-dim]').forEach((b
 });
 $('#piece-flat').onclick = () => layPieceFlat();
 
-
 // ---- auto-save: the thing on the workbench is kept in My stuff as you go ----
 
 let thingSaveTimer = 0;
-function autosaveThing() {
+export function autosaveThing() {
   if (!world.workbench?.pieces.length) return;
   clearTimeout(thingSaveTimer);
   thingSaveTimer = window.setTimeout(saveWorkbenchNow, 450);
@@ -3976,7 +3155,7 @@ function pasteClip(): boolean {
     for (const p of copies) if (c.parts[p.from]) state.parts[p.to] = structuredClone(c.parts[p.from]);
     return copies;
   }, true);
-  idle = false;
+  setIdle(false);
   updateSkeletonVisibility();
   flashPart();
   hint('Pasted', 1000);
@@ -4135,8 +3314,6 @@ function deleteThing(t: Thing) {
   renderStuffPanel();
 }
 
-
-// ---------------------------------------------------------------------------
 // attaching stuff to body parts
 
 /**
@@ -4185,7 +3362,7 @@ class SideScaleControls extends TransformControls {
   }
 }
 
-const gizmo = new SideScaleControls(camera, canvas);
+export const gizmo = new SideScaleControls(camera, canvas);
 gizmo.setSpace('local');
 gizmo.setSize(0.8);
 scene.add(gizmo.getHelper());
@@ -4228,13 +3405,13 @@ gizmo.addEventListener('mouseUp', () => {
   commit();
 });
 
-let selectedAttachment = '';
+export let selectedAttachment = '';
 
 function currentAttachment(): Attachment | undefined {
   return state.attachments?.find((a) => a.id === selectedAttachment);
 }
 
-function selectAttachment(id: string) {
+export function selectAttachment(id: string) {
   const obj = creature.attachmentObject(id);
   if (!obj) return deselectAttachment();
   stopPlacing();
@@ -4248,7 +3425,7 @@ function selectAttachment(id: string) {
   renderCreatureStuff();
 }
 
-function deselectAttachment() {
+export function deselectAttachment() {
   selectedAttachment = '';
   if (!placing) gizmo.detach();
   $('#attach-bar').hidden = true;
@@ -4258,11 +3435,10 @@ function deselectAttachment() {
   renderCreatureStuff();
 }
 
-// ---------------------------------------------------------------------------
 // arranging creatures in the scene: the same gizmo moves, turns and resizes
 // a whole creature anywhere in 3D
 
-let placing = false;
+export let placing = false;
 type PlaceMode = 'translate' | 'rotate' | 'scale';
 
 function setPlaceMode(m: PlaceMode) {
@@ -4283,7 +3459,7 @@ function placeOnFloor() {
   commit();
 }
 
-function startPlacing() {
+export function startPlacing() {
   if (mode === 'stuff') return;
   if (selectedAttachment) deselectAttachment();
   stopMarkTools();
@@ -4297,7 +3473,7 @@ function startPlacing() {
   updateSkeletonVisibility();
 }
 
-function stopPlacing() {
+export function stopPlacing() {
   if (!placing) return;
   placing = false;
   gizmo.detach();
@@ -4328,11 +3504,10 @@ $('#place-done').onclick = () => {
   commit(); // records the move if anything changed (no-op otherwise)
 };
 
-// ---------------------------------------------------------------------------
 // the creature switcher
 
 /** creatures whose parts are shown under their row (the > beside it) */
-const partsOpen = new WeakSet<CreatureState>();
+export const partsOpen = new WeakSet<CreatureState>();
 
 function renderCreatureBar() {
   const el = $('#creature-rows');
@@ -4355,7 +3530,7 @@ function renderCreatureBar() {
     pick.title = i === world.active && !idle ? `${creatureLabel(i)}: click to rename` : creatureLabel(i);
     pick.onclick = () => {
       if (i === world.active && !idle) return renameCreatureRow(pick);
-      idle = false;
+      setIdle(false);
       activate(i);
       flashPart();
       save();
@@ -4410,7 +3585,7 @@ function partRows(i: number): HTMLElement {
   }
   const pickIt = (id: string) => {
     if (i !== world.active || idle) {
-      idle = false;
+      setIdle(false);
       activate(i);
     }
     selectPart(id);
@@ -4544,7 +3719,7 @@ function freeSpot(): Placement {
 }
 
 function addCreature(s: CreatureState) {
-  idle = false;
+  setIdle(false);
   exitDraw();
   world.creatures.push(s);
   creatures.push(makeCreature(s));
@@ -4582,7 +3757,7 @@ function removeCreature(i: number) {
   creatures[i].dispose();
   creatures.splice(i, 1);
   world.creatures.splice(i, 1);
-  creature = undefined as unknown as Creature; // the old one is gone; don't try to reset it
+  setCreature(undefined as unknown as Creature); // the old one is gone; don't try to reset it
   activate(Math.max(0, i - 1));
   commit();
   renderUI();
@@ -4722,7 +3897,6 @@ function attachThing(t: Thing) {
   hintOnce('Drag the arrows to place it; switch to rotate or scale in the top bar', 3000);
 }
 
-// ---------------------------------------------------------------------------
 // carrying eyes or stuff from a menu onto the creature: while it's over the
 // creature it's really there (exactly where it would land), and letting go
 // keeps it
@@ -4975,7 +4149,6 @@ $('#attach-copy').onclick = () => {
 };
 $('#attach-done').onclick = () => deselectAttachment();
 
-// ---------------------------------------------------------------------------
 // files
 
 // The top-bar menus share the same corner of the viewport, so only one is open at a time.
@@ -5200,7 +4373,7 @@ function applyLook(l: SceneLook, view = true): boolean {
   Object.assign(floorPrefs, l.floor);
   saveFloor();
   applyFloor();
-  lightTurn = l.light ?? 0;
+  setLightTurn(l.light ?? 0);
   applyLighting();
   try {
     localStorage.setItem(LIGHT_KEY, JSON.stringify({ turn: lightTurn }));
@@ -5218,7 +4391,7 @@ function applyLook(l: SceneLook, view = true): boolean {
 
 /** Look at a scene the way it was saved: flown to, or (not `fly`) straight there. */
 function putView(v: NonNullable<SceneLook['camera']>, fly: boolean) {
-  sceneOrtho = !!v.ortho;
+  setSceneOrtho(!!v.ortho);
   try {
     localStorage.setItem(ORTHO_KEY, sceneOrtho ? '1' : '0');
   } catch {
@@ -5335,7 +4508,6 @@ function showLoadPicker(b: Bundle, title: string) {
   $('#load-pop').hidden = false;
 }
 
-// ---------------------------------------------------------------------------
 // My creations: the open scene saves itself into the library (src/library.ts)
 // as you go, and the library lists everything you've made
 
@@ -5366,7 +4538,7 @@ function creationName(c: { name?: string; data: { creatures: CreatureState[] } }
 }
 
 /** Save the open scene to the library a moment after it changes. */
-function queueCreationSave() {
+export function queueCreationSave() {
   // a new scene nobody has touched yet isn't worth keeping
   if (!opened.keep && hIndex <= 0) return;
   opened.keep = true;
@@ -5477,7 +4649,7 @@ function beginCreation(id: string | null, keep: boolean, from?: SavedCreation) {
   }
   // undo can't reach back into another creation
   history.length = 0;
-  hIndex = -1;
+  setHIndex(-1);
 }
 
 /**
@@ -5494,12 +4666,12 @@ function replaceWorld(next: World, stuff: Thing[]) {
   stopPlacing();
   for (const c of creatures) c.dispose();
   creatures.length = 0;
-  creature = undefined as unknown as Creature; // replaced wholesale
-  world = next;
+  setCreature(undefined as unknown as Creature); // replaced wholesale
+  setWorld(next);
   next.creatures.forEach((s, i) => (creatures[i] = makeCreature(s)));
-  selected = '';
+  setSelected('');
   // a new world starts with nothing picked: set before activate draws the handles
-  idle = true;
+  setIdle(true);
   activate(world.active);
 }
 
@@ -5562,7 +4734,6 @@ $('#library-btn').onclick = () => {
 };
 $('#library-close').onclick = closeLibrary;
 
-// ---------------------------------------------------------------------------
 // trophies
 
 function renderTrophyList() {
@@ -5870,7 +5041,6 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) flushCreationSave();
 });
 
-// ---------------------------------------------------------------------------
 // UI
 
 const SWATCHES = [
@@ -5928,7 +5098,7 @@ function sceneColorRow(el: HTMLElement, current: () => string | undefined, pick:
   sceneColorRows.push(render);
   return render;
 }
-function renderSceneColors() {
+export function renderSceneColors() {
   // (not before the first creature is up)
   if (!creature) return;
   for (const r of sceneColorRows) r();
@@ -5985,8 +5155,8 @@ function selPart() {
 }
 
 function selectPart(id: string, tips = true) {
-  idle = false;
-  selected = id;
+  setIdle(false);
+  setSelected(id);
   creature.select(id);
   updateSkeletonVisibility();
   flashPart();
@@ -6172,7 +5342,6 @@ function renderThingMaterial(thing: Thing, styles: StyleId[], el: HTMLElement, w
   }
 }
 
-
 /**
  * Sliders for a material. With the default owner (the creature) they apply
  * everywhere that material is used, stuff included unless the item has its
@@ -6280,7 +5449,7 @@ function renderEyes() {
   $('#eyes-card').hidden = !mine.length;
   $('#eyes-card').classList.toggle('folded', eyesFolded);
   if (!mine.length) return;
-  if (!mine.includes(eyePair)) eyePair = mine[0];
+  if (!mine.includes(eyePair)) setEyePair(mine[0]);
   const el = $('#eye-styles');
   el.innerHTML = '';
   const options: { id: EyeStyle | 'none'; name: string }[] = [{ id: 'none', name: 'None' }, ...EYE_STYLES];
@@ -6315,7 +5484,7 @@ function renderEyes() {
     btn.textContent = `${e.pairs[i].single ? 'Eye' : 'Pair'} ${n + 1}`;
     btn.classList.toggle('active', i === eyePair);
     btn.onclick = () => {
-      eyePair = i;
+      setEyePair(i);
       renderEyes();
     };
     tabs.append(btn);
@@ -6327,7 +5496,7 @@ function renderEyes() {
     // another pair on the same part, a little smaller and lower
     const on = e.pairs[eyePair];
     e.pairs.push({ size: Math.max(0.15, on.size * 0.75), spacing: on.spacing, height: Math.max(0.1, on.height - 0.22), lift: on.lift ?? e.lift, bone: on.bone, single: on.single, turn: on.turn ?? e.turn });
-    eyePair = e.pairs.length - 1;
+    setEyePair(e.pairs.length - 1);
     e.enabled = true;
     creature.sync();
     commit();
@@ -6410,8 +5579,8 @@ function renderEyes() {
   }
 }
 
-function renderUI() {
-  if (!creature.bones.has(selected)) selected = creature.list[0].def.id;
+export function renderUI() {
+  if (!creature.bones.has(selected)) setSelected(creature.list[0].def.id);
   renderAnim();
   renderRigs();
   renderPartCard();
@@ -6473,7 +5642,6 @@ function setColor(c: string, doCommit: boolean) {
   renderCreatureBar();
 }
 
-// ---------------------------------------------------------------------------
 // Markings: patterns over the material (see src/markings.ts and the panel in
 // src/markingPanel.ts), on the whole creature or one part. The same panel
 // marks stuff pieces on the workbench (see pieceMarks).
@@ -6678,8 +5846,8 @@ function switchRig(base: string) {
   next.style = state.style;
   next.eyes = state.eyes;
   exitDraw();
-  state = next;
-  selected = '';
+  setState(next);
+  setSelected('');
   buildCreature();
   commit();
   renderUI();
@@ -6695,7 +5863,7 @@ function setMode(m: Mode) {
     paintBackdrop(m === 'stuff' ? STUFF_BACKDROP : backdrop);
     setOrtho(m === 'stuff' || sceneOrtho);
   }
-  mode = m;
+  setModeValue(m);
   if (m === ANIM_TAB) deselectAttachment();
   stopMarkTools();
   applyDof();
@@ -6742,7 +5910,6 @@ function tintMode() {
   else h.style.removeProperty('--tab-color');
 }
 
-// ---------------------------------------------------------------------------
 // rig editing
 
 /** Apply a skeleton edit, give new bones a look, rebuild, and select the first new bone. */
@@ -6772,7 +5939,7 @@ function rigEdit(fn: (rig: RigState) => PartCopy[], copyShape: boolean) {
   buildCreature();
   // stuff on removed bones goes with them
   if (state.attachments) state.attachments = state.attachments.filter((a) => creature.bones.has(a.bone));
-  if (copies.length) selected = copies[0].to;
+  if (copies.length) setSelected(copies[0].to);
   creature.select(selected);
   commit();
   renderUI();
@@ -6897,7 +6064,7 @@ $('#rig-split').onclick = () => {
 
 // ---- lock symmetry (remembered) ----
 const RIG_PREFS_KEY = 'creature-creator/rig-prefs';
-const rigPrefs: { lock: boolean; autoParent: boolean } = (() => {
+export const rigPrefs: { lock: boolean; autoParent: boolean } = (() => {
   try {
     return { lock: true, autoParent: true, ...JSON.parse(localStorage.getItem(RIG_PREFS_KEY) ?? '{}') };
   } catch {
@@ -6930,7 +6097,7 @@ $<HTMLInputElement>('#rig-sym').onchange = (e) => setMirror((e.target as HTMLInp
 
 // ---- which part each part hangs off (its parent) ----
 /** Each part's real size, from its drawing (or default shape): see PartSizes. */
-function sizesIn(c: Creature): PartSizes {
+export function sizesIn(c: Creature): PartSizes {
   // each drawing is read once: how wide it is at evenly spaced heights along it
   const STEPS = 24;
   const profiles = new Map<string, { lo: number; hi: number; len: number; w: number[] } | null>();
@@ -6974,7 +6141,7 @@ function sizesIn(c: Creature): PartSizes {
  * Parts in `rig` just given new parents, still built in `c` on their old ones:
  * move each (and everything on it) so it stays exactly where it is, posed.
  */
-function rehang(c: Creature, rig: RigState, ids: string[]) {
+export function rehang(c: Creature, rig: RigState, ids: string[]) {
   const bones = expandRig(rig).bones;
   const moves = ids.map((id) => {
     const to = bones.find((b) => b.id === id)?.parent;
@@ -6982,7 +6149,7 @@ function rehang(c: Creature, rig: RigState, ids: string[]) {
   });
   for (const [id, m] of moves) if (m) moveLimb(rig, id, m);
 }
-const sceneName = (rig: RigState, id: string) => expandRig(rig).bones.find((b) => b.id === id)?.name ?? id;
+export const sceneName = (rig: RigState, id: string) => expandRig(rig).bones.find((b) => b.id === id)?.name ?? id;
 let pickingParent = false;
 function setPickingParent(on: boolean) {
   pickingParent = on;
@@ -7134,7 +6301,7 @@ function mirrorPart() {
     }
   }
   if (!state.rig.base.startsWith('custom')) state.rig.base = 'custom';
-  selected = to.get(selected) ?? r.renamed[0][1];
+  setSelected(to.get(selected) ?? r.renamed[0][1]);
   buildCreature();
   // the new side takes this side's pose
   creature.mirrorPose(r.renamed.map(([, id]) => creature.bones.get(id)!).filter(Boolean));
@@ -7221,7 +6388,7 @@ function hintOnce(text: string, ms = 2000) {
 }
 
 /** A message at the bottom of the view; `ms` 0 keeps it up until replaced (drawing instructions). */
-function hint(text: string, ms = 2000, warn = false) {
+export function hint(text: string, ms = 2000, warn = false) {
   // fingers tap
   if (touchScreen()) text = text.replace(/([Cc])lick(ing|ed)?/g, (_, c: string, end = '') => (c === 'C' ? 'T' : 't') + 'ap' + (end && 'p' + end));
   hintEl.querySelector('.hint-text')!.textContent = text;
@@ -7236,7 +6403,6 @@ function hint(text: string, ms = 2000, warn = false) {
   if (timed) hintEl.style.setProperty('--hint-ms', `${ms + HINT_EXTRA_MS}ms`);
 }
 
-// ---------------------------------------------------------------------------
 // settings (remembered in this browser)
 
 const SETTINGS_KEY = 'creature-creator/settings';
@@ -7384,7 +6550,7 @@ $<HTMLInputElement>('#set-seamless-lp').onchange = (e) => {
 /** Switch performance level: renderer settings now, and every shape rebuilt at the new detail. */
 function setQuality(q: Quality) {
   if (q === quality) return;
-  quality = settings.quality = q;
+  setQualityValue(settings.quality = q);
   const Q = QUALITY[q];
   setMeshDetail(Q.detail);
   setFuzzQuality(Q.fuzz);
@@ -7410,7 +6576,7 @@ function setQuality(q: Quality) {
     creatures[i].dispose();
     creatures[i] = makeCreature(world.creatures[i]);
   }
-  creature = undefined as unknown as Creature; // replaced wholesale
+  setCreature(undefined as unknown as Creature); // replaced wholesale
   activate(world.active);
   benchKey = '';
   syncWorkbench();
@@ -7625,7 +6791,7 @@ function renderBackdropUI() {
   $<HTMLInputElement>('#light-turn').value = String(lightTurn);
 }
 $<HTMLInputElement>('#light-turn').oninput = (e) => {
-  lightTurn = parseFloat((e.target as HTMLInputElement).value);
+  setLightTurn(parseFloat((e.target as HTMLInputElement).value));
   applyLighting();
   try {
     localStorage.setItem(LIGHT_KEY, JSON.stringify({ turn: lightTurn }));
@@ -7715,7 +6881,6 @@ $<HTMLInputElement>('#floor-color').oninput = (e) => {
 };
 $<HTMLInputElement>('#floor-color').onchange = () => renderFloorUI();
 $<HTMLInputElement>('#ao').onchange = (e) => setAO((e.target as HTMLInputElement).checked);
-// ---------------------------------------------------------------------------
 // depth of field: focus follows the orbit target, nudged by `offset`
 
 const DOF_KEY = 'creature-creator/dof';
@@ -8030,7 +7195,7 @@ document.querySelectorAll<HTMLButtonElement>('#view-proj [data-proj]').forEach((
     const on = b.dataset.proj === 'ortho';
     // on the workbench it's just for now; in Shape and Look it's remembered
     if (mode !== 'stuff') {
-      sceneOrtho = on;
+      setSceneOrtho(on);
       try {
         localStorage.setItem(ORTHO_KEY, on ? '1' : '0');
       } catch {
@@ -8278,7 +7443,6 @@ window.addEventListener('keydown', (e) => {
   } else if (is(e, 'frameAll')) frameAll();
 });
 
-// ---------------------------------------------------------------------------
 // the right-click menu: on a part, a piece or worn stuff in the view, what you
 // can do to it (picking it first); on the tools, arranging them, and on a
 // slider its number and its default. A right-drag still pans the view.
@@ -8335,9 +7499,9 @@ function viewMenu(x: number, y: number) {
   // the same picking as a click: another creature, worn stuff, then a part
   const other = pickOtherCreature(x, y);
   if (other) {
-    idle = false;
+    setIdle(false);
     activate(other.index);
-    if (other.boneId && creature.bones.has(other.boneId)) selected = other.boneId;
+    if (other.boneId && creature.bones.has(other.boneId)) setSelected(other.boneId);
     creature.select(selected);
     save();
     renderUI();
@@ -8459,7 +7623,6 @@ document.addEventListener('contextmenu', (e) => {
   ]);
 });
 
-// ---------------------------------------------------------------------------
 // resize + loop
 
 function resize() {
@@ -8617,7 +7780,6 @@ function loop(now: number) {
   watchSpeed(now);
 }
 
-// ---------------------------------------------------------------------------
 // Animate tab (proof of concept): looping motions on parts, see src/animate.ts
 //
 // The picked part's motion is drawn in the view: a dotted loop where its tip
@@ -8637,7 +7799,7 @@ let animPlaying = true;
 let animT = 0;
 let animLast = 0;
 let animKey = '';
-const animSecs = () => world.animSecs ?? 1.5;
+export const animSecs = () => world.animSecs ?? 1.5;
 function animOn() {
   return mode === ANIM_TAB;
 }
@@ -9387,12 +8549,11 @@ for (const b of $('#anim-gif-joins').querySelectorAll<HTMLButtonElement>('button
 }
 setRenderButton('Render GIF', false);
 
-// ---------------------------------------------------------------------------
 // boot
 
 $<HTMLInputElement>('#ao').checked = gtao.enabled;
 world.creatures.forEach((s, i) => (creatures[i] = makeCreature(s)));
-booted = true;
+setBooted(true);
 
 activate(world.active);
 // My creations: the open scene's details are read back; a scene from before
