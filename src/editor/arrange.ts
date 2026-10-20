@@ -1,3 +1,7 @@
+// ---------------------------------------------------------------------------
+// Arranging creatures in the scene: the same gizmo moves, turns and resizes
+// a whole creature anywhere in 3D.
+
 import * as THREE from 'three';
 import { stopMarkTools } from '../markingPanel';
 import { $ } from './dom';
@@ -5,9 +9,6 @@ import { commit, creature, fitShadows, mode, world } from './state';
 import { creatureLabel, setKeepFloor, settleOnFloor, updateSkeletonVisibility } from './controls';
 import { creatureBox } from './framing';
 import { deselectAttachment, gizmo, selectedAttachment } from './attach';
-
-// arranging creatures in the scene: the same gizmo moves, turns and resizes
-// a whole creature anywhere in 3D
 
 export let placing = false;
 export type PlaceMode = 'translate' | 'rotate' | 'scale';

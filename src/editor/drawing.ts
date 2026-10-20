@@ -1,3 +1,7 @@
+// ---------------------------------------------------------------------------
+// Drawing: strokes and stamped shapes on a part's outline, or pieces on the
+// stuff workbench, in a flat view of the part (or the board).
+
 import * as THREE from 'three';
 import { partShapes, setPartShapes, type BoneRT, type PartShape } from '../creature';
 import { unlock } from '../achievements';
@@ -14,8 +18,6 @@ import { deselectAttachment, gizmo } from './attach';
 import { renderCreatureBar } from './creatureBar';
 import { flashPart, partLabel } from './partPanel';
 import { hint, hintOnce } from './hints';
-
-// drawing
 
 /** What a stroke is for: a body part's outline, or a piece on the stuff workbench (new, or one being redrawn). */
 type DrawTarget = { kind: 'bone'; boneId: string } | { kind: 'piece'; redraw?: string };

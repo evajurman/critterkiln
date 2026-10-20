@@ -1,3 +1,6 @@
+// ---------------------------------------------------------------------------
+// Installing as an app (where the browser offers it), and opening files with it.
+
 import { $ } from './dom';
 import { openFile } from './files';
 import { hint } from './hints';

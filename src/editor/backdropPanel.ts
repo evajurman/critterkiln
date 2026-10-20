@@ -1,3 +1,6 @@
+// ---------------------------------------------------------------------------
+// The Backdrop section: the backdrop color, the floor, lighting and AO.
+
 import { unlock } from '../achievements';
 import { STYLES } from '../materials';
 import { $ } from './dom';

@@ -1,3 +1,6 @@
+// ---------------------------------------------------------------------------
+// The hint bubble at the bottom of the view.
+
 import { $ } from './dom';
 import { touchScreen } from './controls';
 import { drawHint, drawState } from './drawing';

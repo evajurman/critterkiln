@@ -1,3 +1,7 @@
+// ---------------------------------------------------------------------------
+// My creations: the open scene saves itself into the library (src/library.ts)
+// as you go, and the library lists everything you've made.
+
 import * as THREE from 'three';
 import { Creature, type CreatureState } from '../creature';
 import { reach, unlock } from '../achievements';
@@ -38,9 +42,6 @@ import { applyLook, currentLook, forFile, keepInCollection, type SceneLook } fro
 import { renderLibrary } from './libraryPanel';
 import { renderUI, setMode } from './panels';
 import { hint } from './hints';
-
-// My creations: the open scene saves itself into the library (src/library.ts)
-// as you go, and the library lists everything you've made
 
 /** What the library keeps for each scene. */
 export interface CreationData {

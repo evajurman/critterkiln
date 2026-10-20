@@ -1,3 +1,6 @@
+// ---------------------------------------------------------------------------
+// The Animate tab (proof of concept): looping motions on parts, see src/animate.ts.
+
 import * as THREE from 'three';
 import { Creature, type Attachment, type BoneRT } from '../creature';
 import {
@@ -33,8 +36,6 @@ import { hint } from './hints';
 import { invalidate } from './loop';
 import { animRendering } from './animGif';
 
-// Animate tab (proof of concept): looping motions on parts, see src/animate.ts
-//
 // The picked part's motion is drawn in the view: a dotted loop where its tip
 // will go, arrows for which way, a dot riding it now, and two handles. The
 // middle one moves the whole motion; the edge one sets how big and which way.

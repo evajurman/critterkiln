@@ -1,3 +1,7 @@
+// ---------------------------------------------------------------------------
+// Attaching stuff to body parts: the gizmo that moves, turns and resizes worn
+// stuff, and which worn thing is picked.
+
 import * as THREE from 'three';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { type Attachment } from '../creature';
@@ -12,8 +16,6 @@ import { placing, stopPlacing } from './arrange';
 import { syncAttachBar } from './attachPanel';
 import { renderCreatureStuff } from './carry';
 import { invalidate } from './loop';
-
-// attaching stuff to body parts
 
 /**
  * TransformControls whose centre scale cube follows the mouse sideways: left shrinks, right

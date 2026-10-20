@@ -1,3 +1,7 @@
+// ---------------------------------------------------------------------------
+// The render loop: drawing on demand (invalidate), resizing, settling skins
+// when idle, and noticing when frames are slow.
+
 import * as THREE from 'three';
 import { setSketchPixelRatio } from '../materials';
 import { followMarkTools } from '../markingPanel';
@@ -25,8 +29,6 @@ let renderFrames = 3;
 export function invalidate(frames = 3) {
   renderFrames = Math.max(renderFrames, frames);
 }
-
-// resize + loop
 
 export function resize() {
   const w = viewport.clientWidth;

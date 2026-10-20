@@ -1,8 +1,9 @@
+// ---------------------------------------------------------------------------
+// The trophies popover (the trophies themselves are in src/achievements.ts).
+
 import { renderTrophies, setTrophyHandlers } from '../achievements';
 import { $ } from './dom';
 import { togglePopover } from './popovers';
-
-// trophies
 
 function renderTrophyList() {
   if (!$('#trophy-pop').hidden) renderTrophies($('#trophy-list'), $('#trophy-count'));

@@ -1,3 +1,5 @@
+// ---------------------------------------------------------------------------
+// Small DOM helpers shared by the editor: $ for one element, and Font Awesome icons.
 
 export const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector(sel) as T;
 

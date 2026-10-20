@@ -1,3 +1,7 @@
+// ---------------------------------------------------------------------------
+// The My creations panel: a card per creation, to open, rename, copy, download
+// or remove, and backing up or importing them all.
+
 import { type CreatureState } from '../creature';
 import { reach, unlock } from '../achievements';
 import { downloadText, envelope, uid } from '../stuff';

@@ -1,3 +1,7 @@
+// ---------------------------------------------------------------------------
+// The bar for a picked worn thing: its color, glow and material, mirroring,
+// wrapping, copying and taking it off.
+
 import { type Attachment } from '../creature';
 import { uid, type Piece, type Thing } from '../stuff';
 import { $ } from './dom';

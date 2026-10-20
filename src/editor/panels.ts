@@ -1,3 +1,6 @@
+// ---------------------------------------------------------------------------
+// Which tab is open (setMode), and redrawing every panel (renderUI).
+
 import { unlock } from '../achievements';
 import { stopMarkTools } from '../markingPanel';
 import { customTabs, setLayoutTab } from '../layout';

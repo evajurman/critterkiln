@@ -1,3 +1,7 @@
+// ---------------------------------------------------------------------------
+// The top bar: the tab switch, fitting its buttons, the layout, and undo,
+// redo, spin and new.
+
 import { unlock } from '../achievements';
 import { installScrollbars } from '../scrollbars';
 import { initLayout } from '../layout';

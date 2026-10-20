@@ -1,3 +1,7 @@
+// ---------------------------------------------------------------------------
+// Pictures and exports: a screenshot (with a transparent background if asked)
+// and the glTF export.
+
 import * as THREE from 'three';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { unlock } from '../achievements';

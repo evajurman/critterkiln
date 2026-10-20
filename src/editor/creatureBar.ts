@@ -1,3 +1,7 @@
+// ---------------------------------------------------------------------------
+// The creature switcher: a row per creature in the scene, with its parts under
+// it, to pick, rename, add, copy and remove them.
+
 import * as THREE from 'three';
 import { Creature, defaultState, type BoneRT, type CreatureState, type PartState, type Placement } from '../creature';
 import { ANIM_KINDS } from '../animate';
@@ -12,8 +16,6 @@ import { flashPart, selectPart } from './partPanel';
 import { renderUI } from './panels';
 import { freshRig, partName, removePart, rigEdit, setPartName } from './rigEdit';
 import { hint, hintOnce } from './hints';
-
-// the creature switcher
 
 /** creatures whose parts are shown under their row (the > beside it) */
 export const partsOpen = new WeakSet<CreatureState>();

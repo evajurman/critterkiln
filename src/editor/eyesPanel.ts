@@ -1,3 +1,6 @@
+// ---------------------------------------------------------------------------
+// The eyes panel: their style, size, spacing, color, lids and finish.
+
 import { EYE_STYLES, type CreatureState, type EyeFinish, type EyeStyle } from '../creature';
 import { $, fa, faClassic } from './dom';
 import { key } from './stage';

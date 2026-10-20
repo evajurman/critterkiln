@@ -1,3 +1,7 @@
+// ---------------------------------------------------------------------------
+// The stuff workbench (the Stuff tab): pieces drawn on the board make a thing
+// to wear; moving, turning, mirroring and saving them, and the stuff panel.
+
 import * as THREE from 'three';
 import { type PartState } from '../creature';
 import { unlock } from '../achievements';
@@ -42,8 +46,6 @@ import { rigEdit } from './rigEdit';
 import { hint, hintOnce } from './hints';
 import { withCleanScene } from './snapshot';
 import { invalidate } from './loop';
-
-// stuff workbench
 
 // The board sits at chest height; its XY plane is the drawing plane and its
 // origin (the crosshair) is where the thing will attach to a body part.

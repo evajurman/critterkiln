@@ -1,3 +1,7 @@
+// ---------------------------------------------------------------------------
+// Little widgets the panels share: the swatches of colors in the scene, glow
+// sliders and where a glow comes from, and Part | Everything toggles.
+
 import { followOf, type GlowFollow } from '../materials';
 import { type Marking } from '../markings';
 import { setSceneColors } from '../layout';
@@ -6,8 +10,6 @@ import { backdrop, floorPrefs } from './floor';
 import { creature, creatures, mode, sceneColorRows, world } from './state';
 import { workbench } from './workbench';
 import { invalidate } from './loop';
-
-// UI
 
 export const SWATCHES = [
   '#f26b5b', '#ff9f6b', '#f7c873', '#fff1c9', '#9fd98b', '#5fbf9f', '#7cc6e8', '#6d8fe0',

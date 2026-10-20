@@ -1,3 +1,6 @@
+// ---------------------------------------------------------------------------
+// Depth of field: focus follows the orbit target, nudged by `offset`.
+
 import * as THREE from 'three';
 import { unlock } from '../achievements';
 import { $ } from './dom';
@@ -7,8 +10,6 @@ import { creatures, mode } from './state';
 import { controls, raycaster, setRay } from './controls';
 import { board } from './workbench';
 import { hint } from './hints';
-
-// depth of field: focus follows the orbit target, nudged by `offset`
 
 const DOF_KEY = 'creature-creator/dof';
 export const dof: { enabled: boolean; offset: number; blur: number } = (() => {

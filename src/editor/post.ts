@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------------
+// Post-processing: everything after the scene render. Ambient occlusion,
+// the fur pass that draws felt fuzz on top of it, glow, depth of field and
+// tone mapping.
+
 import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';

@@ -1,3 +1,7 @@
+// ---------------------------------------------------------------------------
+// Moving the camera: tweening it, framing a creature or the whole scene,
+// looking from the front, side or top, and setting creatures on the floor.
+
 import * as THREE from 'three';
 import { type BoneRT } from '../creature';
 import { moveJoint, type V3 } from '../rigs';

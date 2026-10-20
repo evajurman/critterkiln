@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------------
+// The right-click menu: on a part, a piece or worn stuff in the view, what you
+// can do to it (picking it first); on the tools, arranging them, and on a
+// slider its number and its default. A right-drag still pans the view.
+
 import { arrangeMenu, tabNamesMenu } from '../layout';
 import { keyLabel, type ShortcutId } from '../shortcuts';
 import { openContextMenu, SEP, type MenuEntry, type MenuItem } from '../contextMenu';
@@ -32,10 +37,6 @@ import { renderUI } from './panels';
 import { pickingParent, removePart, rigLock, setMirror } from './rigEdit';
 import { renderSettings, saveSettings, settings, syncSliderNumbers } from './settings';
 import { pickingFocus } from './dof';
-
-// the right-click menu: on a part, a piece or worn stuff in the view, what you
-// can do to it (picking it first); on the tools, arranging them, and on a
-// slider its number and its default. A right-drag still pans the view.
 
 /** A button's own action as a menu item: greyed when the button is, left out when it's hidden. */
 function buttonItem(id: string, icon: string, label?: string): MenuItem | null {

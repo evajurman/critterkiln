@@ -1,3 +1,7 @@
+// ---------------------------------------------------------------------------
+// State and history: the world (every creature in the scene, one of them
+// active), the active creature, what's picked, the tab, and undo/redo.
+
 import * as THREE from 'three';
 import { Creature, defaultState, type CreatureState } from '../creature';
 import { bump, checkScene } from '../achievements';
@@ -21,8 +25,6 @@ import { rehang, rigPrefs, sceneName, sizesIn } from './rigEdit';
 import { hint } from './hints';
 import { invalidate } from './loop';
 import { animSecs } from './animateTab';
-
-// state + history
 
 /**
  * The whole scene: several creatures, one of which is active. `state` and

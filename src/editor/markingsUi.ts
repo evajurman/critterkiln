@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------------
+// Markings: patterns over the material (see src/markings.ts and the panel in
+// src/markingPanel.ts), on the whole creature or one part. The same panel
+// marks stuff pieces on the workbench (see pieceMarks).
+
 import * as THREE from 'three';
 import { markingsOf } from '../creature';
 import { bounds } from '../inflate';
@@ -34,9 +39,6 @@ export function renderMarkings() {
 export let pieceMarks: MarkingPanel;
 
 export function initMarkingsUi() {
-  // Markings: patterns over the material (see src/markings.ts and the panel in
-  // src/markingPanel.ts), on the whole creature or one part. The same panel
-  // marks stuff pieces on the workbench (see pieceMarks).
 
   initMarkingTools({
     gizmo,

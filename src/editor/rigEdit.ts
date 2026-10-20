@@ -1,3 +1,7 @@
+// ---------------------------------------------------------------------------
+// Editing the skeleton: adding, splitting, mirroring and removing parts, which
+// part hangs off which, naming them, and switching body plans.
+
 import { Creature, defaultState, partShapes, setPartShapes, type PartState } from '../creature';
 import { unlock } from '../achievements';
 import { clipLoop, type Vec2 } from '../inflate';
@@ -71,8 +75,6 @@ export function switchRig(base: string) {
   renderUI();
   frameCreature(true);
 }
-
-// rig editing
 
 /** Apply a skeleton edit, give new bones a look, rebuild, and select the first new bone. */
 /** Give parts made by a rig edit their looks (and, for a split pair's right side, its own eyes). */

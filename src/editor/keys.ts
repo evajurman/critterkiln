@@ -1,3 +1,6 @@
+// ---------------------------------------------------------------------------
+// The keyboard: one handler for every shortcut (see src/shortcuts.ts).
+
 import { markGizmoMode, markToolKey } from '../markingPanel';
 import { customTabs } from '../layout';
 import { captureShortcut, is } from '../shortcuts';

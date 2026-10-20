@@ -1,3 +1,7 @@
+// ---------------------------------------------------------------------------
+// Blending: how far parts blend into one another and their colors, and which
+// parts blend.
+
 import { blendWithOf, type BlendWith } from '../creature';
 import { $ } from './dom';
 import { commit, creature, state } from './state';

@@ -1,3 +1,7 @@
+// ---------------------------------------------------------------------------
+// The stage: the renderer, the scene, its lights and invisible shadow-catching
+// ground, and the camera (perspective, or ortho following it).
+
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { setMeshDetail } from '../inflate';
@@ -9,8 +13,6 @@ import { controls } from './controls';
 import { renderOverlay } from './drawing';
 import { gizmo } from './attach';
 import { invalidate } from './loop';
-
-// renderer / scene
 
 export const viewport = $('#viewport');
 export const canvas = $<HTMLCanvasElement>('#gl');

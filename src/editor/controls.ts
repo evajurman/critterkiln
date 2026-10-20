@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------------
+// Controls in the view: picking, posing and shaping parts with the mouse or a
+// finger, the eyes' drag, and the orbit controls. Our pointer handlers are
+// registered first so they can veto orbiting.
+
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { bendOf, carryOnBend, Creature, partShapes, setPartShapes, type BoneRT, type CreatureState, type Planted } from '../creature';
@@ -41,8 +46,6 @@ import { hint, hintOnce } from './hints';
 import { focusAt, pickingFocus } from './dof';
 import { invalidate } from './loop';
 import { animOn, pickAnimStuff } from './animateTab';
-
-// controls (our pointer handlers are registered first so they can veto orbiting)
 
 export const raycaster = new THREE.Raycaster();
 export const pointer = { downX: 0, downY: 0, moved: false, touch: false };

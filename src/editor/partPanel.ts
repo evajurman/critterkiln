@@ -1,3 +1,6 @@
+// ---------------------------------------------------------------------------
+// The picked part's panel: its shape, color, glow, opacity and material.
+
 import { markingsOf, setPartShapes, type BoneRT, type CreatureState, type PartKind, type PartState } from '../creature';
 import { collect, unlock } from '../achievements';
 import { type Thing } from '../stuff';

@@ -1,10 +1,12 @@
+// ---------------------------------------------------------------------------
+// Floor options: none / backdrop (shadow catcher) / mirror / material, and the
+// backdrop color behind everything.
+
 import * as THREE from 'three';
 import { Reflector } from 'three/examples/jsm/objects/Reflector.js';
 import { makeMaterial, setGlow, styleSettings, type GlowFollow, type StyleId } from '../materials';
 import { ground, hemi, pixelRatio, scene, shadowMat, viewport } from './stage';
 import { mode, state } from './state';
-
-// floor options: none / backdrop (shadow catcher) / mirror / material
 
 export type FloorMode = 'none' | 'shadow' | 'mirror' | 'material';
 const FLOOR_KEY = 'creature-creator/floor';

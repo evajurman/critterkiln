@@ -1,3 +1,7 @@
+// ---------------------------------------------------------------------------
+// Files: saving the scene (or a thing) to a file and opening one, with the
+// choice of what to bring in.
+
 import * as THREE from 'three';
 import { type CreatureState } from '../creature';
 import { unlock } from '../achievements';

@@ -1,3 +1,6 @@
+// ---------------------------------------------------------------------------
+// Settings (remembered in this browser), and the keyboard shortcut sheet.
+
 import { Creature, setSeamlessLowPoly, setSeamlessMode, type SeamlessMode } from '../creature';
 import { setMeshDetail } from '../inflate';
 import { setFuzzQuality } from '../materials';
@@ -14,8 +17,6 @@ import { renderUI } from './panels';
 import { fitTopbar } from './topbar';
 import { renderMerge } from './blendPanel';
 import { resize } from './loop';
-
-// settings (remembered in this browser)
 
 const SETTINGS_KEY = 'creature-creator/settings';
 type Theme = 'light' | 'dark' | 'color';

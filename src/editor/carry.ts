@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------------
+// Carrying eyes or stuff from a menu onto the creature: while it's over the
+// creature it's really there (exactly where it would land), and letting go
+// keeps it.
+
 import * as THREE from 'three';
 import { Creature } from '../creature';
 import { uid, type Thing } from '../stuff';
@@ -11,10 +16,6 @@ import { stripThumb } from './workbench';
 import { deselectAttachment, selectAttachment, selectedAttachment } from './attach';
 import { partLabel, selectPart } from './partPanel';
 import { hint } from './hints';
-
-// carrying eyes or stuff from a menu onto the creature: while it's over the
-// creature it's really there (exactly where it would land), and letting go
-// keeps it
 
 let carry: {
   what: 'eyes' | Thing;

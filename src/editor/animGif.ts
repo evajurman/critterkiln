@@ -1,3 +1,6 @@
+// ---------------------------------------------------------------------------
+// Rendering one loop of the Animate tab out as a GIF.
+
 import { applyPalette, GIFEncoder, quantize } from 'gifenc';
 import { $, faClassic, iconLabel } from './dom';
 import { renderer, scene } from './stage';
@@ -7,8 +10,6 @@ import { hint } from './hints';
 import { invalidate } from './loop';
 import { animKey, animPlaying, animSecs, animT, animViz, renderAnim, setAnimKey, setAnimPlaying, setAnimT, showAnimAt } from './animateTab';
 
-// ---- rendering one loop out as a GIF ----
-//
 // Not a live recording: each frame is posed, then waits for its joins to finish
 // fusing (and, with Seamless, for the seamless skin to be built) before it's
 // drawn, so nothing is caught half-blended. Exactly 25 frames a second (GIF

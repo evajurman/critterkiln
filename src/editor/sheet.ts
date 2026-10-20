@@ -1,6 +1,9 @@
+// ---------------------------------------------------------------------------
+// On a phone the panel is a sheet under the viewport: drag its grip to resize
+// it, tap to fold it away.
+
 import { $ } from './dom';
 
-// On a phone the panel is a sheet under the viewport: drag its grip to resize it, tap to fold it away.
 const SHEET_KEY = 'creature-creator/sheet';
 
 export function initSheet() {

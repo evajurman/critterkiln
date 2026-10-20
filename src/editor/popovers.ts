@@ -1,7 +1,8 @@
+// ---------------------------------------------------------------------------
+// The top bar's popovers (File, Creations, trophies...): one open at a time.
+
 import { $ } from './dom';
 import { closeShortcutSheet } from './settings';
-
-// files
 
 // The top-bar menus share the same corner of the viewport, so only one is open at a time.
 export const POPOVERS: [button: string, pop: string][] = [['#trophy-btn', '#trophy-pop'], ['#library-btn', '#library-pop'], ['#file-btn', '#file-pop'], ['#settings-btn', '#settings-pop']];
