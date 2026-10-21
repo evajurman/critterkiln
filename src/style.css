@@ -243,10 +243,12 @@ input[type=range] { accent-color: var(--accent); width: 100%; }
   flex: 1; display: flex; align-items: center; gap: 8px; padding: 3px 6px; border: 0; background: none; color: inherit;
   font-size: 13px; font-weight: var(--w-bold); text-align: left; cursor: var(--cursor-click);
 }
-.mark-pick img, .mark-pick .mark-none { width: 28px; height: 28px; border-radius: 50%; }
+.mark-swap { display: grid; padding: 3px 0 3px 6px; border: 0; background: none; cursor: var(--cursor-click); }
+.mark-swap img, .mark-swap .mark-none { width: 28px; height: 28px; border-radius: 50%; transition: box-shadow .12s; }
+.mark-swap:hover img, .mark-swap:hover .mark-none, .mark-swap.on img, .mark-swap.on .mark-none { box-shadow: 0 0 0 2px var(--accent); }
 .mark-pick > span { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.15; }
 .mark-pick small { font-size: 10.5px; font-weight: var(--w-bold); color: var(--muted); }
-.mark-row.off .mark-pick img { opacity: .4; filter: grayscale(1); }
+.mark-row.off .mark-swap img { opacity: .4; filter: grayscale(1); }
 .mark-row.off .mark-pick > span { opacity: .6; }
 .mark-where { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; font-size: 12px; font-weight: var(--w-bold); color: var(--muted); }
 .piece-marks-title { margin-top: 12px; }
@@ -256,6 +258,7 @@ input[type=range] { accent-color: var(--accent); width: 100%; }
   display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 5px 2px 4px; font-size: 11px; font-weight: var(--w-bold);
   border: 2px solid var(--line); background: var(--card); border-radius: 12px; cursor: var(--cursor-click); color: inherit;
 }
+.mark-kinds button.active { border-color: var(--accent); background: var(--accent-soft); }
 .mark-kinds img, .mark-kinds .mark-none { width: 40px; height: 40px; border-radius: 50%; }
 .mark-none { display: grid; place-items: center; border: 2px dashed var(--line); }
 .mark-color { display: flex; align-items: center; gap: 8px; margin: 8px 0; font-size: 13px; font-weight: var(--w-bold); }

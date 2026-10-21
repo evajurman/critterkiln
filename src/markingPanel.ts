@@ -390,6 +390,8 @@ export class MarkingPanel {
   open = 0;
   /** the kinds to add one from are showing */
   adding = false;
+  /** the row (see refs) whose kinds to change it to are showing */
+  swapping: number | null = null;
 
   constructor(
     readonly target: MarkTarget,
@@ -487,6 +489,27 @@ export class MarkingPanel {
       this.open = list.length - 1;
     }
     this.render();
+  }
+
+  /** Make a marking another kind, keeping its settings (and where it's been moved to). */
+  private retype(r: MarkRef, type: Marking['type']) {
+    const list = this.list(r.all);
+    const old = list[r.i];
+    if (!old || old.type === type) return;
+    // (how strongly a pattern's cut and what's been painted, written or picked are the old kind's own)
+    const { size, rough, amount, darkness, color, finish, offset, turn, stretch, skip } = old;
+    const keep: Partial<Marking> = { size, rough, amount, darkness, color, finish, offset, turn, stretch, skip };
+    const m: Marking = { ...defaultMarking(type), ...Object.fromEntries(Object.entries(keep).filter(([, v]) => v !== undefined)) };
+    // a sticker made from a pattern goes where it's being looked at
+    if (STICKERS.includes(type) && !STICKERS.includes(old.type)) this.faceView(m);
+    list[r.i] = m;
+    this.swapping = null;
+    this.save(list, true, r.all);
+    this.open = this.refs().findIndex((x) => x.m === m);
+    this.render();
+    if (type === 'picture') this.pickPicture({ ...r, m });
+    if (STICKERS.includes(type)) this.startGizmo('translate');
+    if (type === 'paint') this.startBrush(false);
   }
 
   /** Lay a sticker on the picked unit where the view meets it (in its middle), facing the way it's being looked at. */
@@ -601,6 +624,7 @@ export class MarkingPanel {
     }
     const refs = this.refs();
     this.open = Math.min(this.open, Math.max(0, refs.length - 1));
+    if (this.swapping !== null && this.swapping >= refs.length) this.swapping = null;
     const pics = markingThumbnails();
     const pic = (k: Marking['type']) => (pics.has(k) ? `<img src="${pics.get(k)}" alt="" />` : '<span class="mark-none"></span>');
     const name = (k: Marking['type']) => MARKINGS.find((x) => x.type === k)!.name;
@@ -609,16 +633,27 @@ export class MarkingPanel {
     refs.forEach((r, i) => {
       const row = document.createElement('div');
       row.className = 'mark-row' + (i === this.open && !this.adding ? ' active' : '') + (r.off ? ' off' : '');
+      const swap = document.createElement('button');
+      swap.className = 'mark-swap' + (this.swapping === i ? ' on' : '');
+      swap.title = 'Make it a different kind of marking';
+      swap.innerHTML = pic(r.m.type);
+      swap.onclick = () => {
+        this.open = i;
+        this.adding = false;
+        this.swapping = this.swapping === i ? null : i;
+        this.render();
+      };
       const open = document.createElement('button');
       open.className = 'mark-pick';
       open.title = 'Change this marking';
-      open.innerHTML = `${pic(r.m.type)}<span>${name(r.m.type)}<small>${r.all ? (r.off ? `${Whole} · off here` : Whole) : `This ${t.unit}`}</small></span>`;
+      open.innerHTML = `<span>${name(r.m.type)}<small>${r.all ? (r.off ? `${Whole} · off here` : Whole) : `This ${t.unit}`}</small></span>`;
       open.onclick = () => {
         this.open = i;
         this.adding = false;
+        this.swapping = null;
         this.render();
       };
-      row.append(open);
+      row.append(swap, open);
       if (r.all) {
         // the whole's: on or off on this unit
         const here = document.createElement('button');
@@ -641,6 +676,7 @@ export class MarkingPanel {
       };
       row.append(del);
       el.append(row);
+      if (this.swapping === i) el.append(this.kinds(r.m.type, (k) => this.retype(r, k)));
     });
     const add = document.createElement('button');
     add.className = 'ghost mark-add' + (this.adding ? ' on' : '');
@@ -650,34 +686,44 @@ export class MarkingPanel {
     add.title = why ?? (this.all ? `Lay a pattern over every ${t.unit} (it can be taken off any one of them after)` : `Lay a pattern over just this ${t.unit}`);
     add.onclick = () => {
       this.adding = !this.adding;
+      this.swapping = null;
       this.render();
     };
     el.append(add);
     if (this.adding) {
-      const kinds = document.createElement('div');
-      kinds.className = 'mark-kinds';
-      for (const k of MARKINGS) {
-        const btn = document.createElement('button');
-        btn.title = k.title;
-        btn.innerHTML = `${pic(k.type)}<span>${k.name}</span>`;
-        btn.onclick = () => {
-          const m = defaultMarking(k.type);
-          if (STICKERS.includes(k.type)) this.faceView(m);
+      el.append(
+        this.kinds(undefined, (type) => {
+          const m = defaultMarking(type);
+          if (STICKERS.includes(type)) this.faceView(m);
           const all = this.all;
           const list = [...this.list(all), m];
           this.adding = false;
           this.save(list, true, all);
           this.open = this.refs().findIndex((r) => r.m === m);
           this.render();
-          if (k.type === 'picture') this.pickPicture({ m, all, i: list.length - 1, off: false });
-          if (STICKERS.includes(k.type)) this.startGizmo('translate');
-          if (k.type === 'paint') this.startBrush(false);
-        };
-        kinds.append(btn);
-      }
-      el.append(kinds);
+          if (type === 'picture') this.pickPicture({ m, all, i: list.length - 1, off: false });
+          if (STICKERS.includes(type)) this.startGizmo('translate');
+          if (type === 'paint') this.startBrush(false);
+        }),
+      );
     }
     this.renderParams(this.adding ? undefined : refs[this.open]);
+  }
+
+  /** A picture of each kind of marking to pick one from (the one it is now, if any, marked). */
+  private kinds(now: Marking['type'] | undefined, pick: (type: Marking['type']) => void): HTMLElement {
+    const pics = markingThumbnails();
+    const kinds = document.createElement('div');
+    kinds.className = 'mark-kinds';
+    for (const k of MARKINGS) {
+      const btn = document.createElement('button');
+      btn.title = k.title;
+      if (k.type === now) btn.className = 'active';
+      btn.innerHTML = `${pics.has(k.type) ? `<img src="${pics.get(k.type)}" alt="" />` : '<span class="mark-none"></span>'}<span>${k.name}</span>`;
+      btn.onclick = () => pick(k.type);
+      kinds.append(btn);
+    }
+    return kinds;
   }
 
   /** The open marking's settings. */
