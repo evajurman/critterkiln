@@ -42,11 +42,12 @@
     <div id="app">
       <header class="topbar">
         <div class="brand"><img class="logo" src="/icon-192.png" alt="" /> CritterKiln</div>
-        <div class="modes" role="tablist">
-          <button data-mode="shape" class="active" data-shortcut="shape" title="Shape: draw, stretch, grow and pose your creature (1)"><i class="fa-slab-duo fa-regular fa-hand" aria-hidden="true"></i><span class="lbl"> Shape</span></button>
-          <button data-mode="look" data-shortcut="look" title="Look: colors, materials and stuff to wear (2)"><i class="fa-slab-duo fa-regular fa-palette" aria-hidden="true"></i><span class="lbl"> Look</span></button>
-          <button data-mode="animate" data-shortcut="animate" title="Animate: give parts looping motions, ready to record (3)"><i class="fa-slab-duo fa-regular fa-video" aria-hidden="true"></i><span class="lbl"> Animate</span></button>
-          <button data-mode="stuff" data-shortcut="stuff" title="Stuff: make things to wear and carry (4)"><i class="fa-slab-duo fa-regular fa-briefcase" aria-hidden="true"></i><span class="lbl"> Stuff</span></button>
+        <!-- on a phone: the menu (everything else in this bar) and what's picked, which opens the parts list -->
+        <button id="phone-menu" class="phone-only phone-round" aria-label="Menu" aria-expanded="false" title="Menu"><i class="fa-slab-duo fa-regular fa-bars" aria-hidden="true"></i></button>
+        <button id="pick-pill" class="phone-only pick-pill" aria-expanded="false" title="What's picked: tap for the parts list"><span id="pick-dot" class="pick-dot"></span><span id="pick-name"></span> <i class="fa-duotone fa-regular fa-chevron-down" aria-hidden="true"></i></button>
+        <div class="seg guided-seg" id="guided-seg" role="group" aria-label="How to work">
+          <button data-guided="on" title="Guided: one step at a time, from a body plan to a photo">Guided</button>
+          <button data-guided="off" title="Free: every tool, in the Shape, Look, Animate and Stuff modes">Free</button>
         </div>
         <div class="spacer"></div>
         <div class="tools">
@@ -61,18 +62,53 @@
         </div>
       </header>
 
+      <!-- the modes, down the left edge (along the top on a phone) -->
+      <nav class="rail modes" role="tablist" aria-label="Modes">
+        <button data-mode="shape" class="active" data-shortcut="shape" title="Shape: draw, stretch, grow and pose your creature (1)"><i class="fa-slab-duo fa-regular fa-hand" aria-hidden="true"></i><span class="lbl"> Shape</span></button>
+        <button data-mode="look" data-shortcut="look" title="Look: colors, materials and stuff to wear (2)"><i class="fa-slab-duo fa-regular fa-palette" aria-hidden="true"></i><span class="lbl"> Look</span></button>
+        <button data-mode="animate" data-shortcut="animate" title="Animate: give parts looping motions, ready to record (3)"><i class="fa-slab-duo fa-regular fa-video" aria-hidden="true"></i><span class="lbl"> Animate</span></button>
+        <button data-mode="stuff" data-shortcut="stuff" title="Stuff: make things to wear and carry (4)"><i class="fa-slab-duo fa-regular fa-briefcase" aria-hidden="true"></i><span class="lbl"> Stuff</span></button>
+        <!-- Guided on a phone: back, where you are, next (src/layout.ts) -->
+        <div id="step-bar" class="step-bar">
+          <button id="sb-back" class="ghost" aria-label="Back a step"><i class="fa-duotone fa-regular fa-chevron-left" aria-hidden="true"></i></button>
+          <div class="sb-mid"><span id="sb-label"></span><span id="sb-dots" class="sb-dots" aria-hidden="true"></span></div>
+          <button id="sb-next" class="primary slim"></button>
+        </div>
+      </nav>
+
       <button id="sheet-grip" class="sheet-grip" aria-label="Resize the panel" title="Drag to resize the panel; tap to fold it away"></button>
 
-      <aside class="panel">
+      <!-- the outliner and the inspector: either side of the view, or one sheet under it on a phone -->
+      <div class="side-wrap">
+      <aside class="outliner" aria-label="Scene">
         <div id="creature-bar" class="creature-bar">
           <div class="creature-foot">
-            <button id="cr-add" class="ghost creature-new" title="Add a new creature to the scene"><i class="fa-duotone fa-regular fa-plus" aria-hidden="true"></i> New</button>
-            <button id="ck-menu-btn" class="piece-icon ck-menu-btn" title="Sections: bring back hidden ones, gizmos, and arranging this tab" aria-label="Sections"><i class="fa-duotone fa-regular fa-ellipsis" aria-hidden="true"></i></button>
+            <button id="scene-fold" class="piece-icon scene-fold" title="Fold the Scene list into a strip of its creatures" aria-label="Fold the Scene list"><i class="fa-duotone fa-regular fa-chevrons-left" aria-hidden="true"></i></button>
+            <span class="side-title">Scene</span>
+            <button id="cr-add" class="ghost creature-new" title="Add a new creature to the scene"><i class="fa-duotone fa-regular fa-plus" aria-hidden="true"></i> Creature</button>
           </div>
           <div id="creature-rows" class="creature-rows"></div>
-          <div id="ck-banner" class="ck-banner" hidden></div>
         </div>
-        <p class="idle-note muted">Click a creature to start shaping it, or pick one above.</p>
+        <!-- folded (a small window, or by hand): just the creatures, a click picks every part of one -->
+        <div id="scene-strip" class="scene-strip"></div>
+      </aside>
+
+      <aside class="panel" aria-label="Inspector">
+        <div class="inspector-head">
+          <div class="inspector-title">
+            <span class="inspector-path muted" id="inspector-path"></span>
+            <span class="inspector-name" id="inspector-name"></span>
+          </div>
+          <div id="sec-tabs" class="sec-tabs" role="tablist" aria-label="Sections"></div>
+          <button id="ck-menu-btn" class="piece-icon ck-menu-btn" title="Sections: bring back hidden ones, gizmos, and arranging this tab" aria-label="Sections"><i class="fa-duotone fa-regular fa-ellipsis" aria-hidden="true"></i></button>
+        </div>
+        <div id="ck-banner" class="ck-banner" hidden></div>
+        <!-- Guided: what to do in this step (src/layout.ts) -->
+        <div id="step-note" class="step-note" hidden>
+          <span id="step-text"></span>
+          <button id="step-action" class="ghost step-action" hidden></button>
+        </div>
+        <p class="idle-note muted">Click a creature to start shaping it, or pick one in the list.</p>
         <!-- each tab's sections: src/layout.ts moves the tools below into them, or onto the view's corners -->
         <div id="ck-side" class="ck-side"></div>
         <div id="ck-hidden" class="ck-tray"></div>
@@ -153,12 +189,6 @@
           <div class="ck-tool" data-tool="floor"><button id="drop-floor" class="ghost" title="Move the whole creature so its lowest point touches the floor"><i class="fa-slab-duo fa-regular fa-arrow-down-to-line" aria-hidden="true"></i> Floor</button></div>
           <div class="ck-tool" data-tool="keep-floor"><label class="check" title="After you bend or resize something, the creature settles back onto the floor (if it was standing on it)"><input id="keep-floor" type="checkbox" checked /> Keep feet on the floor</label></div>
           <div class="ck-tool" data-tool="custom-color"><label class="color-pick"><input id="color" type="color" /> Custom</label></div>
-          <div class="ck-tool" data-tool="paint-all">
-            <div class="seg scope-seg" id="color-scope">
-              <button data-scope="part" title="Colors and glow go on the picked part">Part</button>
-              <button data-scope="all" title="Colors and glow go on the whole creature">Everything</button>
-            </div>
-          </div>
           <div class="ck-tool" data-tool="swatches"><div id="swatches" class="swatches"></div></div>
           <div class="ck-tool" data-tool="scene-colors"><div class="scene-colors" id="scene-colors"></div></div>
           <div class="ck-tool" data-tool="glow">
@@ -177,20 +207,8 @@
           </div>
           <div class="ck-tool" data-tool="materials"><div id="styles" class="styles"></div></div>
           <div class="ck-tool" data-tool="material-params"><div id="style-params" class="style-params"></div></div>
-          <div class="ck-tool" data-tool="marking-part">
-            <div class="seg scope-seg" id="mark-scope">
-              <button data-scope="part" title="New markings go on just the picked part">Part</button>
-              <button data-scope="all" title="New markings go on the whole creature (any part can turn one off)">Everything</button>
-            </div>
-          </div>
           <div class="ck-tool" data-tool="markings"><div id="markings" class="markings"></div></div>
           <div class="ck-tool" data-tool="marking-params"><div id="marking-params" class="style-params"></div></div>
-          <div class="ck-tool" data-tool="style-part">
-            <div class="seg scope-seg" id="style-scope">
-              <button data-scope="part" title="A material just for the picked part">Part</button>
-              <button data-scope="all" title="One material for the whole creature">Everything</button>
-            </div>
-          </div>
           <div class="ck-tool" data-tool="arrange"><button id="cr-place" class="pill-toggle" title="Move, turn or resize this creature anywhere in the scene"><i class="fa-duotone fa-regular fa-arrows-up-down-left-right" aria-hidden="true"></i> Arrange</button></div>
           <div class="ck-tool" data-tool="pull">
             <label id="ik-pill" class="pill-toggle" title="Dragging a hand bends the elbow and shoulder too">
@@ -358,21 +376,6 @@
           </div>
           <div class="ck-tool" data-tool="photo-clear"><label class="check" title="Leave the backdrop out of the picture: just the creatures (and their shadows)"><input id="shot-clear" type="checkbox" /> Transparent background</label></div>
           <div class="ck-tool" data-tool="photo"><button id="shot" class="primary" title="Save a picture of the scene"><i class="fa-slab-duo fa-regular fa-camera" aria-hidden="true"></i> Take photo</button></div>
-          <div class="ck-tool" data-tool="views">
-        <div id="view-bar" class="view-bar" aria-label="Camera views">
-          <button data-view="front" title="View from the front">Front</button>
-          <button data-view="left" title="View from the left">Left</button>
-          <button data-view="right" title="View from the right">Right</button>
-          <button data-view="top" title="View from above">Top</button>
-          <button data-view="quarter" title="Three-quarter view">¾</button>
-          <button data-view="selection" data-shortcut="frame" title="Frame the creature you're editing (F)" hidden>Selection</button>
-          <button data-view="all" data-shortcut="frameAll" title="Frame everyone (Shift+A)">All</button>
-          <span id="view-proj" class="view-proj">
-            <button data-proj="persp" title="Perspective: things further away look smaller" aria-label="Perspective"><i class="fa-regular fa-cube" aria-hidden="true"></i></button>
-            <button data-proj="ortho" title="Ortho: flat, no perspective, sizes stay true" aria-label="Ortho"><i class="fa-regular fa-square" aria-hidden="true"></i></button>
-          </span>
-        </div>
-          </div>
         </div>
 
         <section id="stuff-panel" hidden>
@@ -418,10 +421,6 @@
             <label class="slider" title="Fade into the colors of the pieces this one touches. 0 keeps colors apart."><span>Blend colors</span><input id="piece-blend-color" type="range" data-default="0" min="0" max="1" step="0.01" /></label>
             <div class="paint-row">
               <label class="color-pick"><input id="piece-color" type="color" /> Custom</label>
-              <div class="seg scope-seg" id="piece-color-scope">
-                <button data-scope="part" title="Colors and glow go on the picked piece">Piece</button>
-                <button data-scope="all" title="Colors and glow go on every piece of this thing">All</button>
-              </div>
             </div>
             <div class="swatches" id="piece-swatches"></div>
             <div class="scene-colors" id="piece-scene-colors"></div>
@@ -434,21 +433,40 @@
             <div class="mini-styles" id="piece-styles"></div>
             <div class="thing-material" id="piece-style-params"></div>
             <div class="sub-title piece-marks-title">Markings</div>
-            <div class="seg scope-seg" id="piece-mark-scope">
-              <button data-scope="part" title="New markings go on just the picked piece">Piece</button>
-              <button data-scope="all" title="New markings go on the whole thing (any piece can turn one off)">Whole thing</button>
-            </div>
             <div id="piece-markings" class="markings"></div>
             <div id="piece-marking-params" class="style-params" hidden></div>
           </div>
         </section>
 
-
+        <div id="step-foot" class="step-foot" hidden>
+          <button id="step-back" class="ghost"></button>
+          <button id="step-next" class="primary slim"></button>
+        </div>
       </aside>
+      </div>
 
       <main class="viewport" id="viewport">
         <canvas id="gl"></canvas>
         <canvas id="overlay"></canvas>
+        <!-- the view cube: always in the view's bottom right corner, turned the way the scene is (src/editor/framing.ts) -->
+        <div id="view-bar" class="view-gizmo" aria-label="Camera views">
+          <div class="cube-side">
+            <button data-view="selection" data-shortcut="frame" title="Frame the creature you're editing (F)" aria-label="Frame the creature you're editing" hidden><i class="fa-duotone fa-regular fa-crosshairs" aria-hidden="true"></i></button>
+            <button data-view="all" data-shortcut="frameAll" title="Frame everyone (Shift+A)" aria-label="Frame everyone"><i class="fa-duotone fa-regular fa-expand" aria-hidden="true"></i></button>
+            <span id="view-proj" class="view-proj">
+              <button data-proj="persp" title="Perspective: things further away look smaller" aria-label="Perspective"><i class="fa-regular fa-cube" aria-hidden="true"></i></button>
+              <button data-proj="ortho" title="Ortho: flat, no perspective, sizes stay true" aria-label="Ortho"><i class="fa-regular fa-square" aria-hidden="true"></i></button>
+            </span>
+          </div>
+          <div class="cube-wrap" id="view-cube">
+            <div class="cube" id="cube"></div>
+            <button class="cube-home" data-view="quarter" title="Home: the three-quarter view" aria-label="Home: the three-quarter view"><i class="fa-duotone fa-regular fa-house" aria-hidden="true"></i></button>
+            <button class="cube-step" data-step="up" title="Turn to the side above" aria-label="Turn to the side above"><i class="fa-solid fa-caret-up" aria-hidden="true"></i></button>
+            <button class="cube-step" data-step="down" title="Turn to the side below" aria-label="Turn to the side below"><i class="fa-solid fa-caret-down" aria-hidden="true"></i></button>
+            <button class="cube-step" data-step="left" title="Turn to the side on the left" aria-label="Turn to the side on the left"><i class="fa-solid fa-caret-left" aria-hidden="true"></i></button>
+            <button class="cube-step" data-step="right" title="Turn to the side on the right" aria-label="Turn to the side on the right"><i class="fa-solid fa-caret-right" aria-hidden="true"></i></button>
+          </div>
+        </div>
         <!-- sections pinned to the view's corners (src/layout.ts) -->
         <div class="ck-col" data-side="left">
           <div class="ck-dock" data-corner="tl"></div>
@@ -458,14 +476,8 @@
           <div class="ck-dock" data-corner="tr"></div>
           <div class="ck-dock" data-corner="br"></div>
         </div>
-        <!-- what each handle does: top middle, while handles show (Gizmos: Full or Selected part) -->
-        <div class="legend" id="shape-legend">
-          <span><b class="dot orange"></b> bend</span>
-          <span><b class="dot purple square"></b> slide</span>
-          <span title="Drag to curve the part; double-click to straighten it"><b class="dot green diamond"></b> curve</span>
-          <span class="legend-tip mouse-only" title="While dragging a grip: Shift keeps it to the creature's X, Y or Z; Ctrl snaps it onto another part's base or tip"><kbd>Shift</kbd> one axis · <kbd class="ctrl-key">Ctrl</kbd> snap</span>
-          <span class="legend-tip" title="Scroll on an orange tip or a purple base: Tip and Base width (a drawn part grows or shrinks whole)"><b class="dot orange"></b><b class="dot purple square"></b> scroll to change size</span>
-        </div>
+        <!-- what the handle under the pointer does, beside it (src/editor/controls.ts) -->
+        <div id="handle-tip" class="handle-tip" hidden></div>
         <div id="hint" class="hint">
           <span class="hint-text"></span>
           <button class="hint-close" title="Close" aria-label="Close">
@@ -520,10 +532,6 @@
             <div class="attach-pieces" id="attach-pieces"></div>
             <div class="paint-row">
               <label class="color-pick"><input id="attach-color" type="color" /> Custom</label>
-              <div class="seg scope-seg" id="attach-color-scope">
-                <button data-scope="part" title="Colors and glow go on the picked piece">Piece</button>
-                <button data-scope="all" title="Colors and glow go on every piece of this thing">All</button>
-              </div>
             </div>
             <div class="swatches" id="attach-swatches"></div>
             <div class="scene-colors" id="attach-scene-colors"></div>

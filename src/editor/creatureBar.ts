@@ -1,26 +1,27 @@
 // ---------------------------------------------------------------------------
-// The creature switcher: a row per creature in the scene, with its parts under
-// it, to pick, rename, add, copy and remove them.
+// The outliner: a row per creature in the scene, with its parts under it, to
+// pick, rename, add, copy and remove them.
 
 import * as THREE from 'three';
 import { Creature, defaultState, type BoneRT, type CreatureState, type PartState, type Placement } from '../creature';
 import { ANIM_KINDS } from '../animate';
 import { duplicateLimb } from '../rigs';
-import { $, fa } from './dom';
+import { $, fa, pickHow, type PickHow } from './dom';
 import { activate, commit, creature, creatures, idle, makeCreature, save, selected, setCreature, setIdle, state, world } from './state';
 import { creatureLabel } from './controls';
 import { frameAll } from './framing';
 import { exitDraw } from './drawing';
 import { placing, startPlacing, stopPlacing } from './arrange';
-import { flashPart, selectPart } from './partPanel';
+import { partTree, pickedSrcs, selectAllParts, selectPart } from './partPanel';
 import { renderUI } from './panels';
 import { freshRig, partName, removePart, rigEdit, setPartName } from './rigEdit';
 import { hint, hintOnce } from './hints';
 
-/** creatures whose parts are shown under their row (the > beside it) */
-export const partsOpen = new WeakSet<CreatureState>();
+/** creatures whose parts are folded away under their row (the > beside it); the rest show theirs, like a tree */
+export const partsShut = new WeakSet<CreatureState>();
 
 export function renderCreatureBar() {
+  renderStrip();
   const el = $('#creature-rows');
   el.innerHTML = '';
   // with others around, the camera can frame just this one
@@ -38,14 +39,15 @@ export function renderCreatureBar() {
     name.className = 'creature-name';
     name.textContent = creatureLabel(i);
     pick.append(name);
-    pick.title = i === world.active && !idle ? `${creatureLabel(i)}: click to rename` : creatureLabel(i);
+    pick.title = `${creatureLabel(i)}: click to pick every part · double-click to rename`;
+    // a click picks the whole creature (every part); a second, quick one renames it
     pick.onclick = () => {
-      if (i === world.active && !idle) return renameCreatureRow(pick);
-      setIdle(false);
-      activate(i);
-      flashPart();
+      const again = lastCreatureClick.i === i && performance.now() - lastCreatureClick.at < 450;
+      lastCreatureClick = { i, at: again ? 0 : performance.now() };
+      if (again && i === world.active) return renameCreatureRow(el.querySelectorAll<HTMLButtonElement>('.creature-row .piece-pick')[i]);
+      if (i !== world.active) activate(i);
+      selectAllParts();
       save();
-      renderUI();
     };
     const dup = document.createElement('button');
     dup.className = 'piece-icon';
@@ -58,15 +60,15 @@ export function renderCreatureBar() {
     del.title = world.creatures.length < 2 ? 'The scene needs at least one creature' : 'Remove this creature from the scene';
     del.disabled = world.creatures.length < 2;
     del.onclick = () => removeCreature(i);
-    const open = partsOpen.has(s);
+    const open = !partsShut.has(s);
     const fold = document.createElement('button');
     fold.className = 'piece-icon parts-fold' + (open ? ' open' : '');
     fold.innerHTML = '<i class="fa-duotone fa-regular fa-chevron-down" aria-hidden="true"></i>';
     fold.title = open ? 'Hide its parts' : 'Show its parts';
     fold.setAttribute('aria-expanded', String(open));
     fold.onclick = () => {
-      if (open) partsOpen.delete(s);
-      else partsOpen.add(s);
+      if (open) partsShut.add(s);
+      else partsShut.delete(s);
       renderCreatureBar();
     };
     row.prepend(fold);
@@ -86,31 +88,23 @@ function partRows(i: number): HTMLElement {
   const c = creatures[i];
   const list = document.createElement('div');
   list.className = 'part-rows';
-  const picked = i === world.active && !idle ? creature.bones.get(selected)?.src : undefined;
-  // a pair is listed by its left twin, so a part on the right twin hangs off that row too
-  const row = (b: BoneRT) => (b.def.mirrorOf ? (c.bones.get(b.def.mirrorOf) ?? b) : b);
-  const kids = new Map<BoneRT | null, BoneRT[]>();
-  for (const b of c.list.filter((o) => !o.def.mirrorOf)) {
-    const up = b.parent ? row(b.parent) : null;
-    kids.set(up, [...(kids.get(up) ?? []), b]);
-  }
-  const pickIt = (id: string) => {
+  const picked = new Set(i === world.active && !idle ? pickedSrcs() : []);
+  const pickIt = (id: string, how: PickHow = 'one') => {
     if (i !== world.active || idle) {
       setIdle(false);
       activate(i);
+      how = 'one';
     }
-    selectPart(id);
+    selectPart(id, true, how);
   };
-  const add = (b: BoneRT, depth: number) => {
-    const p = s.parts[b.src];
-    if (p) list.append(partRow(i, b, p, depth, b.src === picked, pickIt));
-    for (const k of kids.get(b) ?? []) add(k, depth + 1);
-  };
-  for (const b of kids.get(null) ?? []) add(b, 0);
+  for (const { bone, depth } of partTree(c)) {
+    const p = s.parts[bone.src];
+    if (p) list.append(partRow(i, bone, p, depth, picked.has(bone.src), pickIt));
+  }
   return list;
 }
 
-function partRow(i: number, b: BoneRT, p: PartState, depth: number, active: boolean, pickIt: (id: string) => void): HTMLElement {
+function partRow(i: number, b: BoneRT, p: PartState, depth: number, active: boolean, pickIt: (id: string, how?: PickHow) => void): HTMLElement {
   const s = world.creatures[i];
   const c = creatures[i];
   const twin = c.list.find((o) => o.def.mirrorOf === b.def.id);
@@ -127,8 +121,14 @@ function partRow(i: number, b: BoneRT, p: PartState, depth: number, active: bool
     `<i style="background:${p.color}"></i><span class="part-name">${name}${twin ? ' ×2' : ''}</span>` +
     (p.outline ? `<span class="part-mark" title="Drawn">${fa('check')}</span>` : '') +
     (kind ? `<span class="part-mark" title="Moves: ${kind.name}"><i class="fa-duotone fa-regular fa-${kind.icon}" aria-hidden="true"></i></span>` : '');
-  btn.title = (kind ? `${name}: moves (${kind.name})` : name) + ' · double-click to rename';
-  btn.onclick = () => {
+  btn.title = (kind ? `${name}: moves (${kind.name})` : name) + ' · Ctrl-click to pick one more · Shift-click to pick everything between · double-click to rename';
+  btn.onclick = (e) => {
+    // Ctrl: one more part picked (or one less); Shift: everything from the main pick to this one
+    if (pickHow(e) !== 'one') {
+      pickIt(b.def.id, pickHow(e));
+      save();
+      return;
+    }
     // picking re-draws the list, so a double click lands on a new row: tell it by the time between
     const again = lastPartClick.id === b.def.id && performance.now() - lastPartClick.at < 450;
     lastPartClick = { id: b.def.id, at: again ? 0 : performance.now() };
@@ -156,11 +156,21 @@ function partRow(i: number, b: BoneRT, p: PartState, depth: number, active: bool
     pickIt(b.def.id);
     removePart();
   };
-  row.append(btn, dup, del);
+  const add = document.createElement('button');
+  add.className = 'piece-icon part-add phone-only';
+  add.innerHTML = fa(active ? 'check' : 'plus');
+  add.title = active ? `Leave ${name} out of the picked parts` : `Pick ${name} too`;
+  add.setAttribute('aria-label', add.title);
+  add.onclick = () => {
+    pickIt(b.def.id, 'toggle');
+    save();
+  };
+  row.append(add, btn, dup, del);
   return row;
 }
 
 let lastPartClick = { id: '', at: 0 };
+let lastCreatureClick = { i: -1, at: 0 };
 
 /** Turns the picked part's row (in the creature bar) into a name box: Enter or clicking away keeps it, Escape doesn't. */
 function renamePartRow(id: string) {
@@ -217,6 +227,56 @@ function renameCreatureRow(btn: HTMLButtonElement) {
   input.onblur = () => finish(true);
 }
 
+/** The Scene list folded: a dot per creature (a click picks every part of it), then add, and unfold. */
+function renderStrip() {
+  const strip = $('#scene-strip');
+  const unfold = document.createElement('button');
+  unfold.className = 'strip-unfold';
+  unfold.innerHTML = '<i class="fa-duotone fa-regular fa-chevrons-right" aria-hidden="true"></i>';
+  unfold.title = 'Unfold the Scene list';
+  unfold.setAttribute('aria-label', 'Unfold the Scene list');
+  unfold.onclick = () => setSceneFolded(false);
+  const dots = world.creatures.map((s, i) => {
+    const b = document.createElement('button');
+    b.className = 'strip-creature' + (i === world.active && !idle ? ' active' : '');
+    b.style.background = Object.values(s.parts)[0]?.color ?? '#ccc';
+    b.title = `${creatureLabel(i)}: click to pick every part`;
+    b.setAttribute('aria-label', creatureLabel(i));
+    b.onclick = () => {
+      if (i !== world.active) activate(i);
+      selectAllParts();
+      save();
+    };
+    return b;
+  });
+  const add = document.createElement('button');
+  add.className = 'strip-add';
+  add.innerHTML = '<i class="fa-duotone fa-regular fa-plus" aria-hidden="true"></i>';
+  add.title = 'Add a new creature to the scene';
+  add.setAttribute('aria-label', 'Add a creature');
+  add.onclick = () => $('#cr-add').click();
+  strip.replaceChildren(unfold, ...dots, add);
+}
+
+const FOLD_KEY = 'creature-creator/scene-folded';
+/** Folded or not, as chosen by hand; unset: folded in a smaller window */
+let foldChoice: boolean | null = null;
+try {
+  const v = localStorage.getItem(FOLD_KEY);
+  if (v === 'true' || v === 'false') foldChoice = v === 'true';
+} catch {}
+const smallWindow = matchMedia('(max-width: 1440px)');
+function applyFold() {
+  $('#app').classList.toggle('scene-folded', foldChoice ?? smallWindow.matches);
+}
+function setSceneFolded(v: boolean) {
+  foldChoice = v;
+  try {
+    localStorage.setItem(FOLD_KEY, String(v));
+  } catch {}
+  applyFold();
+}
+
 /** A free spot on the floor to the right of everyone else. */
 export function freeSpot(): Placement {
   let maxX = -Infinity;
@@ -267,6 +327,9 @@ function removeCreature(i: number) {
 }
 
 export function initCreatureBar() {
+  applyFold();
+  smallWindow.addEventListener('change', applyFold);
+  $('#scene-fold').onclick = () => setSceneFolded(true);
   $('#cr-add').onclick = () => {
     const s = defaultState(freshRig(state.rig));
     s.style = state.style;

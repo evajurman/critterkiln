@@ -168,7 +168,8 @@ export function initViewMenu() {
   canvas.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     // a right-drag panned the view; and nothing to offer while drawing or picking a parent
-    if (pointer.moved || drawState || pickingParent || pickingFocus || gizmo.dragging) return;
+    // (and a long press on a phone picks a part instead)
+    if (pointer.moved || pointer.held || drawState || pickingParent || pickingFocus || gizmo.dragging) return;
     viewMenu(e.clientX, e.clientY);
   });
   /** On a slider: its default back, and the number boxes; on a tool: arranging it. */

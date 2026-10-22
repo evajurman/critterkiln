@@ -69,20 +69,16 @@ const TOOLS: Record<string, ToolDef> = {
   'scene-colors': { name: 'Colors in the scene', icon: duo('swatchbook'), kind: 'wide' },
   glow: { name: 'Glow', icon: duo('lightbulb'), kind: 'wide' },
   'custom-color': { name: 'Custom color', icon: duo('eye-dropper'), kind: 'button' },
-  'paint-all': { name: 'Color: part or everything', icon: duo('fill-drip'), kind: 'button' },
   'color-blend': { name: 'Blend colors', icon: duo('sliders'), kind: 'wide' },
   materials: { name: 'Materials', icon: slab('cloud'), kind: 'wide' },
   'material-params': { name: 'Material settings', icon: duo('sliders'), kind: 'wide' },
-  'style-part': { name: 'Material: part or everything', icon: duo('fill-drip'), kind: 'wide' },
   markings: { name: 'Markings', icon: slab('circle'), kind: 'wide' },
   'marking-params': { name: 'Marking settings', icon: duo('sliders'), kind: 'wide' },
-  'marking-part': { name: 'Marking: part or everything', icon: duo('fill-drip'), kind: 'wide' },
   arrange: { name: 'Arrange', icon: duo('arrows-up-down-left-right'), kind: 'pill' },
   pull: { name: 'Pull limbs', icon: duo('hand-back-fist'), kind: 'pill', gizmo: true },
   mirror: { name: 'Mirror', icon: slab('arrow-right-arrow-left'), kind: 'pill' },
   eyes: { name: 'Eyes', icon: slab('eye'), kind: 'own' },
   attach: { name: 'Attach stuff', icon: slab('paperclip'), kind: 'pill' },
-  views: { name: 'Camera views', icon: duo('video'), kind: 'own', always: true },
   // the scene, not a part: out whether or not anything's picked
   'backdrop-color': { name: 'Backdrop color', icon: slab('image'), kind: 'wide', always: true },
   ground: { name: 'Floor (backdrop)', icon: slab('arrow-down-to-line'), kind: 'wide', always: true },
@@ -152,14 +148,13 @@ const SECTIONS: Omit<Sec, 'place'>[] = [
   { id: 'part', name: 'This part', icon: 'pencil', color: '#e5823a', tools: ['name', 'draw', 'thickness', 'width0', 'width1', 'reset-shape'] },
   { id: 'grow', name: 'Grow', icon: 'scissors', color: '#d0486a', tools: ['bone', 'extend', 'split', 'detach', 'parent'] },
   { id: 'pose', name: 'Pose', icon: 'face-smile', color: '#e9a51f', tools: ['stand', 'floor', 'keep-floor'] },
-  { id: 'color', name: 'Color', icon: 'palette', color: '#a66ad6', tools: ['custom-color', 'paint-all', 'swatches', 'scene-colors', 'glow', 'color-blend', 'opacity'] },
-  { id: 'material', name: 'Material', icon: 'cloud', color: '#5fa0d8', tools: ['style-part', 'materials', 'material-params'] },
-  { id: 'markings', name: 'Markings', icon: 'circle', color: '#d0486a', tools: ['marking-part', 'markings', 'marking-params'] },
+  { id: 'color', name: 'Color', icon: 'palette', color: '#a66ad6', tools: ['custom-color', 'swatches', 'scene-colors', 'glow', 'color-blend', 'opacity'] },
+  { id: 'material', name: 'Material', icon: 'cloud', color: '#5fa0d8', tools: ['materials', 'material-params'] },
+  { id: 'markings', name: 'Markings', icon: 'circle', color: '#d0486a', tools: ['markings', 'marking-params'] },
   { id: 'quick', name: 'Arrange', icon: 'expand', color: '#3b82f6', tools: ['arrange', 'pull'] },
   { id: 'mirror', name: 'Mirror', icon: 'arrow-right-arrow-left', color: '#14a596', tools: ['mirror'] },
   { id: 'eyes', name: 'Eyes', icon: 'eye', color: '#5b6170', tools: ['eyes'] },
   { id: 'attach', name: 'Attach', icon: 'paperclip', color: '#8a8f99', tools: ['attach'] },
-  { id: 'camera', name: 'Camera', icon: 'arrows-rotate', color: '#5b6170', tools: ['views'] },
   { id: 'backdrop', name: 'Backdrop', icon: 'image', color: '#8a63d2', tools: ['backdrop-color', 'ground', 'light-turn', 'ao', 'dof'], fold: true },
   { id: 'photo', name: 'Photo', icon: 'camera', color: '#3b82f6', tools: ['photo-clear', 'photo'], fold: true },
   { id: 'anim', name: 'Animate this part', icon: 'arrows-rotate', color: '#e0609a', tools: ['anim'] },
@@ -169,18 +164,66 @@ const SECTIONS: Omit<Sec, 'place'>[] = [
 const DEFAULT_PLACES: Record<Base, Record<string, Place>> = {
   shape: {
     plan: 'side', parts: 'side', part: 'side', grow: 'side', pose: 'side', color: 'hidden', material: 'hidden', markings: 'hidden',
-    quick: 'tl', mirror: 'tl', eyes: 'tl', attach: 'tl', camera: 'br', backdrop: 'hidden', photo: 'hidden', anim: 'hidden', loop: 'hidden',
+    quick: 'tl', mirror: 'tl', eyes: 'tl', attach: 'tl', backdrop: 'hidden', photo: 'hidden', anim: 'hidden', loop: 'hidden',
   },
   look: {
     plan: 'hidden', parts: 'hidden', part: 'hidden', grow: 'hidden', pose: 'hidden', color: 'side', material: 'side', markings: 'side',
-    quick: 'tl', mirror: 'hidden', eyes: 'tl', attach: 'tl', camera: 'br', backdrop: 'tr', photo: 'tr', anim: 'hidden', loop: 'hidden',
+    quick: 'tl', mirror: 'hidden', eyes: 'tl', attach: 'tl', backdrop: 'tr', photo: 'tr', anim: 'hidden', loop: 'hidden',
   },
   animate: {
     plan: 'hidden', parts: 'side', part: 'hidden', grow: 'hidden', pose: 'hidden', color: 'hidden', material: 'hidden', markings: 'hidden',
-    quick: 'hidden', mirror: 'tl', eyes: 'hidden', attach: 'hidden', camera: 'br', backdrop: 'tr', photo: 'tr', anim: 'side', loop: 'side',
+    quick: 'hidden', mirror: 'tl', eyes: 'hidden', attach: 'hidden', backdrop: 'tr', photo: 'tr', anim: 'side', loop: 'side',
   },
 };
 const DEFAULT_GIZMOS: Record<Base, Gizmos> = { shape: 'full', look: 'none', animate: 'none' };
+
+/**
+ * Guided: the modes become steps, one after another down the rail, each a
+ * fixed layout of just its sections (not arranged by hand, not saved).
+ */
+interface StepDef {
+  id: string;
+  name: string;
+  /** what to do in this step, at the top of the inspector */
+  note: string;
+  /** the note on a touch screen, where it differs (no Ctrl or Shift) */
+  touchNote?: string;
+  gizmos: Gizmos;
+  /** its sections in the inspector, in order */
+  side: string[];
+  /** sections on the view's corners */
+  corners?: Record<string, Place>;
+  /** tools taken out of their own section into another one: tool -> section */
+  move?: Record<string, string>;
+  /** a button under the note that takes you somewhere (Dress up: to Stuff, to make something) */
+  action?: { label: string; to: Tab };
+}
+export const STEPS: readonly StepDef[] = [
+  { id: 'step-plan', name: 'Body plan', gizmos: 'none', side: ['plan'], note: 'Pick a starting skeleton. You can add, cut and redraw every part later.' },
+  { id: 'step-draw', name: 'Draw', gizmos: 'part', side: ['part'], corners: { mirror: 'tl' }, note: 'Pick a part, then Draw shape (or double-click the part) and draw its outline: it puffs up like a balloon.' },
+  { id: 'step-grow', name: 'Grow & pose', gizmos: 'full', side: ['grow', 'pose', 'parts'], corners: { quick: 'tl', mirror: 'tl' }, note: 'Drag the orange handles to bend joints and the purple ones to slide parts; add, extend or split parts, and choose how smoothly they join.' },
+  { id: 'step-face', name: 'Face', gizmos: 'none', side: ['eyes'], note: 'Add eyes: drag them onto the critter, then pick a style and a look.' },
+  { id: 'step-color', name: 'Color', gizmos: 'none', side: ['color', 'material', 'markings'], note: 'Click a part (Ctrl-click adds one, Shift-click everything between, Ctrl+A all of them), then pick its colors, material and markings.', touchNote: 'Tap a part (hold one to add it, or use + in the parts list up top), then pick its colors, material and markings.' },
+  { id: 'step-dress', name: 'Dress up', gizmos: 'none', side: ['attach'], move: { worn: 'attach' }, note: 'Pick a part, then Attach stuff to put something from My stuff on it. Or make something new.', action: { label: 'Make new stuff ›', to: 'stuff' } },
+  { id: 'step-show', name: 'Show off', gizmos: 'none', side: ['backdrop', 'photo'], note: 'Set the scene, frame your critter and take a photo.' },
+];
+const stepOf = (t: Tab | null) => STEPS.find((s) => s.id === t);
+/** In Guided, Stuff (the workbench) is part of Dress up: it opens from there and goes back there */
+export const STUFF_STEP = 'step-dress';
+export const isStep = (t: Tab | null) => !!stepOf(t);
+
+function stepLayout(st: StepDef): Layout {
+  const sections = SECTIONS.map((s): Sec => ({
+    ...s,
+    tools: s.tools.filter((t) => !st.move?.[t]),
+    fold: undefined,
+    place: st.side.includes(s.id) ? 'side' : (st.corners?.[s.id] ?? 'hidden'),
+  }));
+  for (const [tool, to] of Object.entries(st.move ?? {})) sections.find((s) => s.id === to)!.tools.push(tool);
+  const rank = (s: Sec) => (st.side.includes(s.id) ? st.side.indexOf(s.id) : st.side.length);
+  sections.sort((a, b) => rank(a) - rank(b));
+  return { sections, gizmos: st.gizmos };
+}
 /** each tool's home section, where it goes back to if its own section is deleted */
 const HOME = new Map(SECTIONS.flatMap((s) => s.tools.map((t) => [t, s.id] as const)));
 const PLACE_NAMES: [Place, string][] = [
@@ -189,7 +232,7 @@ const PLACE_NAMES: [Place, string][] = [
 const made = (t: Tab) => tabs.find((o) => o.id === t);
 const BASES: readonly Base[] = ['shape', 'look', 'animate'];
 const isBase = (t: unknown): t is Base => BASES.includes(t as Base);
-const tabName = (t: Tab) => (t === 'shape' ? 'Shape' : t === 'look' ? 'Look' : t === 'animate' ? 'Animate' : (made(t)?.name ?? 'Tab'));
+const tabName = (t: Tab) => (t === 'shape' ? 'Shape' : t === 'look' ? 'Look' : t === 'animate' ? 'Animate' : (made(t)?.name ?? stepOf(t)?.name ?? 'Tab'));
 const baseOf = (t: Tab): Base => (isBase(t) ? t : (made(t)?.base ?? 'shape'));
 
 function defaults(t: Tab): Layout {
@@ -241,7 +284,8 @@ function repair(raw: unknown, t: Tab): Layout {
   return { sections, gizmos: ['full', 'part', 'none'].includes(r.gizmos) ? r.gizmos : d.gizmos };
 }
 
-const KEY = 'creature-creator/layout';
+// v2: the Studio shell (rail, outliner, inspector) starts everyone on its own defaults
+const KEY = 'creature-creator/layout-v2';
 let saved: Record<string, unknown> = {};
 try {
   saved = JSON.parse(localStorage.getItem(KEY) ?? '{}') ?? {};
@@ -257,20 +301,28 @@ const tabs: TabDef[] = (Array.isArray(saved.tabs) ? (saved.tabs as Partial<TabDe
       } as TabDef]
     : [],
 );
-/** Off: the tabs along the top are just their icons (Shape, Look, Animate and Stuff too) */
+/** Off: the tabs down the rail are just their icons (Shape, Look, Animate and Stuff too) */
 let showTabNames = saved.showTabNames !== false;
 const toolIds = (raw: unknown) => (Array.isArray(raw) ? (raw as unknown[]).filter((id): id is string => typeof id === 'string' && !!TOOLS[id]) : []);
 const layouts: Record<Tab, Layout> = { shape: repair(saved.shape, 'shape'), look: repair(saved.look, 'look'), animate: repair(saved.animate, 'animate') };
 for (const t of tabs) layouts[t.id] = repair(saved[t.id], t.id);
+for (const st of STEPS) layouts[st.id] = stepLayout(st);
 /** options the notice was told never to mention again */
 let quietTools = new Set(toolIds(saved.quietTools));
 function save() {
   try {
-    localStorage.setItem(KEY, JSON.stringify({ ...layouts, tabs, showTabNames, quietTools: quietTools.size ? [...quietTools] : undefined }));
+    const own = Object.fromEntries(Object.entries(layouts).filter(([t]) => !isStep(t)));
+    localStorage.setItem(KEY, JSON.stringify({ ...own, tabs, showTabNames, quietTools: quietTools.size ? [...quietTools] : undefined }));
   } catch {}
 }
 
 let tab: Tab | null = 'shape';
+/** A phone (or a tablet held upright): the view's too small for sections on its corners, so they join the sheet, and its sections are tabs (style.css uses the same test) */
+const phone = matchMedia('(max-width: 760px), (max-width: 1100px) and (orientation: portrait)');
+/** fingers, not a mouse: no Ctrl or Shift to hold */
+const touch = matchMedia('(pointer: coarse)');
+/** the section tab open on a phone, per tab (or step) */
+const openSec: Record<string, string> = {};
 let idle = false;
 let editing = false;
 const tools = new Map<string, HTMLElement>();
@@ -279,6 +331,8 @@ const opened = new Set<string>();
 let onGizmos = () => {};
 let onTabs = () => {};
 let switchTo = (_t: Tab) => {};
+/** back to Dress up from Stuff, with the list of things to put on open */
+let putOn = () => {};
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string) => document.querySelector<T>(s)!;
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', html = '') => {
@@ -318,6 +372,37 @@ export function tabNamesMenu(): MenuItem[] {
   ];
 }
 
+const GUIDED_KEY = 'creature-creator/guided';
+/** Guided: the rail shows the steps; and the step last open there, and the mode last open in Free */
+let guided = { on: false, step: STEPS[0].id, free: 'shape' as Tab };
+try {
+  const g = JSON.parse(localStorage.getItem(GUIDED_KEY) ?? '{}');
+  guided = { on: g.on === true, step: stepOf(g.step) ? g.step : STEPS[0].id, free: typeof g.free === 'string' && !isStep(g.free) ? g.free : 'shape' };
+} catch {}
+function saveGuided() {
+  try {
+    localStorage.setItem(GUIDED_KEY, JSON.stringify(guided));
+  } catch {}
+}
+export function guidedOn(): boolean {
+  return guided.on;
+}
+/** Where Guided (or Free) opens: the step (or mode) last open there. */
+export function guidedTab(on = guided.on): Tab {
+  return on ? guided.step : guided.free;
+}
+/** Remember the step (or mode) just opened, for coming back to Guided (or Free). */
+export function noteTab(t: Tab) {
+  if (isStep(t)) guided.step = t;
+  else guided.free = t;
+  saveGuided();
+}
+export function setGuided(on: boolean) {
+  guided.on = on;
+  saveGuided();
+  $('#app').classList.toggle('guided', on);
+}
+
 /** The tabs people made, in order along the top. */
 export function customTabs(): readonly { id: string; name: string; color: string }[] {
   return tabs;
@@ -329,10 +414,11 @@ export function setLayoutIdle(v: boolean) {
   sync();
 }
 
-export function initLayout(opts: { onGizmos: () => void; onTabs: () => void; switchTo: (t: Tab) => void }) {
+export function initLayout(opts: { onGizmos: () => void; onTabs: () => void; switchTo: (t: Tab) => void; putOn: () => void }) {
   onGizmos = opts.onGizmos;
   onTabs = opts.onTabs;
   switchTo = opts.switchTo;
+  putOn = opts.putOn;
   renderTabs();
   for (const w of document.querySelectorAll<HTMLElement>('.ck-tool')) {
     const id = w.dataset.tool!;
@@ -379,6 +465,7 @@ export function initLayout(opts: { onGizmos: () => void; onTabs: () => void; swi
     if (e.key === 'Escape' && (menu || picker)) closePops();
     else if (e.key === 'Escape' && editing && !(e.target as HTMLElement).closest('input')) setEditing(false);
   });
+  phone.addEventListener('change', () => render());
   render();
   const missing = noticeTools();
   if (missing.length) showUpdateNotice(missing);
@@ -393,7 +480,7 @@ function container(p: Place): HTMLElement {
 // ---------------------------------------------------------------------------
 // drawing the layout
 
-/** The made tabs' buttons, between Look and Stuff; and whether the tabs show their names. */
+/** The made tabs' buttons on the rail, between Animate and Stuff; and whether the tabs show their names. */
 function renderTabs() {
   const modes = $('.modes');
   modes.querySelectorAll('.ck-tab').forEach((b) => b.remove());
@@ -406,31 +493,107 @@ function renderTabs() {
     b.classList.toggle('active', t.id === tab);
     modes.insertBefore(b, stuff);
   }
-  $('.topbar').classList.toggle('tab-icons', !showTabNames);
+  // Guided's steps, numbered, after the modes (only one set shows: see #app.guided)
+  modes.querySelectorAll('.ck-step').forEach((b) => b.remove());
+  STEPS.forEach((st, i) => {
+    const b = el('button', 'ck-step', `<span class="step-num">${i + 1}</span><span class="lbl"> ${esc(st.name)}</span>`);
+    b.dataset.mode = st.id;
+    b.title = `Step ${i + 1}: ${st.name}`;
+    b.classList.toggle('active', st.id === tab);
+    modes.append(b);
+  });
+  $('#app').classList.toggle('tab-icons', !showTabNames);
   onTabs();
 }
 const tabIcon = (t: Pick<TabDef, 'icon' | 'color'>) => `<i class="${slab(t.icon)} ck-ic" style="--ic:${t.color}" aria-hidden="true"></i>`;
 
+/** In a step: what to do, at the top of the inspector, and Back / Next at the bottom. */
+function renderStep() {
+  const st = stepOf(tab);
+  // Stuff from Guided: making something for Dress up
+  const making = !tab && guided.on;
+  const note = $('#step-note');
+  const foot = $('#step-foot');
+  note.hidden = foot.hidden = !st && !making;
+  const action = $<HTMLButtonElement>('#step-action');
+  action.hidden = !st?.action;
+  if (st?.action) {
+    action.textContent = st.action.label;
+    action.onclick = () => switchTo(st.action!.to);
+  }
+  const back = $<HTMLButtonElement>('#step-back');
+  const next = $<HTMLButtonElement>('#step-next');
+  renderStepBar(st, making);
+  if (making) {
+    $('#step-text').textContent = 'Making stuff for Dress up: draw pieces on the board. The blue cross is where it sits on a part. It’s kept in My stuff as you go.';
+    back.hidden = next.hidden = false;
+    back.textContent = '‹ Back to Dress up';
+    back.onclick = () => switchTo(STUFF_STEP);
+    next.textContent = 'Put it on ›';
+    next.onclick = putOn;
+    return;
+  }
+  if (!st) return;
+  $('#step-text').textContent = (touch.matches && st.touchNote) || st.note;
+  const i = STEPS.indexOf(st);
+  back.hidden = i === 0;
+  next.hidden = i === STEPS.length - 1;
+  if (i > 0) {
+    back.textContent = `‹ ${STEPS[i - 1].name}`;
+    back.onclick = () => switchTo(STEPS[i - 1].id);
+  }
+  if (i < STEPS.length - 1) {
+    next.textContent = `Next: ${STEPS[i + 1].name} ›`;
+    next.onclick = () => switchTo(STEPS[i + 1].id);
+  }
+}
+
+/** Guided on a phone: the rail along the bottom is one step at a time, with dots for where you are. */
+function renderStepBar(st: StepDef | undefined, making: boolean) {
+  const at = making ? STEPS.findIndex((o) => o.id === STUFF_STEP) : st ? STEPS.indexOf(st) : -1;
+  if (at < 0) return;
+  const back = $<HTMLButtonElement>('#sb-back');
+  const next = $<HTMLButtonElement>('#sb-next');
+  $('#sb-label').textContent = making ? 'Dress up · making stuff' : `Step ${at + 1} of ${STEPS.length} · ${STEPS[at].name}`;
+  $('#sb-dots').replaceChildren(...STEPS.map((o, i) => {
+    const d = el('span', i === at ? 'on' : i < at ? 'done' : '');
+    d.title = o.name;
+    return d;
+  }));
+  back.disabled = !making && at === 0;
+  back.title = making ? 'Back to Dress up' : at > 0 ? `Back: ${STEPS[at - 1].name}` : '';
+  back.onclick = () => switchTo(making ? STUFF_STEP : STEPS[at - 1].id);
+  next.hidden = !making && at === STEPS.length - 1;
+  next.textContent = making ? 'Put it on \u203a' : 'Next \u203a';
+  next.title = making ? 'Back to Dress up, to put it on' : at < STEPS.length - 1 ? `Next: ${STEPS[at + 1].name}` : '';
+  next.onclick = making ? putOn : () => switchTo(STEPS[at + 1].id);
+}
+
 function render() {
+  renderStep();
   const pool = $('#ck-pool');
   for (const w of tools.values()) pool.append(w);
   for (const [p] of PLACE_NAMES) container(p).replaceChildren();
   document.body.classList.toggle('ck-editing', editing);
   renderBanner();
-  if (!tab) {
-    // Stuff isn't arranged: it just keeps the camera views bottom right
-    const cam = SECTIONS.find((s) => s.id === 'camera')!;
-    container('br').append(sectionEl({ ...cam, tools: [...cam.tools], place: 'br' }));
-    return sync();
-  }
+  // (Stuff isn't arranged; the view cube is the view's own, not a section)
+  if (!tab) return sync();
   const tray = container('hidden');
   tray.append(el('div', 'ck-tray-title', 'Hidden <span class="muted">· drop sections here to hide them</span>'));
-  for (const s of layout().sections) container(s.place).append(sectionEl(s));
+  // on a phone the corners' sections come after the sheet's own (unless they're being arranged)
+  const onPhone = phone.matches && !editing;
+  const placeOf = (s: Sec): Place => (onPhone && s.place !== 'hidden' ? 'side' : s.place);
+  const sections = layout().sections;
+  for (const s of [...sections.filter((o) => o.place === 'side'), ...sections.filter((o) => o.place !== 'side')]) {
+    const e = sectionEl(s, placeOf(s));
+    container(placeOf(s)).append(e);
+  }
+  renderSecTabs();
   sync();
 }
 
-function sectionEl(s: Sec): HTMLElement {
-  const canvas = s.place !== 'side' && s.place !== 'hidden';
+function sectionEl(s: Sec, place = s.place): HTMLElement {
+  const canvas = place !== 'side' && place !== 'hidden';
   const sec = el('section', 'ck-sec');
   sec.dataset.sec = s.id;
   sec.classList.toggle('ck-folded', canvas && !!s.fold);
@@ -512,7 +675,41 @@ function sync() {
     sec.classList.toggle('ck-empty', !live.length);
     sec.classList.toggle('ck-carded', live.some((t) => t.dataset.kind === 'wide'));
   }
-  $('#ck-menu-btn').hidden = !tab;
+  // a step's layout is fixed: nothing to arrange or bring back
+  $('#ck-menu-btn').hidden = !tab || isStep(tab);
+  syncSecTabs();
+}
+
+/** On a phone: a tab per section in the sheet (only one shows at a time). */
+function renderSecTabs() {
+  const row = $('#sec-tabs');
+  row.replaceChildren();
+  if (!tab) return;
+  for (const sec of document.querySelectorAll<HTMLElement>('#ck-side > .ck-sec')) {
+    const s = find(sec.dataset.sec!);
+    if (!s) continue;
+    const b = el('button', 'sec-tab', esc(s.name));
+    b.dataset.sec = s.id;
+    b.setAttribute('role', 'tab');
+    b.onclick = () => {
+      openSec[tab!] = s.id;
+      syncSecTabs();
+    };
+    row.append(b);
+  }
+}
+function syncSecTabs() {
+  const row = $('#sec-tabs');
+  const live = [...document.querySelectorAll<HTMLElement>('#ck-side > .ck-sec:not(.ck-empty)')].map((e) => e.dataset.sec!);
+  const on = tab && live.includes(openSec[tab]) ? openSec[tab] : live[0];
+  for (const b of row.querySelectorAll<HTMLButtonElement>('.sec-tab')) {
+    b.hidden = !live.includes(b.dataset.sec!);
+    b.classList.toggle('active', b.dataset.sec === on);
+    b.setAttribute('aria-selected', String(b.dataset.sec === on));
+  }
+  // one section: no tabs, just it
+  row.hidden = live.length < 2;
+  for (const sec of document.querySelectorAll<HTMLElement>('#ck-side > .ck-sec')) sec.classList.toggle('sec-on', sec.dataset.sec === on);
 }
 
 function renderBanner() {
@@ -559,7 +756,7 @@ function renderBanner() {
 }
 
 function setEditing(on: boolean) {
-  editing = on && !!tab;
+  editing = on && !!tab && !isStep(tab);
   closePops();
   render();
 }
@@ -623,7 +820,7 @@ function deleteSection(id: string) {
 
 /** What the notice mentions: tools no tab shows (new ones go where they sit by default, so only ones hidden away), unless told not to */
 function noticeTools(): string[] {
-  const shown = new Set(Object.values(layouts).flatMap((L) => L.sections.filter((s) => s.place !== 'hidden').flatMap((s) => s.tools)));
+  const shown = new Set(Object.entries(layouts).filter(([t]) => !isStep(t)).flatMap(([, L]) => L.sections.filter((s) => s.place !== 'hidden').flatMap((s) => s.tools)));
   return Object.keys(TOOLS).filter((id) => !shown.has(id) && !quietTools.has(id));
 }
 
@@ -726,7 +923,7 @@ function setGizmos(g: Gizmos) {
  */
 export function arrangeMenu(at: HTMLElement): MenuItem | null {
   const secEl = at.closest<HTMLElement>('.ck-sec');
-  const s = tab && secEl ? find(secEl.dataset.sec!) : undefined;
+  const s = tab && !isStep(tab) && secEl ? find(secEl.dataset.sec!) : undefined;
   if (!s) return null;
   const toolId = at.closest<HTMLElement>('.ck-tool')?.dataset.tool;
   const canvas = s.place !== 'side' && s.place !== 'hidden';

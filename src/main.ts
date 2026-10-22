@@ -36,7 +36,8 @@ import { initInstall } from './editor/install';
 import { initWidgets } from './editor/widgets';
 import { initPartPanel } from './editor/partPanel';
 import { initEyesPanel } from './editor/eyesPanel';
-import { renderUI } from './editor/panels';
+import { renderUI, setMode } from './editor/panels';
+import { guidedOn, guidedTab } from './layout';
 import { initMarkingsUi } from './editor/markingsUi';
 import { initRigEdit } from './editor/rigEdit';
 import { hintOnce, initHints } from './editor/hints';
@@ -117,6 +118,8 @@ if (opened.id) {
 }
 commit();
 renderUI();
+// Guided opens on the step it was left at
+if (guidedOn()) setMode(guidedTab());
 if (mode === 'shape' && idle) hintOnce('Click a part to begin!');
 renderSettings();
 applyLighting();

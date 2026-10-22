@@ -17,7 +17,7 @@ import { drawState, exitDraw } from './drawing';
 import { autosaveThing, syncWorkbench, workbench } from './workbench';
 import { deselectAttachment, selectAttachment, selectedAttachment } from './attach';
 import { placing, startPlacing, stopPlacing } from './arrange';
-import { partsOpen } from './creatureBar';
+import { partsShut } from './creatureBar';
 import { queueCreationSave } from './creations';
 import { renderSceneColors } from './widgets';
 import { renderUI } from './panels';
@@ -81,6 +81,8 @@ export let selected = '';
 export function setSelected(v: typeof selected) {
   selected = v;
 }
+/** More parts picked along with `selected` (Shift- or Ctrl-click, or the whole creature): bone ids. Colors, materials and markings go on them all; shaping and posing stay with `selected`. */
+export const alsoPicked = new Set<string>();
 /** Nothing picked: no creature or part shows as selected (no handles, no part editor) until one is clicked. */
 export let idle = true;
 export function setIdle(v: typeof idle) {
@@ -213,7 +215,7 @@ function restore(snap: string) {
   while (creatures.length > next.creatures.length) creatures.pop()!.dispose();
   // (undo brings back copies: their parts lists stay open or closed)
   next.creatures.forEach((s, i) => {
-    if (world.creatures[i] && partsOpen.has(world.creatures[i])) partsOpen.add(s);
+    if (world.creatures[i] && partsShut.has(world.creatures[i])) partsShut.add(s);
   });
   world = next;
   activate(world.active);
@@ -302,6 +304,7 @@ export function activate(i: number) {
   state = world.creatures[i];
   creature = next;
   if (switching) deselectAttachment();
+  if (switching) alsoPicked.clear();
   if (!creature.bones.has(selected)) selected = creature.list[0].def.id;
   creature.select(selected);
   updateSkeletonVisibility();

@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { Creature, type CreatureState } from '../creature';
 import { reach, unlock } from '../achievements';
+import { guidedOn, STEPS } from '../layout';
 import { collection, setCollection, uid, type Thing } from '../stuff';
 import { getCreation, keepStorage, listCreations, putCreation, type Creation } from '../library';
 import { $ } from './dom';
@@ -209,7 +210,9 @@ export function replaceWorld(next: World, stuff: Thing[]) {
 
 /** A fresh scene with nothing in My stuff. `keepOld` = false: the open one was just deleted. */
 export function newCreation(keepOld = true) {
-  if (mode !== 'shape') setMode('shape');
+  // back to the start: the first step in Guided, Shape in Free
+  const start = guidedOn() ? STEPS[0].id : 'shape';
+  if (mode !== start) setMode(start);
   if (keepOld) leaveScene();
   const kept = opened.keep;
   replaceWorld(freshWorld(), []);

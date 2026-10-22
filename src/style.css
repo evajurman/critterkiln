@@ -107,14 +107,109 @@ body {
 }
 button, input, select { font: inherit; color: inherit; }
 
+/* Studio: the modes down the left, the scene's outliner, the view, and the picked part's inspector on the right */
 #app {
   display: grid;
   /* minmax(0, …): never let a wide row (the top bar) push the page past the screen */
-  grid-template-columns: 300px minmax(0, 1fr);
-  grid-template-rows: 56px minmax(0, 1fr);
+  grid-template-columns: 76px 240px minmax(0, 1fr) 312px;
+  grid-template-rows: 52px minmax(0, 1fr);
+  grid-template-areas: 'top top top top' 'rail outliner view panel';
   height: 100vh;
   height: 100dvh;
 }
+/* a smaller window: a narrower rail and inspector, and the Scene list folds into a strip of its creatures (src/editor/creatureBar.ts) */
+@media (min-width: 761px) and (max-width: 1440px) and (orientation: landscape), (min-width: 1101px) and (max-width: 1440px) {
+  #app { grid-template-columns: 64px 240px minmax(0, 1fr) 284px; }
+  .rail button { width: 54px; }
+}
+@media (min-width: 761px) and (orientation: landscape), (min-width: 1101px) { #app.scene-folded { grid-template-columns: 76px 56px minmax(0, 1fr) 312px; } }
+@media (min-width: 761px) and (max-width: 1440px) and (orientation: landscape), (min-width: 1101px) and (max-width: 1440px) {
+  #app.scene-folded { grid-template-columns: 64px 56px minmax(0, 1fr) 284px; }
+}
+.scene-strip { display: none; }
+@media (min-width: 761px) and (orientation: landscape), (min-width: 1101px) {
+  #app.scene-folded .outliner { padding: 0; }
+  #app.scene-folded .creature-bar { display: none; }
+  #app.scene-folded .scene-strip { display: flex; }
+}
+.scene-strip { flex-direction: column; align-items: center; gap: 10px; padding: 12px 0; }
+.scene-strip button { flex: none; width: 36px; height: 36px; border-radius: 50%; padding: 0; cursor: var(--cursor-click); }
+.scene-strip .strip-creature { border: 3px solid transparent; outline: 1px solid rgba(0,0,0,.12); outline-offset: -1px; }
+.scene-strip .strip-creature.active { border-color: var(--ink); }
+.scene-strip .strip-add { border: 2px dashed var(--line); background: transparent; color: var(--muted); }
+.scene-strip .strip-unfold { width: 34px; height: 30px; border-radius: 9px; border: 1px solid var(--line); background: var(--card); color: var(--ink); }
+.creature-foot .scene-fold { margin-right: -4px; }
+.creature-foot .side-title { flex: 1; }
+@media (max-width: 760px), (max-width: 1100px) and (orientation: portrait) { .creature-foot .scene-fold { display: none; } }
+
+/* Stuff has no outliner: its things and pieces are in the panel */
+#app:has(#creature-bar[hidden]) { grid-template-columns: 76px 0 minmax(0, 1fr) 312px; }
+@media (min-width: 761px) and (max-width: 1440px) and (orientation: landscape), (min-width: 1101px) and (max-width: 1440px) { #app:has(#creature-bar[hidden]) { grid-template-columns: 64px 0 minmax(0, 1fr) 284px; } }
+#app:has(#creature-bar[hidden]) :is(.outliner, .inspector-head) { display: none; }
+#app:has(#creature-bar[hidden]) .panel { padding-top: 6px; }
+.side-wrap { display: contents; }
+.topbar { grid-area: top; }
+.rail { grid-area: rail; }
+.outliner { grid-area: outliner; }
+.panel { grid-area: panel; }
+.viewport { grid-area: view; }
+
+/* ---------- the rail: one button per mode, icon over name ---------- */
+.rail {
+  display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 0;
+  background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto;
+}
+.rail button {
+  width: 64px; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 9px 0 7px;
+  border: 0; border-radius: 14px; background: transparent; color: var(--muted);
+  font-size: 11px; font-weight: var(--w-bold); cursor: var(--cursor-click); transition: background .15s, color .15s;
+}
+.rail button i { font-size: 19px; }
+.rail button .lbl { max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rail button:hover { background: var(--bg); color: var(--ink); }
+.rail button.active { background: var(--accent-soft); color: var(--ink); font-weight: var(--w-heavy); }
+#app.tab-icons .rail .lbl { display: none; }
+/* Guided: the rail shows the steps instead of the modes */
+#app.guided .rail > :not(.ck-step), #app:not(.guided) .rail > .ck-step { display: none; }
+.rail .step-num {
+  width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center;
+  border: 2px solid var(--line); font-size: 12px; font-weight: var(--w-heavy); color: var(--muted);
+}
+.rail .ck-step.active .step-num { background: var(--accent); border-color: var(--accent); color: #fff; }
+.rail .ck-step { padding: 7px 0 6px; }
+/* a step's name can take two lines ("Grow & pose") */
+.rail .ck-step .lbl { white-space: normal; text-align: center; line-height: 1.15; }
+
+/* Guided or Free, in the top bar */
+.guided-seg { margin: 0 0 0 8px; }
+.guided-seg button { padding: 5px 14px; font-size: 13px; }
+
+/* a step: what to do, and Back / Next pinned to the bottom of the inspector */
+.step-note[hidden], .step-foot[hidden] { display: none; }
+.step-note { margin: 8px 0 4px; padding: 10px 12px; border-radius: 12px; background: var(--gold-bg); border: 1px solid var(--gold-line); font-size: 13px; line-height: 1.4; }
+.step-foot {
+  position: sticky; bottom: -24px; z-index: 2; display: flex; gap: 8px; margin: 16px -16px -24px; padding: 10px 16px;
+  background: var(--panel); border-top: 1px solid var(--line);
+}
+.step-foot button { flex: 1; }
+.step-note .step-action { display: block; margin-top: 8px; background: var(--card); }
+.step-note .step-action[hidden] { display: none; }
+.step-foot button[hidden] { display: none; }
+.step-foot .primary { padding: 8px; font-size: 14px; }
+
+/* ---------- the outliner: every creature in the scene, its parts under it ---------- */
+.outliner { background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; padding: 0 10px 16px; }
+.side-title { font-size: 11px; font-weight: var(--w-heavy); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+
+/* ---------- the inspector: the picked part's name, then this mode's sections ---------- */
+.inspector-head {
+  position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px;
+  margin: 0 -16px 4px; padding: 12px 12px 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line);
+}
+.inspector-title { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.inspector-path { font-size: 11px; font-weight: var(--w-bold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.inspector-path:empty { display: none; }
+.inspector-name { font-size: 18px; font-weight: var(--w-heavy); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ---------- top bar ---------- */
 .topbar {
@@ -130,18 +225,6 @@ button, input, select { font: inherit; color: inherit; }
 .brand { font-family: 'DynaPuff', system-ui, sans-serif; font-stretch: 100%; font-weight: 700; font-size: 18px; white-space: nowrap; }
 .logo { width: 26px; height: 26px; vertical-align: -6px; margin-right: 2px; }
 .spacer { flex: 1; }
-.modes { position: relative; display: flex; background: var(--bg); border-radius: 999px; padding: 3px; }
-/* one pill under the picked mode, slid there by src/main.ts (placeModePill) */
-.modes::before {
-  content: ''; position: absolute; top: 3px; bottom: 3px; left: 0; width: var(--pill-w, 0);
-  translate: var(--pill-x, 0) 0; border-radius: 999px; background: var(--panel); box-shadow: 0 1px 4px rgba(0,0,0,.1);
-}
-.modes.slide::before { transition: translate .35s cubic-bezier(.3, 1.35, .5, 1), width .35s cubic-bezier(.3, 1.35, .5, 1), background .2s; }
-.modes button {
-  position: relative; border: 0; background: transparent; padding: 6px 16px; border-radius: 999px;
-  font-weight: var(--w-bold); cursor: var(--cursor-click); color: var(--muted); white-space: nowrap; transition: color .2s;
-}
-.modes button.active { color: var(--ink); }
 .tools { display: flex; gap: 6px; }
 .tools button {
   border: 1px solid var(--line); background: var(--panel); padding: 6px 12px;
@@ -152,17 +235,15 @@ button, input, select { font: inherit; color: inherit; }
 .tools button.on { background: var(--accent-soft); border-color: var(--accent); }
 /* when the labels don't fit (narrow window, zoomed in), the top bar is icons only */
 .topbar.compact .lbl { display: none; }
-.topbar.compact .modes button { padding: 6px 12px; }
 
 /* ---------- side panel ---------- */
 .panel {
   background: var(--panel);
-  border-right: 1px solid var(--line);
+  border-left: 1px solid var(--line);
   overflow-y: auto;
-  /* no top padding: sticky bars pin inside the padding, which would leave a see-through strip above the creature bar */
+  /* no top padding: sticky bars pin inside the padding, which would leave a see-through strip above the inspector's head */
   padding: 0 16px 24px;
 }
-.panel:has(> .creature-bar[hidden]) { padding-top: 6px; }
 .panel h3 {
   font-size: 12px; text-transform: uppercase; letter-spacing: .08em;
   color: var(--muted); margin: 18px 0 8px;
@@ -520,19 +601,70 @@ button.primary.slim { width: auto; flex: 1; padding: 8px 10px; font-size: 14px; 
 .parent-row button[hidden] { display: none; }
 #set-parent.on { background: var(--sel-bg); border-color: var(--blue); color: var(--sel-ink); }
 
-.view-bar {
-  /* (wraps rather than spilling out of a narrow corner) */
-  display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 2px; padding: 3px;
-  background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
-  box-shadow: 0 4px 16px rgba(0,0,0,.08);
-}
-.view-bar button {
-  border: 0; background: transparent; padding: 5px 7px; border-radius: 9px;
-  font-weight: var(--w-bold); font-size: 12px; cursor: var(--cursor-click); color: var(--ink);
-}
-.view-bar button:hover { background: var(--bg); }
 .view-proj { display: flex; gap: 2px; margin-left: 2px; padding-left: 4px; border-left: 1px solid var(--line); }
-.view-bar .view-proj button.active { background: var(--ink); color: var(--on-ink); }
+/* the view cube (src/editor/framing.ts): always in the view's bottom right corner, turned the way the scene is;
+   no panel round it, just the cube on its ring, home and the step arrows, and a few round buttons beside it */
+.view-gizmo {
+  position: absolute; z-index: 2; right: 6px; bottom: 6px; display: flex; align-items: flex-end; gap: 2px; pointer-events: none;
+}
+.view-gizmo > * { pointer-events: auto; }
+.cube-wrap { position: relative; width: 124px; height: 124px; display: grid; place-items: center; perspective: 520px; touch-action: none; }
+/* (the grab hand only while it's being turned) */
+.cube-wrap.turning, .cube-wrap.turning * { cursor: var(--cursor-grabbing) !important; }
+.cube { position: relative; width: 56px; height: 56px; transform-style: preserve-3d; }
+/* a side: the middle is the side itself, the strips its edges, the little squares its corners;
+   shaded by how squarely it faces you (--lit, set as the camera turns) */
+.cube .face {
+  position: absolute; inset: 0; display: grid; grid-template: 11px 1fr 11px / 11px 1fr 11px;
+  border: 1px solid color-mix(in srgb, var(--ink) 30%, transparent); border-radius: 5px; overflow: hidden;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--card) 100%, #fff 0%), color-mix(in srgb, var(--card) 88%, var(--ink)));
+  filter: brightness(var(--lit, 1)); backface-visibility: hidden;
+}
+.cube .face[data-face="front"] { background: linear-gradient(160deg, var(--accent-soft), color-mix(in srgb, var(--accent-soft) 85%, var(--accent))); }
+.cube .spot {
+  padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--ink); min-width: 0; min-height: 0;
+  font: inherit; font-size: 9.5px; font-weight: var(--w-heavy); letter-spacing: .02em; cursor: var(--cursor-click);
+}
+.cube .spot:hover { background: color-mix(in srgb, var(--accent) 55%, transparent); }
+.cube .spot.middle:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--ink); }
+/* each side faces out from the middle, the way the creature does: front toward you, its left to your left */
+.cube .face[data-face="front"] { transform: translateZ(28px); }
+.cube .face[data-face="back"] { transform: rotateY(180deg) translateZ(28px); }
+.cube .face[data-face="right"] { transform: rotateY(90deg) translateZ(28px); }
+.cube .face[data-face="left"] { transform: rotateY(-90deg) translateZ(28px); }
+.cube .face[data-face="top"] { transform: rotateX(90deg) translateZ(28px); }
+.cube .face[data-face="bottom"] { transform: rotateX(-90deg) translateZ(28px); }
+/* the ring on the floor round the cube's foot, a dot where the front is */
+.cube .cube-ring {
+  position: absolute; left: 50%; top: 50%; width: 100px; height: 100px; margin: -50px 0 0 -50px; border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--ink) 22%, transparent); transform: rotateX(90deg) translateZ(-34px); pointer-events: none;
+}
+.cube .cube-ring::after {
+  content: ''; position: absolute; left: 50%; bottom: -6px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; background: var(--accent);
+}
+/* home, top left of the cube; and, looking straight at a side, arrows to the sides round it */
+.cube-wrap > button {
+  position: absolute; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; cursor: var(--cursor-click);
+  background: color-mix(in srgb, var(--panel) 80%, transparent); color: var(--ink); box-shadow: 0 1px 4px rgba(0,0,0,.15);
+}
+.cube-wrap > button:hover { background: var(--panel); color: var(--accent); }
+.cube-home { left: 2px; top: 2px; width: 26px; height: 26px; font-size: 12px; }
+.cube-step { width: 20px; height: 20px; font-size: 13px; opacity: 0; pointer-events: none; transition: opacity .15s; }
+.cube-wrap.face-on .cube-step { opacity: 1; pointer-events: auto; }
+.cube-step[data-step="up"] { top: 4px; left: calc(50% - 10px); }
+.cube-step[data-step="down"] { bottom: 4px; left: calc(50% - 10px); }
+.cube-step[data-step="left"] { left: 4px; top: calc(50% - 10px); }
+.cube-step[data-step="right"] { right: 4px; top: calc(50% - 10px); }
+/* beside it: frame, frame everyone, and perspective or flat, as round buttons */
+.cube-side { display: flex; flex-direction: column; gap: 4px; padding-bottom: 8px; }
+.cube-side button, .cube-side .view-proj button {
+  width: 30px; height: 30px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; cursor: var(--cursor-click);
+  background: color-mix(in srgb, var(--panel) 80%, transparent); color: var(--ink); box-shadow: 0 1px 4px rgba(0,0,0,.15); font-size: 13px;
+}
+.cube-side button:hover { background: var(--panel); color: var(--accent); }
+.cube-side > button[hidden] { display: none; }
+.cube-side .view-proj { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; border: 0; }
+.cube-side .view-proj button.active { background: var(--ink); color: var(--on-ink); }
 
 .pop-sub { font-size: 12px; font-weight: var(--w-heavy); color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin: 12px 0 6px; }
 #floor-mode button { font-size: 11px; padding: 5px 2px; }
@@ -540,14 +672,10 @@ button.primary.slim { width: auto; flex: 1; padding: 8px 10px; font-size: 14px; 
 .popover .floor-swatches button { aspect-ratio: 1; border-radius: 50%; }
 #floor-mirror-opts[hidden], #floor-material-opts[hidden] { display: none; }
 
-.creature-bar {
-  /* first thing in the panel, which has no top padding, so it rests where it sticks: no jump, no gap */
-  position: sticky; top: 0; z-index: 2; margin: 0 -16px 4px; padding: 10px 16px 8px;
-  background: var(--panel); border-bottom: 1px solid var(--line);
-}
+.creature-bar { padding: 14px 0 0; }
 .creature-bar[hidden], #place-bar[hidden] { display: none; }
-/* one row per creature (the .piece-row look from Stuff); a crowded scene scrolls inside the bar */
-.creature-rows { display: flex; flex-direction: column; gap: 4px; max-height: 45vh; overflow-y: auto; }
+/* one row per creature (the .piece-row look from Stuff); the outliner scrolls */
+.creature-rows { display: flex; flex-direction: column; gap: 4px; }
 /* the > before a creature: its parts, folded out under it */
 .creature-row .parts-fold { width: 22px; flex: none; }
 .parts-fold .fa-chevron-down { font-size: 11px; transition: transform .15s; transform: rotate(-90deg); }
@@ -564,6 +692,11 @@ button.primary.slim { width: auto; flex: 1; padding: 8px 10px; font-size: 14px; 
 .part-row .piece-icon:disabled { opacity: .15; }
 .part-row:hover { background: var(--accent-soft); }
 .part-row.active { background: var(--ink); color: var(--on-ink); }
+/* in the outliner the picked part is the dark row; its creature is only marked, so the two don't compete */
+.outliner .piece-row { background: transparent; border-color: transparent; }
+.outliner .piece-row:hover { background: var(--bg); }
+.outliner .creature-row.active { background: var(--bg); border-color: var(--line); }
+.outliner .creature-row.active button { color: var(--ink); }
 .part-row i:not([class]) { width: 10px; height: 10px; border-radius: 50%; display: inline-block; border: 1px solid rgba(0,0,0,.15); flex: none; }
 .part-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .part-mark { flex: none; font-size: 11px; opacity: .75; }
@@ -685,20 +818,15 @@ body.show-nums .slider input.num, body.show-nums .bar-slider input.num { display
 .ck-tool .pill-toggle.on { background: var(--teal-bg); border-color: #14b8a6; color: var(--teal-ink); }
 .ck-tool kbd { font: inherit; font-size: 10px; background: var(--bg); border-radius: 5px; padding: 0 5px; color: var(--muted); }
 .ck-tool button.primary kbd { background: rgba(255,255,255,.25); color: inherit; }
-/* top middle of the view, over the corner sections (z 1) and under popups and bars (z 5), which may cover it */
-.legend {
-  position: absolute; z-index: 2; top: 12px; left: 50%; translate: -50% 0;
-  display: flex; gap: 10px; padding: 5px 12px; border-radius: 999px; font-size: 12px; font-weight: var(--w-bold);
-  color: var(--muted); background: color-mix(in srgb, var(--panel) 85%, transparent); border: 1px solid var(--line);
-  pointer-events: none;
+/* what the handle under the pointer does, just below and right of it */
+.handle-tip {
+  position: absolute; z-index: 4; display: flex; flex-direction: column; gap: 3px; padding: 6px 10px; border-radius: 10px; pointer-events: none;
+  background: rgba(47, 40, 51, .9); color: #fff; font-size: 12px; font-weight: var(--w-bold); white-space: nowrap; box-shadow: 0 4px 14px rgba(0,0,0,.18);
 }
-.legend span { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
-/* a how-to after the key, set off by a divider */
-.legend .legend-tip { gap: 3px; padding-left: 10px; border-left: 1px solid var(--line); }
-/* keys look as they do on the shortcut sheet (.keys-btn kbd) */
-.legend kbd { font: inherit; font-size: 11px; font-weight: var(--w-bold); background: var(--bg); color: var(--ink); border-radius: 5px; padding: 1px 6px; }
-.legend .legend-tip .dot:last-of-type { margin-right: 2px; }
-@media (max-width: 960px) { .legend { display: none; } }
+.handle-tip[hidden] { display: none; }
+.handle-tip .tip-main { display: flex; align-items: center; gap: 6px; }
+.handle-tip .tip-keys { color: rgba(255,255,255,.75); font-size: 11px; }
+.handle-tip kbd { font: inherit; font-size: 10px; background: rgba(255,255,255,.18); border-radius: 4px; padding: 0 5px; }
 
 details.fine { margin-top: 10px; }
 details.fine > summary {
@@ -707,7 +835,6 @@ details.fine > summary {
 details.fine > summary::before { content: '▸ '; display: inline-block; transition: transform .15s; }
 details.fine[open] > summary::before { transform: rotate(90deg); }
 details.fine[open] > summary { margin-bottom: 6px; }
-.legend[hidden], .legend.off { display: none; }
 
 /* ---- My creations ---- */
 .popover.library-pop {
@@ -914,27 +1041,103 @@ button.piece-icon { padding: 0; border: 0; background: transparent; }
   .mouse-only { display: none; }
 }
 
-/* ---------- phones and narrow windows: viewport on top, panel as a bottom sheet ---------- */
-.sheet-grip { display: none; }
-@media (max-width: 760px) {
+/* ---------- phones, tablets held upright and narrow windows: viewport on top, panel as a bottom sheet ----------
+   (the same test everywhere: max-width 760px, or up to 1100px when taller than wide; the columns otherwise) */
+.sheet-grip, .phone-only, .step-bar, .sec-tabs { display: none; }
+@media (max-width: 760px), (max-width: 1100px) and (orientation: portrait) {
   html, body { overscroll-behavior: none; }
-  #app {
+  /* the view, the sheet under it, and the modes (or Guided's steps) along the bottom */
+  #app, #app:has(#creature-bar[hidden]) {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: 48px minmax(0, 1fr) auto var(--sheet, 42%);
+    grid-template-rows: 52px minmax(0, 1fr) auto var(--sheet, 42%) auto;
+    grid-template-areas: 'top' 'view' 'grip' 'side' 'rail';
   }
-  .topbar { gap: 6px; padding: 0 8px; }
-  .topbar .spacer { display: none; }
-  .brand { display: none; }
-  .topbar.compact .modes button { padding: 7px 7px; }
-  .tools { gap: 3px; min-width: 0; margin-left: auto; overflow-x: auto; scrollbar-width: none; }
-  .tools::-webkit-scrollbar { display: none; }
-  .topbar.compact .tools button { padding: 7px 5px; }
-  .viewport { grid-row: 2; }
-  .panel { grid-row: 4; border-right: 0; padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
+  .viewport { grid-area: view; }
+  .side-wrap { display: block; grid-area: side; overflow-y: auto; background: var(--panel); }
+  .panel { overflow: visible; border: 0; padding-bottom: 24px; }
+
+  /* the modes: a tab bar along the bottom */
+  .rail { flex-direction: row; gap: 2px; padding: 4px 6px calc(4px + env(safe-area-inset-bottom)); border-right: 0; border-top: 1px solid var(--line); overflow-x: auto; }
+  .rail button { flex: 1 0 auto; width: auto; min-height: 48px; padding: 5px 8px; font-size: 11px; }
+  .rail button i { font-size: 18px; }
+  /* Guided: one step at a time, back and next */
+  #app.guided .rail > .ck-step { display: none; }
+  #app.guided .rail > .step-bar { display: flex; }
+  .step-bar { flex: 1; align-items: center; gap: 8px; min-height: 56px; }
+  .step-bar > button { flex: none; width: auto; min-height: 44px; flex-direction: row; font-size: 14px; }
+  .step-bar #sb-back { width: 48px; padding: 0; justify-content: center; }
+  .step-bar #sb-back:disabled { opacity: .35; }
+  .step-bar #sb-next { padding: 0 16px; box-shadow: none; }
+  .step-bar #sb-next[hidden] { display: none; }
+  .sb-mid { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 5px; font-size: 13px; font-weight: var(--w-heavy); text-align: center; }
+  .sb-dots { display: flex; gap: 5px; }
+  .sb-dots span { width: 8px; height: 8px; border-radius: 4px; background: var(--line); }
+  .sb-dots span.done { background: var(--ink); }
+  .sb-dots span.on { width: 20px; background: var(--accent); }
+  /* (the bar has them: not again at the bottom of the panel) */
+  .step-foot { display: none !important; }
+  .step-note { margin-top: 4px; padding: 8px 10px; font-size: 12px; }
+  /* the view cube: smaller, tucked into the view's corner */
+  .view-gizmo { right: 6px; bottom: 6px; transform: scale(.78); transform-origin: bottom right; }
+
+  /* the top bar: the menu, what's picked, and undo; the rest is in the menu */
+  .topbar { gap: 8px; padding: 0 8px; }
+  .topbar .spacer, .brand { display: none; }
+  .phone-only { display: inline-flex; }
+  .topbar .phone-round { flex: none; width: 44px; height: 44px; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 50%; background: var(--panel); font-size: 17px; cursor: var(--cursor-click); }
+  .pick-pill {
+    flex: 1; min-width: 0; height: 44px; align-items: center; justify-content: center; gap: 8px; padding: 0 14px;
+    border: 1px solid var(--line); border-radius: 999px; background: var(--card); font-weight: var(--w-heavy); font-size: 15px; cursor: var(--cursor-click);
+  }
+  .pick-pill #pick-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pick-pill i { font-size: 11px; color: var(--muted); }
+  .pick-dot { flex: none; width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(0,0,0,.15); }
+  .pick-dot[hidden] { display: none; }
+  .topbar .guided-seg { display: none; }
+  .tools { gap: 4px; margin-left: 0; }
+  .topbar:not(.menu-open) .tools > :not(#undo) { display: none; }
+  .topbar .tools #undo { width: 44px; height: 44px; padding: 0; border-radius: 50%; }
+  /* the menu: Guided or Free, and the bar's other buttons, with their names */
+  .topbar.menu-open .guided-seg { display: flex; position: fixed; z-index: 40; top: 58px; left: 8px; right: 8px; margin: 0; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+  .topbar.menu-open .guided-seg button { padding: 10px; font-size: 14px; }
+  .topbar.menu-open .tools {
+    position: fixed; z-index: 40; top: 108px; left: 8px; right: 8px; display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+    padding: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0,0,0,.18);
+  }
+  .topbar.menu-open .tools button { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 8px 12px; text-align: left; }
+  .topbar.menu-open .tools #undo { width: auto; height: auto; border-radius: 10px; }
+  .topbar.menu-open .lbl { display: inline; }
+  .topbar.menu-open #trophy-btn::after { content: 'Trophies'; }
+  .topbar.menu-open #undo::after { content: 'Undo'; }
+  .topbar.menu-open #redo::after { content: 'Redo'; }
+  .topbar.menu-open #settings-btn::after { content: 'Settings'; }
+
+  /* what's picked opens the parts list, over the view */
+  .outliner { display: none; }
+  #app.parts-open .outliner {
+    display: block; position: fixed; z-index: 40; top: 58px; left: 8px; right: 8px; max-height: 65vh; overflow-y: auto;
+    border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0,0,0,.18); padding-bottom: 10px;
+  }
+  .part-row .part-add { display: grid; opacity: .8; }
+  .part-row.active .part-add { opacity: 1; }
+
+  /* the sheet's sections are tabs: one shows at a time */
+  .inspector-head .inspector-title { display: none; }
+  .inspector-head { padding: 8px 8px 8px 12px; }
+  .sec-tabs { display: flex; flex: 1; min-width: 0; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+  .sec-tabs[hidden] { display: none; }
+  .sec-tab[hidden] { display: none; }
+  .sec-tab { flex: none; min-height: 36px; padding: 6px 14px; border: 0; border-radius: 999px; background: var(--bg); color: var(--ink); font-weight: var(--w-bold); font-size: 13px; cursor: var(--cursor-click); }
+  .sec-tab.active { background: var(--ink); color: var(--on-ink); }
+  body:not(.ck-editing) #ck-side > .ck-sec:not(.sec-on) { display: none; }
+  #ck-side > .ck-sec > .ck-title { display: none; }
+  /* one section, no tabs: its title instead; and no head left at all if there's nothing in it */
+  .panel:has(.sec-tabs[hidden]) #ck-side > .ck-sec > .ck-title { display: block; }
+  .inspector-head:has(.sec-tabs[hidden]):has(.ck-menu-btn[hidden]) { display: none; }
 
   /* drag (or tap) to give the panel more or less room */
   .sheet-grip {
-    grid-row: 3; display: grid; place-items: center; height: 22px; padding: 0; width: 100%;
+    grid-area: grip; display: grid; place-items: center; height: 22px; padding: 0; width: 100%;
     background: var(--panel); border: 0; border-top: 1px solid var(--line); cursor: ns-resize;
     touch-action: none;
   }
@@ -973,7 +1176,6 @@ button.piece-icon { padding: 0; border: 0; background: transparent; }
   .viewport:has(.draw-bar:not([hidden])) .ck-dock:is([data-corner="tl"], [data-corner="tr"]) { display: none; }
   .eyes-card { width: min(250px, calc(100vw - 16px)); max-height: 45vh; }
 
-  .view-bar button { padding: 6px 8px; }
   .settle-badge { bottom: 10px; }
   .hint {
     bottom: 52px; white-space: normal; text-align: center; width: max-content;
@@ -1029,7 +1231,7 @@ body.carrying, body.carrying * { cursor: var(--cursor-grabbing) !important; }
 .popover:is(.library-pop, .trophy-pop, .load-pop, .keys-pop) { transform-origin: 0 0; }
 /* the floating bars (drawing, Arrange, attaching) drop in from their top middle; same translate(-50%) story */
 .draw-bar { transform-origin: 0 0; }
-@media (max-width: 760px) { .popover:is(.library-pop, .trophy-pop, .load-pop, .keys-pop), .draw-bar { transform-origin: top center; } }
+@media (max-width: 760px), (max-width: 1100px) and (orientation: portrait) { .popover:is(.library-pop, .trophy-pop, .load-pop, .keys-pop), .draw-bar { transform-origin: top center; } }
 .popover:is(.library-pop, .trophy-pop, .load-pop, .keys-pop)[hidden] { translate: none; }
 @starting-style {
   .popover:is(.library-pop, .trophy-pop, .load-pop, .keys-pop):not([hidden]) { translate: none; }
@@ -1101,7 +1303,7 @@ html.theme-color :is(button.primary, .part-row.active, .eye-pairs button.active,
 
 /* ---------- sections: each tab's tools in the sidebar, on the view's corners, or hidden (src/layout.ts) ---------- */
 /* above the creatures: New and the sections menu */
-.creature-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.creature-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 2px 8px 4px; }
 .creature-foot .creature-new { margin-top: 0; }
 .ck-menu-btn[hidden] { display: none; }
 .ck-menu-btn.on { opacity: 1; background: rgba(127,127,127,.18); }
@@ -1126,7 +1328,6 @@ html.theme-color .ck-ic, :is(.ck-picker, .ck-head, .ck-tab-row) .ck-ic { --fa-se
 /* room between Draw shape and the Puffy / Flat / Turned choice under it */
 .ck-side .ck-tool[data-tool="draw"] { margin-bottom: 8px; }
 .ck-side .eyes-card { width: auto; max-height: none; box-shadow: none; background: var(--card); }
-.ck-side .view-bar { box-shadow: none; justify-content: space-between; }
 .ck-tool[data-tool="eyes"] { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
 .ck-side .ck-tool[data-tool="eyes"] { align-items: stretch; }
 .ck-side .ck-tool[data-tool="eyes"] > #eyes-add { align-self: flex-start; }
@@ -1142,6 +1343,8 @@ html.theme-color .ck-ic, :is(.ck-picker, .ck-head, .ck-tab-row) .ck-ic { --fa-se
 }
 .ck-col[data-side="left"] { left: 6px; justify-items: start; }
 .ck-col[data-side="right"] { right: 6px; justify-items: end; }
+/* (the view cube has the bottom right corner) */
+.ck-col[data-side="right"] { bottom: 118px; }
 /* a crowded corner scrolls (src/scrollbars.ts draws its thumb); the padding leaves the pills' shadows room inside it */
 .ck-dock {
   display: flex; flex-direction: column; gap: 6px; pointer-events: none; min-height: 0; max-width: 100%;
@@ -1179,7 +1382,6 @@ body:not(.ck-editing) .ck-dock:not(:has(> .ck-sec:not(.ck-empty))) { padding: 0;
   background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px;
   box-shadow: 0 4px 16px rgba(0,0,0,.1); font-size: 13px;
 }
-.ck-dock .ck-sec:not(.ck-carded) .view-bar { box-shadow: 0 4px 16px rgba(0,0,0,.08); }
 .ck-dock :is(.ck-carded, .ck-folded) > .ck-body {
   /* no scroll of its own: the corner scrolls (one scroller, so the wheel never stops inside a card short of the end) */
   width: 270px; max-width: 100%; pointer-events: auto;
@@ -1279,7 +1481,7 @@ body.ck-editing .ck-side { min-height: 80px; }
 }
 .ck-lifted { opacity: .35; }
 body.ck-dragging, body.ck-dragging * { cursor: var(--cursor-grabbing) !important; }
-@media (max-width: 760px) {
+@media (max-width: 760px), (max-width: 1100px) and (orientation: portrait) {
   .ck-col { top: 2px; bottom: 2px; }
   .ck-col[data-side="left"] { left: 2px; }
   .ck-col[data-side="right"] { right: 2px; }
@@ -1289,8 +1491,6 @@ body.ck-dragging, body.ck-dragging * { cursor: var(--cursor-grabbing) !important
 
 /* ---------- tabs people made (src/layout.ts): between Look and Stuff ---------- */
 /* … › Show tab names off: every tab is just its icon (the name shows on hover) */
-.topbar.tab-icons .modes .lbl { display: none; }
-.topbar.tab-icons:not(.compact) .modes button { padding: 6px 12px; }
 /* Color theme: a made tab tints the panels with its own color */
 html.theme-color[data-mode="custom"] {
   --panel: color-mix(in srgb, var(--tab-color) 8%, #fff);

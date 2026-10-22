@@ -12,7 +12,7 @@ import { markToolsOut } from '../markingPanel';
 import { gizmos, setLayoutIdle } from '../layout';
 import { ridesSurface } from '../shortcuts';
 import { expandRig, moveJoint, rollLimb, scaleBone, unlinkPair, type BoneDef, type RigState, type V3 } from '../rigs';
-import { $ } from './dom';
+import { $, pickHow } from './dom';
 import { camera, canvas, scene, view } from './stage';
 import {
   activate,
@@ -34,7 +34,7 @@ import {
 } from './state';
 import { creatureBox } from './framing';
 import { drawState, enterDraw, spacePan } from './drawing';
-import { pickPiece, renderStuffPanel, selectedPiece, setSelectedPiece } from './workbench';
+import { choosePiece, pickPiece, renderStuffPanel, selectedPiece, setSelectedPiece } from './workbench';
 import { deselectAttachment, gizmo, selectedAttachment } from './attach';
 import { placing, stopPlacing } from './arrange';
 import { pickAttachment, pickStuff } from './carry';
@@ -49,7 +49,10 @@ import { invalidate } from './loop';
 import { animOn, pickAnimStuff } from './animateTab';
 
 export const raycaster = new THREE.Raycaster();
-export const pointer = { downX: 0, downY: 0, moved: false, touch: false };
+export const pointer = { downX: 0, downY: 0, moved: false, touch: false, held: false };
+/** a finger held still on a part this long picks it along with the others */
+const HOLD_MS = 450;
+let holdTimer = 0;
 /** A phone or tablet: hints talk about fingers, not mice and keys. */
 export const touchScreen = () => matchMedia('(pointer: coarse)').matches;
 // the last tap on the 3D view, to spot a double tap
@@ -534,6 +537,8 @@ function onDoubleClick(x: number, y: number) {
 }
 
 export let controls: OrbitControls<THREE.PerspectiveCamera>;
+/** How far dragging the view tips the camera: a touch below level, never under the floor (only the view cube goes there) */
+export const FLOOR_TILT = Math.PI * 0.53;
 /** the view's been moved by hand since the page opened (the open creation's saved view is only put back before that) */
 export let viewMoved = false;
 /** The view is kept with the open creation (see SceneLook): save it there once it's settled. */
@@ -653,6 +658,47 @@ export function showEyes(pair: number) {
 }
 
 /** Handles are tiny, so pick the nearest one in screen space. */
+const MOD_KEY = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl';
+/** What a handle does, for the label beside the pointer: the grips' drag keys under it */
+function handleTipHtml(h: THREE.Object3D): string {
+  const kind = h.userData.kind as string;
+  const b = creature.bones.get(h.userData.handle as string);
+  const keys = `<span class="tip-keys"><kbd>Shift</kbd> one axis · <kbd>${MOD_KEY}</kbd> snap</span>`;
+  const line = (dot: string, what: string, how: string) => `<span class="tip-main">${dot}<span><b>${what}</b>: ${how}</span></span>`;
+  if (kind === 'start' && b && !b.parent && creature.plantedFeet(b).length) return line('<b class="dot purple square"></b>', 'Body', 'drag to move it; the feet stay put') + keys;
+  if (kind === 'start') return line('<b class="dot purple square"></b>', 'Slide', 'drag to move where it sits · scroll for base width') + keys;
+  if (kind === 'end') return line('<b class="dot orange"></b>', 'Bend', 'drag to pose · scroll for tip width') + keys;
+  if (kind === 'bend') return line('<b class="dot green diamond"></b>', 'Curve', 'drag to curve it · double-click to straighten');
+  if (kind === 'roll') return line('', 'Roll', 'drag round the ring to turn the part');
+  return '';
+}
+/** The label for the handle under a mouse pointer (none while dragging, or over nothing). */
+let tipQueued: { x: number; y: number } | null = null;
+function queueHandleTip(x: number, y: number) {
+  const first = !tipQueued;
+  tipQueued = { x, y };
+  if (first) requestAnimationFrame(showHandleTip);
+}
+function showHandleTip() {
+  const at = tipQueued;
+  tipQueued = null;
+  const tip = $('#handle-tip');
+  const h = at && !drag && !drawState && handlesVisible() ? pickHandle(at.x, at.y) : null;
+  const html = h ? handleTipHtml(h) : '';
+  tip.hidden = !html;
+  if (!html || !at) return;
+  if (tip.dataset.html !== html) {
+    tip.innerHTML = html;
+    tip.dataset.html = html;
+  }
+  // below and right of the pointer, kept inside the view
+  const r = canvas.getBoundingClientRect();
+  const x = at.x - r.left + 16;
+  const y = at.y - r.top + 18;
+  tip.style.left = `${Math.min(x, r.width - tip.offsetWidth - 6)}px`;
+  tip.style.top = `${y + tip.offsetHeight > r.height - 6 ? at.y - r.top - tip.offsetHeight - 10 : y}px`;
+}
+
 function pickHandle(x: number, y: number): THREE.Object3D | null {
   const r = canvas.getBoundingClientRect();
   let best: THREE.Object3D | null = null;
@@ -722,7 +768,7 @@ export function updateSkeletonVisibility() {
   Creature.handleScope = gizmos() === 'part' ? 'part' : 'all';
   creature.setSkeletonVisible(handlesVisible());
   // the key to the handles shows with them
-  $('#shape-legend').classList.toggle('off', !handlesVisible());
+  if (!handlesVisible()) $('#handle-tip').hidden = true;
 }
 
 export function initControls() {
@@ -731,6 +777,21 @@ export function initControls() {
     pointer.downY = e.clientY;
     pointer.moved = false;
     pointer.touch = e.pointerType !== 'mouse';
+    pointer.held = false;
+    clearTimeout(holdTimer);
+    if (pointer.touch && e.isPrimary && mode !== 'stuff' && !drawState && !idle) {
+      const x = e.clientX;
+      const y = e.clientY;
+      holdTimer = window.setTimeout(() => {
+        // (held on a handle or an eye: that's about to be dragged)
+        if (pointer.moved || drag || gizmo.dragging || eyeDrag || (handlesVisible() && pickHandle(x, y))) return;
+        const id = pickPart(x, y);
+        if (!id) return;
+        pointer.held = true;
+        navigator.vibrate?.(15);
+        selectPart(id, true, 'toggle');
+      }, HOLD_MS);
+    }
     // holding Space, the left button only pans
     if (e.button !== 0 || pickingFocus || pickingParent || spacePan) return;
     // pressing on an eye: dragging slides the pair over the surface (a click still opens its settings)
@@ -789,7 +850,13 @@ export function initControls() {
     drag = { id, kind, plane, body, stretch, moving, startHit: pos, moved: false, rigBase: reshape ? JSON.stringify(state.rig) : undefined, toDef, roll, node: h.userData.node as number | undefined, gap: h.userData.gap === undefined ? undefined : { at: h.userData.gap as number, pos: h.position.clone() } };
   });
   canvas.addEventListener('pointermove', (e) => {
-    if (Math.hypot(e.clientX - pointer.downX, e.clientY - pointer.downY) > 5) pointer.moved = true;
+    // a mouse over a handle: what it does, beside it
+    if (e.pointerType === 'mouse' && !e.buttons) queueHandleTip(e.clientX, e.clientY);
+    else if (!$('#handle-tip').hidden) $('#handle-tip').hidden = true;
+    if (Math.hypot(e.clientX - pointer.downX, e.clientY - pointer.downY) > 5) {
+      pointer.moved = true;
+      clearTimeout(holdTimer);
+    }
     if (eyeDrag) {
       if (pointer.moved) moveEyesTo(eyeDrag.pair, eyeDrag.sgn, e.clientX, e.clientY);
       return;
@@ -886,7 +953,6 @@ export function initControls() {
     g.visible = false;
     scene.add(g);
   }
-  if (/Mac|iPhone|iPad/.test(navigator.platform)) document.querySelectorAll('.ctrl-key').forEach((k) => (k.textContent = '⌘'));
   // pressing or letting go of Shift or Ctrl mid-drag applies straight away
   for (const type of ['keydown', 'keyup'] as const) {
     addEventListener(type, (e) => {
@@ -928,7 +994,9 @@ export function initControls() {
     },
     { capture: true, passive: false },
   );
+  canvas.addEventListener('pointerleave', () => ($('#handle-tip').hidden = true));
   canvas.addEventListener('pointerup', (e) => {
+    clearTimeout(holdTimer);
     if (eyeDrag) {
       const d = eyeDrag;
       eyeDrag = null;
@@ -987,7 +1055,8 @@ export function initControls() {
       commit();
       return;
     }
-    if (pointer.moved || e.button !== 0 || gizmo.dragging || drawState) return;
+    // (a long press already picked)
+    if (pointer.moved || pointer.held || e.button !== 0 || gizmo.dragging || drawState) return;
     if (doubleTapped(e)) return;
     if (pickingFocus) {
       focusAt(e.clientX, e.clientY);
@@ -1000,7 +1069,8 @@ export function initControls() {
     if (mode === 'stuff') {
       const id = pickPiece(e.clientX, e.clientY);
       if (id) {
-        setSelectedPiece(id);
+        // Ctrl: one more piece picked (or one less); Shift: every piece from the main pick to this one
+        choosePiece(id, pickHow(e));
         flashPart();
         renderStuffPanel();
       }
@@ -1034,7 +1104,8 @@ export function initControls() {
     const id = pickPart(e.clientX, e.clientY);
     if (id) {
       deselectAttachment();
-      selectPart(id);
+      // Ctrl: one more part picked (or one less); Shift: every part in the Scene list from the main pick to this one
+      selectPart(id, true, pickHow(e));
     } else if (gizmos() !== 'none' && !idle) deselectAll();
   });
   canvas.addEventListener('dblclick', (e) => {
@@ -1048,9 +1119,14 @@ export function initControls() {
   controls.target.set(0, 0.9, 0);
   controls.minDistance = 0.6;
   controls.maxDistance = 14;
-  controls.maxPolarAngle = Math.PI * 0.53;
+  controls.maxPolarAngle = FLOOR_TILT;
   controls.autoRotateSpeed = 2.5;
   controls.update();
-  controls.addEventListener('start', () => (viewMoved = true));
+  controls.addEventListener('start', () => {
+    viewMoved = true;
+    // dragging the view keeps above the floor; already under it (the view cube went there), no further under
+    const tilt = new THREE.Spherical().setFromVector3(camera.position.clone().sub(controls.target)).phi;
+    controls.maxPolarAngle = Math.max(FLOOR_TILT, tilt);
+  });
   controls.addEventListener('end', () => viewChanged());
 }

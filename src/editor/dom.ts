@@ -1,5 +1,6 @@
 // ---------------------------------------------------------------------------
-// Small DOM helpers shared by the editor: $ for one element, and Font Awesome icons.
+// Small DOM helpers shared by the editor: $ for one element, Font Awesome icons,
+// and how a click picks things.
 
 export const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector(sel) as T;
 
@@ -13,4 +14,10 @@ export const faClassic = (name: string) => `<i class="fa-duotone fa-regular fa-$
 export function iconLabel(el: HTMLElement, icon: string, text = '') {
   el.innerHTML = icon;
   if (text) el.append(` ${text}`);
+}
+
+/** How a click picks: just this, this one more (or one less: Ctrl or ⌘), or everything from the main pick to this (Shift). */
+export type PickHow = 'one' | 'toggle' | 'range';
+export function pickHow(e: MouseEvent): PickHow {
+  return e.ctrlKey || e.metaKey ? 'toggle' : e.shiftKey ? 'range' : 'one';
 }

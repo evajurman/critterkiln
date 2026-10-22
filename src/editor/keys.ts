@@ -8,11 +8,12 @@ import { $ } from './dom';
 import { creature, idle, mode, redo, undo } from './state';
 import { focusOnBone, frameAll, frameCreature } from './framing';
 import { drawState, enterDraw, exitDraw, finishDraw, setDrawSide, setDrawTool, setSpacePan, toggleSymmetry } from './drawing';
-import { board, copyPicked, deletePiece, focusOnBoard, focusOnPlane, pasteClip, piece, piecePivot, setPieceMirror, setPieceMode } from './workbench';
+import { board, copyPicked, deletePiece, selectAllPieces, focusOnBoard, focusOnPlane, pasteClip, piece, piecePivot, setPieceMirror, setPieceMode } from './workbench';
 import { gizmo, selectedAttachment } from './attach';
 import { placing, setPlaceMode } from './arrange';
 import { removeAttachment, syncAttachBar } from './attachPanel';
 import { setMode } from './panels';
+import { selectAllParts } from './partPanel';
 import { pickingParent, removePart, rigLock, setMirror, setPickingParent } from './rigEdit';
 import { closeShortcutSheet, shortcutsChanged, toggleShortcutSheet } from './settings';
 
@@ -87,6 +88,10 @@ export function initKeys() {
       if (copyPicked()) e.preventDefault();
     } else if (is(e, 'paste')) {
       if (pasteClip()) e.preventDefault();
+    } else if (is(e, 'selectAll') && !drawState) {
+      e.preventDefault();
+      if (mode === 'stuff') selectAllPieces();
+      else selectAllParts();
     } else if (is(e, 'move') || is(e, 'rotate') || is(e, 'scale')) {
       const m = is(e, 'move') ? 'translate' : is(e, 'rotate') ? 'rotate' : 'scale';
       if (mode === 'stuff' && piecePivot) setPieceMode(m);

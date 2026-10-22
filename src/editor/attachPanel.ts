@@ -4,13 +4,13 @@
 
 import { type Attachment } from '../creature';
 import { uid, type Piece, type Thing } from '../stuff';
-import { $ } from './dom';
+import { $, pickHow } from './dom';
 import { mirror } from './floor';
 import { commit, creature, selected, state } from './state';
-import { pieceColorAll, pieceColorScope, renderCollection, setPieceColorAll, stripThumb } from './workbench';
+import { renderCollection, stripThumb } from './workbench';
 import { currentAttachment, deselectAttachment, gizmo, selectAttachment, selectedAttachment } from './attach';
 import { closeTopPopovers } from './popovers';
-import { glowFollowSeg, glowSlider, sceneColorRow, scopeSeg, SWATCHES } from './widgets';
+import { glowFollowSeg, glowSlider, sceneColorRow, SWATCHES } from './widgets';
 import { renderThingMaterial } from './partPanel';
 import { hintOnce } from './hints';
 
@@ -28,25 +28,27 @@ export function syncAttachBar() {
   if (!$('#attach-mat-pop').hidden) renderAttachMaterial();
 }
 
-/** The piece of the picked stuff its colors go on (picked in its Stuff material popover) */
-let attachPieceId = '';
-function attachPiece(): Piece | undefined {
-  const a = currentAttachment();
-  return a?.thing.pieces.find((p) => p.id === attachPieceId) ?? a?.thing.pieces[0];
+/** The pieces of the picked stuff its colors go on (picked in its Stuff material popover): the main one first */
+let attachPieceIds: string[] = [];
+function attachPieces(): Piece[] {
+  const pieces = currentAttachment()?.thing.pieces ?? [];
+  const picked = attachPieceIds.flatMap((id) => pieces.find((p) => p.id === id) ?? []);
+  return picked.length ? picked : pieces.slice(0, 1);
 }
-/** Change the picked stuff's color or glow: on its piece, or (All) on every piece of it */
+function attachPiece(): Piece | undefined {
+  return attachPieces()[0];
+}
+/** Change the picked stuff's color or glow, on every picked piece of it */
 function updateAttachColor(fn: (p: Piece) => void, doCommit = true) {
-  const a = currentAttachment();
-  const p = attachPiece();
-  if (!a || !p) return;
-  for (const q of pieceColorAll ? a.thing.pieces : [p]) fn(q);
+  const pieces = attachPieces();
+  if (!pieces.length) return;
+  for (const q of pieces) fn(q);
   creature.sync();
   if (doCommit) {
     commit();
     renderAttachMaterial();
   }
 }
-let attachColorScope: () => void;
 let attachGlowFollow: () => void;
 let attachSceneColors: () => void;
 
@@ -55,26 +57,43 @@ function renderAttachMaterial() {
   if (!a) return;
   const p = attachPiece()!;
   const several = a.thing.pieces.length > 1;
-  // which piece: a button per piece, in its color
+  // which pieces: a button per piece, in its color (Ctrl picks one more, Shift everything between), and All
+  const picked = attachPieces();
   const pieces = $('#attach-pieces');
   pieces.hidden = !several;
+  const all = document.createElement('button');
+  all.className = 'piece-pick';
+  all.classList.toggle('active', picked.length === a.thing.pieces.length);
+  all.textContent = 'All';
+  all.title = 'Pick every piece';
+  all.onclick = () => {
+    attachPieceIds = [p.id, ...a.thing.pieces.filter((q) => q !== p).map((q) => q.id)];
+    renderAttachMaterial();
+  };
   pieces.replaceChildren(
     ...a.thing.pieces.map((q, i) => {
       const b = document.createElement('button');
       b.className = 'piece-pick';
-      b.classList.toggle('active', q === p);
+      b.classList.toggle('active', picked.includes(q));
       b.innerHTML = `<i style="background:${q.color}"></i>`;
       b.append(` ${i + 1}`);
-      b.title = `Piece ${i + 1}`;
-      b.onclick = () => {
-        attachPieceId = q.id;
+      b.title = `Piece ${i + 1} · Ctrl-click to pick one more · Shift-click to pick everything between`;
+      b.onclick = (e) => {
+        const ids = picked.map((o) => o.id);
+        const how = pickHow(e);
+        // Ctrl: one more piece picked (or one less), as the main one; Shift: every piece from the main one to this one
+        if (how === 'one') attachPieceIds = [q.id];
+        else if (how === 'range') {
+          const from = a.thing.pieces.indexOf(p);
+          attachPieceIds = [p.id, ...a.thing.pieces.slice(Math.min(from, i), Math.max(from, i) + 1).filter((o) => o !== p).map((o) => o.id)];
+        } else if (!ids.includes(q.id)) attachPieceIds = [q.id, ...ids];
+        else if (ids.length > 1) attachPieceIds = ids.filter((id) => id !== q.id);
         renderAttachMaterial();
       };
       return b;
     }),
+    all,
   );
-  $('#attach-color-scope').hidden = !several;
-  attachColorScope();
   const sw = $('#attach-swatches');
   sw.replaceChildren(
     ...SWATCHES.map((c) => {
@@ -121,14 +140,6 @@ export function removeAttachment() {
 }
 
 export function initAttachPanel() {
-  attachColorScope = scopeSeg(
-    '#attach-color-scope',
-    () => pieceColorAll,
-    (all) => {
-      setPieceColorAll(all);
-      pieceColorScope();
-    },
-  );
   attachGlowFollow = glowFollowSeg('#attach-glow-follow', attachPiece, (f) =>
     updateAttachColor((q) => {
       if (f) q.glowFollow = f;

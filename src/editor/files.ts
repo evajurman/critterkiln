@@ -26,7 +26,7 @@ import { renderUI } from './panels';
 import { hint } from './hints';
 import { renderBackdropUI } from './backdropPanel';
 import { applyDof, dof, saveDof } from './dof';
-import { invalidate } from './loop';
+import { invalidate, viewPutBack } from './loop';
 
 /** Files are named after who's in the scene: "Bimble", or "Bimble-Twin-Creature 3". */
 export function sceneFileName(): string {
@@ -48,8 +48,8 @@ export interface SceneLook {
   floor: typeof floorPrefs;
   light: number;
   dof: typeof dof;
-  /** where the view was: the camera, the spot it orbits, and whether it was flat (ortho) */
-  camera?: { pos: V3; target: V3; ortho?: boolean };
+  /** where the view was: the camera, the spot it orbits, whether it was flat (ortho), and the view's shape (width / height) */
+  camera?: { pos: V3; target: V3; ortho?: boolean; aspect?: number };
 }
 
 /** What a save holds. Older files (.scene, .stuff, .collection, single creatures) are read into one too. */
@@ -67,7 +67,7 @@ export function currentLook(): SceneLook {
   // (the workbench has a view of its own; mid-flight, where it's flying to)
   if (mode !== 'stuff') {
     const r4 = (v: THREE.Vector3) => v.toArray().map((x) => Math.round(x * 1e4) / 1e4) as V3;
-    look.camera = { pos: r4(tween?.p1 ?? camera.position), target: r4(tween?.t1v ?? controls.target), ortho: sceneOrtho };
+    look.camera = { pos: r4(tween?.p1 ?? camera.position), target: r4(tween?.t1v ?? controls.target), ortho: sceneOrtho, aspect: Math.round(camera.aspect * 100) / 100 };
   }
   return look;
 }
@@ -218,12 +218,16 @@ export function putView(v: NonNullable<SceneLook['camera']>, fly: boolean) {
   }
   if (mode !== 'stuff') setOrtho(sceneOrtho);
   const pos = new THREE.Vector3(...v.pos), target = new THREE.Vector3(...v.target);
-  if (fly) return flyTo(pos, target);
-  setTween(null);
-  camera.position.copy(pos);
-  controls.target.copy(target);
-  controls.update();
-  invalidate();
+  if (fly) flyTo(pos, target);
+  else {
+    setTween(null);
+    camera.position.copy(pos);
+    controls.target.copy(target);
+    controls.update();
+    invalidate();
+  }
+  // saved in a differently shaped window (a phone, say): framed afresh for this one
+  viewPutBack(v.aspect);
 }
 
 /** The "what do you want from this file?" picker. */

@@ -1,19 +1,20 @@
 // ---------------------------------------------------------------------------
-// The picked part's panel: its shape, color, glow, opacity and material.
+// The picked part's panel: its shape, color, glow, opacity and material; and
+// picking parts (one, several, or every part of the creature).
 
-import { markingsOf, setPartShapes, type BoneRT, type CreatureState, type PartKind, type PartState } from '../creature';
+import { markingsOf, setPartShapes, type BoneRT, type Creature, type CreatureState, type PartKind, type PartState } from '../creature';
 import { collect, unlock } from '../achievements';
 import { type Thing } from '../stuff';
 import { STYLE_PARAMS, STYLES, styleSettings, type StyleId } from '../materials';
 import { RIGS, savedRigs } from '../rigs';
-import { $ } from './dom';
+import { $, type PickHow } from './dom';
 import { buildFloorMesh, floorPrefs } from './floor';
-import { commit, creature, idle, mode, selected, setIdle, setSelected, state } from './state';
+import { alsoPicked, commit, creature, idle, mode, selected, setIdle, setSelected, state } from './state';
 import { touchScreen, updateSkeletonVisibility } from './controls';
 import { enterDraw, exitDraw } from './drawing';
 import { renderStuffPanel, syncWorkbench } from './workbench';
 import { renderCreatureBar } from './creatureBar';
-import { glowFollowSeg, glowSlider, sceneColorRow, scopeSeg, SWATCHES } from './widgets';
+import { glowFollowSeg, glowSlider, sceneColorRow, SWATCHES } from './widgets';
 import { renderEyes } from './eyesPanel';
 import { renderUI } from './panels';
 import { selPartId } from './markingsUi';
@@ -33,7 +34,70 @@ function selPart() {
   return state.parts[creature.bones.get(selected)!.src];
 }
 
-export function selectPart(id: string, tips = true) {
+/** The picked parts' bones: the main one (the one shaped and posed) first, then any picked along with it. */
+export function pickedBones(): string[] {
+  return [selected, ...[...alsoPicked].filter((id) => id !== selected && creature.bones.has(id))];
+}
+/** The picked parts' drawings (a pair's two sides share one), main part first. */
+export function pickedSrcs(): string[] {
+  return [...new Set(pickedBones().flatMap((id) => creature.bones.get(id)?.src ?? []))];
+}
+function pickedParts(): PartState[] {
+  return pickedSrcs().flatMap((src) => state.parts[src] ?? []);
+}
+/** Every part of the creature is picked: colors and materials go on the whole creature, markings over all of it. */
+export function allPicked(): boolean {
+  return !idle && pickedSrcs().length >= Object.keys(state.parts).length;
+}
+
+/**
+ * The parts in the order the Scene list shows them: each under the part it hangs off, a step
+ * deeper (a pair is listed once, by its first side, so a part on its other side hangs off that too).
+ */
+export function partTree(c: Creature = creature): { bone: BoneRT; depth: number }[] {
+  const row = (b: BoneRT) => (b.def.mirrorOf ? (c.bones.get(b.def.mirrorOf) ?? b) : b);
+  const kids = new Map<BoneRT | null, BoneRT[]>();
+  for (const b of c.list.filter((o) => !o.def.mirrorOf)) {
+    const up = b.parent ? row(b.parent) : null;
+    kids.set(up, [...(kids.get(up) ?? []), b]);
+  }
+  const out: { bone: BoneRT; depth: number }[] = [];
+  const add = (b: BoneRT, depth: number) => {
+    out.push({ bone: b, depth });
+    for (const k of kids.get(b) ?? []) add(k, depth + 1);
+  };
+  for (const b of kids.get(null) ?? []) add(b, 0);
+  return out;
+}
+
+/**
+ * Picks a part: just it; or (`toggle`) one more, as the main one, or one less; or (`range`)
+ * every part in the Scene list from the main one to it, the main one staying main.
+ */
+export function selectPart(id: string, tips = true, how: PickHow = 'one') {
+  const src = creature.bones.get(id)?.src;
+  if (idle || !src) how = 'one';
+  if (how === 'toggle') {
+    const had = pickedBones().filter((b) => creature.bones.get(b)?.src === src);
+    if (!had.length) {
+      alsoPicked.add(selected);
+    } else {
+      // the last one picked stays picked
+      if (pickedSrcs().length < 2) return;
+      for (const b of [...alsoPicked]) if (creature.bones.get(b)?.src === src) alsoPicked.delete(b);
+      if (had.includes(selected)) id = pickedBones().find((b) => creature.bones.get(b)?.src !== src)!;
+      else id = selected;
+      alsoPicked.delete(id);
+    }
+  } else if (how === 'range') {
+    const order = partTree().map((r) => r.bone);
+    const mainSrc = creature.bones.get(selected)?.src;
+    const a = order.findIndex((b) => b.src === mainSrc);
+    const z = order.findIndex((b) => b.src === src);
+    alsoPicked.clear();
+    if (a >= 0 && z >= 0) for (const b of order.slice(Math.min(a, z), Math.max(a, z) + 1)) if (b.src !== mainSrc) alsoPicked.add(b.def.id);
+    id = selected;
+  } else alsoPicked.clear();
   setIdle(false);
   setSelected(id);
   creature.select(id);
@@ -41,6 +105,17 @@ export function selectPart(id: string, tips = true) {
   flashPart();
   renderUI();
   if (tips && mode === 'shape') shapeTips();
+}
+
+/** Picks every part of the creature (the main part stays the one shaped and posed). */
+export function selectAllParts() {
+  setIdle(false);
+  if (!creature.bones.has(selected)) setSelected(creature.list[0].def.id);
+  for (const b of sources()) if (b.def.id !== selected) alsoPicked.add(b.def.id);
+  creature.select(selected);
+  updateSkeletonVisibility();
+  flashPart();
+  renderUI();
 }
 
 /** What the handles on a picked part do: the first time one is picked in Shape. */
@@ -105,7 +180,7 @@ export let partGlowFollow: () => void;
 let partSceneColors: () => void;
 
 export function renderStyles() {
-  const current = !styleAll ? (selPart().style ?? state.style) : state.style;
+  const current = allPicked() ? state.style : (selPart().style ?? state.style);
   const el = $('#styles');
   el.innerHTML = '';
   for (const s of STYLES) {
@@ -255,18 +330,9 @@ function renderStyleParams(style: StyleId, el: HTMLElement = $('#style-params'),
   }
 }
 
-/** Colors go on the picked part, or (Everything) on the whole creature */
-let colorAll = false;
-/** Materials go on the whole creature, or (Part) just the picked part */
-let styleAll = true;
-/** the parts a color (and its glow) goes on */
-function colorParts(): PartState[] {
-  return colorAll ? Object.values(state.parts) : [selPart()];
-}
-
 function setColor(c: string, doCommit: boolean) {
-  for (const p of colorParts()) p.color = c;
-  if (colorAll && doCommit && Object.keys(state.parts).length > 1) unlock('paint-all');
+  for (const p of pickedParts()) p.color = c;
+  if (allPicked() && doCommit && Object.keys(state.parts).length > 1) unlock('paint-all');
   creature.sync();
   creature.markMergeDirty();
   if (doCommit) {
@@ -276,9 +342,10 @@ function setColor(c: string, doCommit: boolean) {
   renderCreatureBar();
 }
 
+/** A material on the picked parts; with every part picked, it's the whole creature's (parts added later too). */
 function setStyle(id: StyleId) {
-  if (!styleAll) {
-    selPart().style = id;
+  if (!allPicked()) {
+    for (const p of pickedParts()) p.style = id;
   } else {
     state.style = id;
     for (const p of Object.values(state.parts)) delete p.style;
@@ -313,7 +380,7 @@ export function initPartPanel() {
     '#glow-follow',
     () => (creature.bones.has(selected) ? { ...selPart(), markings: markingsOf(state, selPartId()) } : undefined),
     (f) => {
-      for (const p of colorParts()) {
+      for (const p of pickedParts()) {
         if (f) p.glowFollow = f;
         else delete p.glowFollow;
       }
@@ -326,7 +393,7 @@ export function initPartPanel() {
   glowSlider(
     '#glow',
     (v) => {
-      for (const p of colorParts()) {
+      for (const p of pickedParts()) {
         if (v > 0) p.glow = v;
         else delete p.glow;
       }
@@ -335,15 +402,6 @@ export function initPartPanel() {
       partGlowFollow();
     },
     () => commit(),
-  );
-  scopeSeg('#color-scope', () => colorAll, (all) => (colorAll = all));
-  scopeSeg(
-    '#style-scope',
-    () => styleAll,
-    (all) => {
-      styleAll = all;
-      renderStyles();
-    },
   );
   $('#draw').onclick = () => enterDraw({ kind: 'bone', boneId: selected });
   $('#cancel-draw').onclick = () => exitDraw();

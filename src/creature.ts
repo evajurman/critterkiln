@@ -2371,16 +2371,16 @@ export class Creature {
     for (const b of this.list) this.updateGuide(b, this.drawFocus === b.def.id);
   }
 
-  /** Glow the selected part (and its twin); k fades 1 -> 0. */
-  flash(id: string | null, k: number) {
-    const src = id ? this.bones.get(id)?.src : null;
+  /** Glow the selected parts (and their twins); k fades 1 -> 0. */
+  flash(ids: string | string[] | null, k: number) {
+    const srcs = new Set((Array.isArray(ids) ? ids : ids ? [ids] : []).map((id) => this.bones.get(id)?.src));
     for (const b of this.list) {
       const m = b.mesh?.material as THREE.MeshStandardMaterial | undefined;
-      if (m && 'emissive' in m) glowWithFlash(m, b.src === src && k > 0 ? FLASH.setRGB(1, 0.42, 0.29).multiplyScalar(0.45 * k) : undefined);
+      if (m && 'emissive' in m) glowWithFlash(m, srcs.has(b.src) && k > 0 ? FLASH.setRGB(1, 0.42, 0.29).multiplyScalar(0.45 * k) : undefined);
       // A part under a seamless skin is hidden, so its own glow can't be
       // seen: glow a copy of its surface, puffed out a touch, over the skin.
       let hl = this.highlights.get(b);
-      const on = !!b.mesh && !b.mesh.visible && b.src === src && k > 0;
+      const on = !!b.mesh && !b.mesh.visible && srcs.has(b.src) && k > 0;
       if (!on) {
         if (hl) hl.visible = false;
         continue;

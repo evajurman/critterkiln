@@ -18,8 +18,7 @@ import { drawState, spacePan } from './drawing';
 import { bench, piece, refreshPieceGizmo, selectedPiece, syncTwin, syncWorkbench, workbench } from './workbench';
 import { deselectAttachment, gizmo, selectedAttachment } from './attach';
 import { stopPlacing } from './arrange';
-import { scopeSeg } from './widgets';
-import { partGlowFollow } from './partPanel';
+import { allPicked, partGlowFollow } from './partPanel';
 import { hint, hintOnce } from './hints';
 import { invalidate } from './loop';
 import { rayAt } from './animateTab';
@@ -32,6 +31,8 @@ export function selPartId(): string {
 let partMarks: MarkingPanel;
 
 export function renderMarkings() {
+  // with every part picked, new markings go over the whole creature; otherwise on the picked part
+  partMarks.all = allPicked();
   partMarks.render();
 }
 
@@ -115,14 +116,6 @@ export function initMarkingsUi() {
     },
     { list: $('#markings'), params: $('#marking-params') },
   );
-  scopeSeg(
-    '#mark-scope',
-    () => partMarks.all,
-    (all) => {
-      partMarks.all = all;
-      partMarks.render();
-    },
-  );
   pieceMarks = new MarkingPanel(
     {
       unit: 'piece',
@@ -174,13 +167,5 @@ export function initMarkingsUi() {
       mirror: (v) => v.setX(-v.x),
     },
     { list: $('#piece-markings'), params: $('#piece-marking-params') },
-  );
-  scopeSeg(
-    '#piece-mark-scope',
-    () => pieceMarks.all,
-    (all) => {
-      pieceMarks.all = all;
-      pieceMarks.render();
-    },
   );
 }

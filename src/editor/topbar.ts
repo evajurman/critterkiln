@@ -1,10 +1,10 @@
 // ---------------------------------------------------------------------------
-// The top bar: the tab switch, fitting its buttons, the layout, and undo,
-// redo, spin and new.
+// The top bar and the mode rail: the tab switch, fitting the bar's buttons,
+// the layout, and undo, redo, spin and new.
 
 import { unlock } from '../achievements';
 import { installScrollbars } from '../scrollbars';
-import { initLayout } from '../layout';
+import { guidedOn, guidedTab, initLayout, setGuided, STUFF_STEP } from '../layout';
 import { installCursorPress } from '../cursorPress';
 import { installTooltips } from '../tooltip';
 import { $ } from './dom';
@@ -21,14 +21,6 @@ export function fitTopbar() {
   const tools = $('.topbar .tools');
   bar.classList.toggle('compact', bar.scrollWidth > bar.clientWidth || tools.scrollWidth > tools.clientWidth);
 }
-/** The Shape / Look / Stuff switch has one pill that slides under whichever is picked. */
-export function placeModePill() {
-  const modes = $('.modes');
-  const on = modes.querySelector<HTMLElement>('button.active');
-  if (!on) return;
-  modes.style.setProperty('--pill-x', `${on.offsetLeft}px`);
-  modes.style.setProperty('--pill-w', `${on.offsetWidth}px`);
-}
 
 export function initTopbar() {
   // wire up static controls
@@ -38,25 +30,30 @@ export function initTopbar() {
     if (b) setMode(b.dataset.mode as Mode);
   });
   new ResizeObserver(fitTopbar).observe($('.topbar'));
-  // labels dropping (compact) or the font loading change the widths
-  new ResizeObserver(placeModePill).observe($('.modes'));
-  document.fonts.ready.then(placeModePill);
-  // only slide once it has found its first spot
-  requestAnimationFrame(() => requestAnimationFrame(() => $('.modes').classList.add('slide')));
   document.fonts.ready.then(fitTopbar); // the icon font and the text font change the buttons' widths
   installScrollbars();
   installCursorPress();
   installTooltips();
   initLayout({
     onGizmos: updateSkeletonVisibility,
-    // a tab made, renamed or deleted: the bar's widths changed (and maybe the open tab's color)
-    onTabs: () => {
-      fitTopbar();
-      placeModePill();
-      tintMode();
-    },
+    // a tab made, renamed or deleted: maybe the open tab's color changed
+    onTabs: tintMode,
     switchTo: (t) => setMode(t),
+    putOn: () => {
+      setMode(STUFF_STEP);
+      $('#rig-attach').click();
+    },
   });
+  // Guided or Free: each opens where it was left
+  $('#guided-seg').addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-guided]');
+    if (!b || (b.dataset.guided === 'on') === guidedOn()) return;
+    setGuided(b.dataset.guided === 'on');
+    setMode(guidedTab());
+  });
+  // (setMode marks it from then on)
+  $('#app').classList.toggle('guided', guidedOn());
+  document.querySelectorAll<HTMLButtonElement>('#guided-seg button').forEach((b) => b.classList.toggle('active', (b.dataset.guided === 'on') === guidedOn()));
   $('#undo').onclick = undo;
   $('#redo').onclick = redo;
   $('#spin').onclick = () => {

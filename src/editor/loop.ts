@@ -10,12 +10,12 @@ import { camera, key, overlay, pixelRatio, quality, renderer, scene, syncView, v
 import { sizeMirror } from './floor';
 import { aoTexel, composer, gtao } from './post';
 import { creature, creatures, mode, selected } from './state';
-import { controls, drag, viewChanged } from './controls';
-import { setTween, tween } from './framing';
+import { controls, drag, viewChanged, viewMoved } from './controls';
+import { frameCreature, setTween, syncViewCube, tween } from './framing';
 import { drawState, renderOverlay } from './drawing';
 import { flashPiece } from './workbench';
 import { gizmo } from './attach';
-import { flashStart } from './partPanel';
+import { flashStart, pickedBones } from './partPanel';
 import { hint } from './hints';
 import { settings, syncSliderNumbers } from './settings';
 import { dof, focusMarkerUntil, updateFocus } from './dof';
@@ -30,9 +30,28 @@ export function invalidate(frames = 3) {
   renderFrames = Math.max(renderFrames, frames);
 }
 
+/** the view's shape when the creature was last framed for it */
+let framedAspect = 0;
+/** A very different shape now (more than a quarter wider or narrower): what was in view may be tiny or cut off, so frame the creature again (unless the view's been moved by hand). */
+function reframeIfReshaped() {
+  if (!framedAspect) framedAspect = camera.aspect;
+  if (Math.abs(Math.log(camera.aspect / framedAspect)) <= Math.log(1.25)) return;
+  framedAspect = camera.aspect;
+  if (!viewMoved && !drawState && mode !== 'stuff') frameCreature();
+}
+/**
+ * A saved view was put back: it was framed for a view `aspect` wide. Older saves don't say; they were
+ * nearly all made in a wide window, so in an upright view (a phone) they're taken as wide, else as this one.
+ */
+export function viewPutBack(aspect?: number) {
+  framedAspect = aspect ?? (camera.aspect < 1 ? 1.6 : camera.aspect);
+  reframeIfReshaped();
+}
+
 export function resize() {
   const w = viewport.clientWidth;
   const h = viewport.clientHeight;
+  if (!w || !h) return;
   renderer.setSize(w, h, false);
   renderer.setPixelRatio(pixelRatio());
   composer.setPixelRatio(pixelRatio());
@@ -42,6 +61,7 @@ export function resize() {
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
   syncView();
+  reframeIfReshaped();
   const dpr = Math.min(devicePixelRatio, 2);
   overlay.width = w * dpr;
   overlay.height = h * dpr;
@@ -140,11 +160,12 @@ export function loop(now: number) {
   // true while damping or auto-rotating
   if (controls.update()) invalidate(2);
   syncView();
+  syncViewCube();
   const f = 1 - (now - flashStart) / 700;
   // one extra frame after the flash ends clears the glow
   if (f > -0.1) invalidate(1);
   if (mode === 'stuff') flashPiece(drawState ? 0 : Math.max(0, f));
-  else creature.flash(drawState ? null : selected, Math.max(0, f));
+  else creature.flash(drawState ? null : pickedBones(), Math.max(0, f));
   if (creature.tickBoing(now)) invalidate(1);
   tickAnim(now);
   // while something's dragged, moving joins blend colors more cheaply (see setDragging)

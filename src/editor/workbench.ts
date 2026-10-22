@@ -26,7 +26,7 @@ import {
 import { STYLES, glowWithFlash } from '../materials';
 import { markToolsOut } from '../markingPanel';
 import { copyLimb, partIds, pasteLimb, type LimbClip } from '../rigs';
-import { $, fa, faClassic, iconLabel } from './dom';
+import { $, fa, faClassic, iconLabel, pickHow, type PickHow } from './dom';
 import { camera, canvas, key, scene, view } from './stage';
 import { composer } from './post';
 import { commit, creature, creatures, idle, mode, save, selected, setIdle, state, world } from './state';
@@ -39,7 +39,7 @@ import { attachThing } from './attachPanel';
 import { carryFrom } from './carry';
 import { saveBundle } from './files';
 import { queueCreationSave } from './creations';
-import { glowFollowSeg, glowSlider, sceneColorRow, scopeSeg, SWATCHES } from './widgets';
+import { glowFollowSeg, glowSlider, sceneColorRow, SWATCHES } from './widgets';
 import { flashPart, renderThingMaterial } from './partPanel';
 import { pieceMarks } from './markingsUi';
 import { rigEdit } from './rigEdit';
@@ -59,8 +59,52 @@ export function setBenchKey(v: typeof benchKey) {
   benchKey = v;
 }
 export let selectedPiece = '';
+/** Picks one piece (and only it). */
 export function setSelectedPiece(v: typeof selectedPiece) {
   selectedPiece = v;
+  alsoPickedPieces.clear();
+}
+/** More pieces picked along with `selectedPiece` (Shift- or Ctrl-click, or Ctrl+A): colors, glow, materials and markings go on them all. */
+const alsoPickedPieces = new Set<string>();
+/** The picked pieces that are still on the thing, the main one first. */
+export function pickedPieces(): Piece[] {
+  const pieces = workbench().pieces;
+  const main = pieces.find((p) => p.id === selectedPiece);
+  return main ? [main, ...pieces.filter((p) => p !== main && alsoPickedPieces.has(p.id))] : [];
+}
+/** Every piece of the thing is picked: new markings go over the whole thing. */
+export function allPiecesPicked(): boolean {
+  return pickedPieces().length >= workbench().pieces.length;
+}
+/** Picks a piece: just it; or (`toggle`) one more, as the main one, or one less; or (`range`) every piece from the main one to it in the list, the main one staying main. */
+export function choosePiece(id: string, how: PickHow = 'one') {
+  if (how === 'one' || !selectedPiece) return setSelectedPiece(id);
+  const picked = pickedPieces().map((p) => p.id);
+  if (how === 'range') {
+    const ids = workbench().pieces.map((p) => p.id);
+    const a = ids.indexOf(selectedPiece);
+    const z = ids.indexOf(id);
+    alsoPickedPieces.clear();
+    if (a >= 0 && z >= 0) for (const o of ids.slice(Math.min(a, z), Math.max(a, z) + 1)) if (o !== selectedPiece) alsoPickedPieces.add(o);
+  } else if (!picked.includes(id)) {
+    alsoPickedPieces.add(selectedPiece);
+    selectedPiece = id;
+  } else if (picked.length > 1) {
+    alsoPickedPieces.delete(id);
+    if (id === selectedPiece) {
+      selectedPiece = picked.find((o) => o !== id)!;
+      alsoPickedPieces.delete(selectedPiece);
+    }
+  }
+}
+/** Picks every piece of the thing. */
+export function selectAllPieces() {
+  const pieces = workbench().pieces;
+  if (!pieces.length) return;
+  if (!pieces.some((p) => p.id === selectedPiece)) selectedPiece = pieces[0].id;
+  for (const p of pieces) if (p.id !== selectedPiece) alsoPickedPieces.add(p.id);
+  flashPart();
+  renderStuffPanel();
 }
 
 export function workbench(): Thing {
@@ -421,7 +465,7 @@ export function saveWorkbenchNow() {
 function openOnBench(t: Thing) {
   saveWorkbenchNow();
   world.workbench = stripThumb(t);
-  selectedPiece = '';
+  setSelectedPiece('');
   $('#thing-saved').textContent = '';
   syncWorkbench();
   commit();
@@ -464,7 +508,7 @@ export function addPieces(shapes: { outline: Vec2[]; holes: Vec2[][] }[]) {
     }
   }
   wb.pieces.push(...made);
-  selectedPiece = made[0].id;
+  setSelectedPiece(made[0].id);
   unlock('piece');
   exitDraw(true);
   syncWorkbench();
@@ -498,7 +542,7 @@ export function replacePiece(id: string, shapes: { outline: Vec2[]; holes: Vec2[
   }
   wb.pieces.splice(i, 1, ...next);
   syncTwin(next[0]);
-  selectedPiece = old.id;
+  setSelectedPiece(old.id);
   exitDraw(true);
   syncWorkbench();
   commit();
@@ -517,13 +561,14 @@ export function pickPiece(x: number, y: number): string | null {
   return null;
 }
 
-/** Glow the selected piece (k fades 1 -> 0). */
+/** Glow the picked pieces (k fades 1 -> 0). */
 export function flashPiece(k: number) {
+  const picked = new Set(k > 0 ? pickedPieces().map((p) => p.id) : []);
   bench?.traverse((m) => {
     if (!m.userData.pieceId || !(m as THREE.Mesh).isMesh) return;
     const mat = (m as THREE.Mesh).material as THREE.MeshStandardMaterial;
     if (!mat || !('emissive' in mat)) return;
-    glowWithFlash(mat, m.userData.pieceId === selectedPiece && k > 0 ? new THREE.Color(1, 0.42, 0.29).multiplyScalar(0.45 * k) : undefined);
+    glowWithFlash(mat, picked.has(m.userData.pieceId) && k > 0 ? new THREE.Color(1, 0.42, 0.29).multiplyScalar(0.45 * k) : undefined);
   });
 }
 
@@ -574,7 +619,8 @@ export function renderStuffPanel() {
   const wb = workbench();
   const nameInput = $<HTMLInputElement>('#thing-name');
   if (document.activeElement !== nameInput) nameInput.value = wb.name;
-  if (!wb.pieces.some((p) => p.id === selectedPiece)) selectedPiece = wb.pieces[wb.pieces.length - 1]?.id ?? '';
+  if (!wb.pieces.some((p) => p.id === selectedPiece)) setSelectedPiece(wb.pieces[wb.pieces.length - 1]?.id ?? '');
+  const picked = new Set(pickedPieces().map((p) => p.id));
 
   const list = $('#pieces');
   list.innerHTML = '';
@@ -582,7 +628,7 @@ export function renderStuffPanel() {
   wb.pieces.forEach((p, i) => {
     const row = document.createElement('div');
     row.className = 'piece-row';
-    row.classList.toggle('active', p.id === selectedPiece);
+    row.classList.toggle('active', picked.has(p.id));
     const pick = document.createElement('button');
     pick.className = 'piece-pick';
     pick.innerHTML = `<i style="background:${p.color}"></i>`;
@@ -590,8 +636,9 @@ export function renderStuffPanel() {
     pick.append(` Piece ${i + 1}${p.holes.length ? ` (${p.holes.length} hole${p.holes.length > 1 ? 's' : ''})` : ''}`);
     const t = twinOf(p);
     if (t) pick.insertAdjacentHTML('beforeend', ` <span class="piece-twin" title="Mirror image of Piece ${wb.pieces.indexOf(t) + 1}">${fa('arrow-right-arrow-left')}</span>`);
-    pick.onclick = () => {
-      selectedPiece = p.id;
+    pick.title = 'Ctrl-click to pick one more · Shift-click to pick everything between';
+    pick.onclick = (e) => {
+      choosePiece(p.id, pickHow(e));
       flashPart();
       renderStuffPanel();
     };
@@ -600,7 +647,7 @@ export function renderStuffPanel() {
     edit.innerHTML = fa('pencil');
     edit.title = 'Redraw this piece: add to it, erase bits (erase inside it for a hole), or move, size and turn it. Or double-click it';
     edit.onclick = () => {
-      selectedPiece = p.id;
+      setSelectedPiece(p.id);
       renderStuffPanel();
       enterDraw({ kind: 'piece', redraw: p.id });
     };
@@ -652,14 +699,12 @@ export function renderStuffPanel() {
       b.style.background = c;
       b.title = c;
       b.classList.toggle('active', c.toLowerCase() === p.color.toLowerCase());
-      b.onclick = () => updatePieceColor((q) => (q.color = c));
+      b.onclick = () => updatePicked((q) => (q.color = c));
       sw.append(b);
     }
     $<HTMLInputElement>('#piece-color').value = p.color;
     $<HTMLInputElement>('#piece-glow').value = String(p.glow ?? 0);
     pieceGlowFollow();
-    // (only something to do with more than one piece)
-    $('#piece-color-scope').hidden = wb.pieces.length < 2;
     pieceSceneColors();
     const st = $('#piece-styles');
     st.innerHTML = '';
@@ -671,11 +716,13 @@ export function renderStuffPanel() {
       b.append(s.name);
       b.classList.toggle('active', s.id === p.style);
       b.title = s.desc;
-      b.onclick = () => updatePiece((q) => (q.style = s.id));
+      b.onclick = () => updatePicked((q) => (q.style = s.id));
       st.append(b);
     }
     renderThingMaterial(wb, [p.style], $('#piece-style-params'), state.style);
   }
+  // with every piece picked, new markings go over the whole thing
+  pieceMarks.all = allPiecesPicked();
   pieceMarks.render();
   renderCollection();
   refreshPieceGizmo();
@@ -700,7 +747,13 @@ export function renderCollection() {
     el.innerHTML = '';
     const things = collection();
     if (forAttach && !things.length) {
-      el.innerHTML = `<p class="muted small">Nothing here yet. Make something in the ${fa('box')} Stuff tab first.</p>`;
+      el.innerHTML = `<p class="muted small">Nothing here yet. Make something first:</p>`;
+      const make = document.createElement('button');
+      make.className = 'ghost';
+      make.innerHTML = `${fa('briefcase')} Make new stuff`;
+      // (Stuff from the rail: in Guided it's still part of Dress up)
+      make.onclick = () => document.querySelector<HTMLButtonElement>('.rail [data-mode="stuff"]')?.click();
+      el.append(make);
       continue;
     }
     const card = (name: string, thumb: string | undefined, onclick: () => void) => {
@@ -755,7 +808,7 @@ export function copyPiece(id: string) {
   twin.outline = twin.outline.map(nudge);
   twin.holes = twin.holes.map((l) => l.map(nudge));
   wb.pieces.splice(i + 1, 0, twin);
-  selectedPiece = twin.id;
+  setSelectedPiece(twin.id);
   syncWorkbench();
   commit();
   renderStuffPanel();
@@ -811,7 +864,7 @@ export function pasteClip(): boolean {
       return c;
     });
     workbench().pieces.push(...pasted);
-    selectedPiece = pasted[0].id;
+    setSelectedPiece(pasted[0].id);
     syncWorkbench();
     commit();
     renderStuffPanel();
@@ -843,25 +896,24 @@ export function deletePiece(id: string) {
   // a mirrored pair goes together
   const other = wb.pieces.find((p) => p.id === id)?.twin;
   wb.pieces = wb.pieces.filter((p) => p.id !== id && p.id !== other);
-  if (selectedPiece === id || selectedPiece === other) selectedPiece = '';
+  if (selectedPiece === id || selectedPiece === other) setSelectedPiece('');
   if (other) hint('Deleted both sides (turn off Mirror to delete just one)', 2400);
   syncWorkbench();
   commit();
   renderStuffPanel();
   autosaveThing();
 }
-/** Piece colors go on the picked piece, or (All) on every piece of the thing */
-export let pieceColorAll = false;
-export function setPieceColorAll(v: typeof pieceColorAll) {
-  pieceColorAll = v;
-}
-/** `updatePiece` for colors and glow: on every piece with All picked */
-function updatePieceColor(fn: (p: Piece) => void, doCommit = true) {
+/** `updatePiece` for colors, glow and materials: on every picked piece */
+function updatePicked(fn: (p: Piece) => void, doCommit = true) {
+  const others = pickedPieces().slice(1);
   updatePiece((p) => {
-    for (const q of pieceColorAll ? workbench().pieces : [p]) fn(q);
+    fn(p);
+    for (const q of others) {
+      fn(q);
+      syncTwin(q);
+    }
   }, doCommit);
 }
-export let pieceColorScope: () => void;
 let pieceGlowFollow: () => void;
 let pieceSceneColors: () => void;
 /** Copy, download and delete buttons on a My stuff card, like the ones on My creations. */
@@ -912,7 +964,7 @@ function deleteThing(t: Thing) {
   // carry on with the last thing in the list, or a fresh one
   const next = collection().at(-1);
   world.workbench = next ? stripThumb(next) : newThing();
-  selectedPiece = '';
+  setSelectedPiece('');
   $('#thing-saved').textContent = '';
   syncWorkbench();
   commit();
@@ -973,21 +1025,20 @@ export function initWorkbench() {
     input.oninput = () => updatePiece((p) => (p[key] = parseFloat(input.value)), false);
     input.onchange = () => commit();
   }
-  pieceColorScope = scopeSeg('#piece-color-scope', () => pieceColorAll, (all) => (pieceColorAll = all));
   pieceGlowFollow = glowFollowSeg(
     '#piece-glow-follow',
     () => piece(),
     (f) =>
-      updatePieceColor((q) => {
+      updatePicked((q) => {
         if (f) q.glowFollow = f;
         else delete q.glowFollow;
       }),
   );
-  pieceSceneColors = sceneColorRow($('#piece-scene-colors'), () => piece()?.color, (c) => updatePieceColor((q) => (q.color = c)));
+  pieceSceneColors = sceneColorRow($('#piece-scene-colors'), () => piece()?.color, (c) => updatePicked((q) => (q.color = c)));
   glowSlider(
     '#piece-glow',
     (v) => {
-      updatePieceColor((p) => {
+      updatePicked((p) => {
         if (v > 0) p.glow = v;
         else delete p.glow;
       }, false);
@@ -995,7 +1046,7 @@ export function initWorkbench() {
     },
     () => commit(),
   );
-  $<HTMLInputElement>('#piece-color').oninput = (e) => updatePieceColor((p) => (p.color = (e.target as HTMLInputElement).value), false);
+  $<HTMLInputElement>('#piece-color').oninput = (e) => updatePicked((p) => (p.color = (e.target as HTMLInputElement).value), false);
   $<HTMLInputElement>('#piece-color').onchange = () => {
     commit();
     renderStuffPanel();

@@ -108,22 +108,6 @@ export function glowSlider(id: string, set: (v: number) => void, done: () => voi
   input.onchange = () => done();
 }
 
-/** A Part | Everything toggle: shows `get()`, and `set`s it when clicked. */
-export function scopeSeg(id: string, get: () => boolean, set: (all: boolean) => void): () => void {
-  const buttons = [...$(id).querySelectorAll<HTMLButtonElement>('button')];
-  const render = () => {
-    for (const b of buttons) b.classList.toggle('active', (b.dataset.scope === 'all') === get());
-  };
-  for (const b of buttons) {
-    b.onclick = () => {
-      set(b.dataset.scope === 'all');
-      render();
-    };
-  }
-  render();
-  return render;
-}
-
 export function initWidgets() {
   setSceneColors(sceneColors);
 }
