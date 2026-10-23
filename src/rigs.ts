@@ -625,6 +625,16 @@ export function addLimb(rig: RigState, sceneId: string, symmetric: boolean, segm
   const src = partSrc(f.def);
   if (segments === 1) {
     const id = uniqueId(rig, 'bone');
+    if (!mirror) {
+      // just the one: from the middle of the part, out of its front (a part along the front: up)
+      const unit = (v: V3): V3 => scale3(v, 1 / (len3(v) || 1));
+      const fwd = unit(rig.eyeDir ?? [0, 0, 1]);
+      const along = unit(sub3(ex.end, ex.start));
+      const dir: V3 = Math.abs(fwd[0] * along[0] + fwd[1] * along[1] + fwd[2] * along[2]) > 0.9 ? [0, 1, 0] : fwd;
+      const end = add3(mid, scale3(dir, Math.max(0.4, ex.width * 0.7)));
+      rig.bones.push({ id, name: 'Bone', parent, start: round3(mid), end: round3(end), side: [1, 0, 0], width: w, mirror });
+      return [{ from: src, to: id }];
+    }
     const end = add3(s1, [outward * 0.4, -0.16, 0]);
     rig.bones.push({ id, name: 'Bone', parent, start: round3(toDef(s1)), end: round3(toDef(end)), side: [0, 1, 0], width: w, mirror });
     return [{ from: src, to: mirror ? id + 'L' : id }];
@@ -1212,16 +1222,31 @@ export function copyLimb(rig: RigState, sceneId: string): LimbClip | null {
   return { bones: [top, ...bones.filter((b) => b !== top)] };
 }
 
+/** A copied limb as it would be on the creature's other side (left for right). */
+export function flipLimbClip(clip: LimbClip): LimbClip {
+  return {
+    bones: clip.bones.map((d) => ({
+      ...structuredClone(d),
+      start: mirrorV(d.start),
+      end: mirrorV(d.end),
+      side: mirrorV(d.side),
+      roll: d.roll ? -d.roll : undefined,
+      bendDir: d.bendDir ? -d.bendDir : d.bendDir,
+      bendNodes: mirrorNodes(d.bendNodes),
+    })),
+  };
+}
+
 /**
- * Paste a copied limb: it hangs off the part it hung off when that's here,
- * otherwise off scene bone `fallback`, moved by `offset`. Reports which
- * copied parts (scene ids) became which new ones.
+ * Paste a copied limb: it hangs off `parent` if given, otherwise off the part
+ * it hung off when that's here, otherwise off scene bone `fallback`; moved by
+ * `offset`. Reports which copied parts (scene ids) became which new ones.
  */
-export function pasteLimb(rig: RigState, clip: LimbClip, fallback: string, offset: V3): PartCopy[] {
+export function pasteLimb(rig: RigState, clip: LimbClip, fallback: string, offset: V3, parent?: string): PartCopy[] {
   const scene = expandRig(rig).bones;
   const top = clip.bones[0];
   const has = (id: string | undefined) => !!id && (scene.some((b) => b.id === id) || rig.bones.some((b) => b.id === id));
-  let parent = top.parent;
+  parent ??= top.parent;
   if (!has(parent)) {
     const fb = scene.find((b) => b.id === fallback) ?? scene.find((b) => !b.parent)!;
     // a pair hangs off a pair as a whole; anything else off one side

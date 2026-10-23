@@ -3,7 +3,7 @@
 // to wear; moving, turning, mirroring and saving them, and the stuff panel.
 
 import * as THREE from 'three';
-import { type PartState } from '../creature';
+import { type BoneRT, type PartState } from '../creature';
 import { unlock } from '../achievements';
 import { bounds, getMeshDetail, pointInPolygon, type Vec2 } from '../inflate';
 import {
@@ -25,12 +25,12 @@ import {
 } from '../stuff';
 import { STYLES, glowWithFlash } from '../materials';
 import { markToolsOut } from '../markingPanel';
-import { copyLimb, partIds, pasteLimb, type LimbClip } from '../rigs';
+import { copyLimb, flipLimbClip, partIds, pasteLimb, type LimbClip, type V3 } from '../rigs';
 import { $, fa, faClassic, iconLabel, pickHow, type PickHow } from './dom';
 import { camera, canvas, key, scene, view } from './stage';
 import { composer } from './post';
 import { commit, creature, creatures, idle, mode, save, selected, setIdle, state, world } from './state';
-import { raycaster, setRay, updateSkeletonVisibility } from './controls';
+import { hover, raycaster, setRay, updateSkeletonVisibility } from './controls';
 import { flyTo } from './framing';
 import { drawState, enterDraw, exitDraw, pendingPieces, symOn } from './drawing';
 import { gizmo, selectedAttachment } from './attach';
@@ -824,7 +824,9 @@ export function copyPiece(id: string) {
 
 // Copy and paste (Ctrl+C, Ctrl+V): a part and everything on it, or a stuff
 // piece (both sides when mirrored). Kept while the page is open, so it pastes
-// into another creature or thing too; each paste lands a little further down.
+// into another creature or thing too. A part lands on the surface under the
+// pointer, or else on the part it came off (or the picked one); a piece lands a
+// little further down each time.
 type Clip = { kind: 'part'; limb: LimbClip; parts: Record<string, PartState>; pastes: number } | { kind: 'piece'; pieces: Piece[]; pastes: number };
 export let clip: Clip | null = null;
 
@@ -852,8 +854,11 @@ export function copyPicked(): boolean {
   return true;
 }
 
-/** Paste what was copied, if it fits where you are (a part in Shape or Look, a piece in Stuff). */
-export function pasteClip(): boolean {
+/**
+ * Paste what was copied, if it fits where you are (a part in Shape or Look, a
+ * piece in Stuff). A part goes where `at` (the pointer, by default) is on the creature.
+ */
+export function pasteClip(at: { x: number; y: number } | null = hover.over ? hover : null): boolean {
   if (!clip || drawState) return false;
   if (clip.kind === 'piece') {
     if (mode !== 'stuff') return false;
@@ -881,11 +886,27 @@ export function pasteClip(): boolean {
   }
   if (mode === 'stuff' || placing) return false;
   const c = clip;
-  // moved down when the original is still here, so the copy shows
-  const here = c.limb.bones.some((d) => state.rig.bones.some((b) => b.id === d.id));
-  const n = here ? ++c.pastes : 0;
+  const n = ++c.pastes;
+  const spot = (at && surfaceUnderPointer(at.x, at.y)) || fallbackSpot(c.limb, n);
+  if (!spot) return false;
+  const top = c.limb.bones[0];
+  const { on } = spot;
+  let point = spot.point;
+  let limb = c.limb;
+  const side = (v: number) => (Math.abs(v) > 0.02 ? Math.sign(v) : 0);
+  if (top.mirror) {
+    // a pair is defined by its left twin (on +X): the right one lands on the spot then
+    if (point[0] < 0) point = [-point[0], point[1], point[2]];
+  } else if (side(point[0]) * side(top.start[0]) < 0) {
+    // a single part pasted on the creature's other side comes as its mirror image (pointing out, not in)
+    limb = flipLimbClip(limb);
+  }
+  const from = limb.bones[0].start;
+  const offset: V3 = [point[0] - from[0], point[1] - from[1], point[2] - from[2]];
+  // a pair hangs off a pair as a whole; anything else off the part it's on
+  const parent = top.mirror && on.def.sideSign !== 0 ? on.def.baseId : on.def.id;
   rigEdit((rig) => {
-    const copies = pasteLimb(rig, c.limb, selected, [0, -0.18 * n, 0]);
+    const copies = pasteLimb(rig, limb, selected, offset, parent);
     for (const p of copies) if (c.parts[p.from]) state.parts[p.to] = structuredClone(c.parts[p.from]);
     return copies;
   }, true);
@@ -894,6 +915,76 @@ export function pasteClip(): boolean {
   flashPart();
   hint('Pasted', 1000);
   return true;
+}
+
+/** A part's own frame (Z mirrored on a right twin, as surfaceAt gives it) to skeleton coordinates, and back. */
+function frameToSkeleton(b: BoneRT, v: THREE.Vector3): THREE.Vector3 {
+  return v.applyMatrix4(b.restWorld);
+}
+function skeletonToFrame(b: BoneRT, v: THREE.Vector3): THREE.Vector3 {
+  return v.applyMatrix4(b.restWorld.clone().invert());
+}
+
+const round3 = (v: THREE.Vector3) => v.toArray().map((x) => Math.round(x * 1000) / 1000) as V3;
+
+/**
+ * The spot on the creature under the pointer (a little inside the surface), in
+ * skeleton coordinates (where it is on the unposed creature), and the part it's on.
+ */
+function surfaceUnderPointer(x: number, y: number): { on: BoneRT; point: V3 } | null {
+  setRay(x, y);
+  const hit = creature.surfaceAt(raycaster);
+  if (!hit) return null;
+  return { on: hit.bone, point: round3(frameToSkeleton(hit.bone, hit.local.clone().addScaledVector(hit.localNormal, -0.03))) };
+}
+
+/**
+ * Where a copied limb goes with nothing under the pointer: on the surface of
+ * the part it came off (if it's here), otherwise the picked part, at its
+ * middle, on the side the limb was on; each paste after slides along the part
+ * so they don't stack (and keeps clear of the original).
+ */
+function fallbackSpot(limb: LimbClip, n: number): { on: BoneRT; point: V3 } | null {
+  const top = limb.bones[0];
+  const twin = (id: string | undefined) => (id ? (creature.bones.get(id) ?? creature.bones.get(id + 'L')) : undefined);
+  const orig = twin(top.parent);
+  const on = orig ?? creature.bones.get(selected) ?? creature.list[0];
+  if (!on) return null;
+  const start = new THREE.Vector3(...on.def.start);
+  const axis = new THREE.Vector3(...on.def.end).sub(start);
+  const len = axis.length() || 1;
+  axis.divideScalar(len);
+  const was = new THREE.Vector3(...top.start);
+  const wasAlong = was.clone().sub(start).dot(axis) / len;
+  // the original's still here: keep clear of where it sits
+  const here = !!orig && limb.bones.some((d) => state.rig.bones.some((b) => b.id === d.id));
+  const spots = [0.5, 0.3, 0.7, 0.15, 0.85].filter((f) => !here || Math.abs(f - wasAlong) > 0.12);
+  const along = spots[(n - 1) % spots.length];
+  const mid = start.clone().addScaledVector(axis, along * len);
+  // which way out of the part: toward where the limb was, on the part it came off; otherwise the
+  // part's own side of the creature (a part down the middle: the limb's side, or the front)
+  const sideOf = (v: number) => (Math.abs(v) > 0.02 ? Math.sign(v) : 0);
+  const out = orig
+    ? was.clone().sub(mid)
+    : new THREE.Vector3(sideOf(mid.x) || (top.mirror ? 1 : sideOf(top.start[0])), 0, 0);
+  if (out.lengthSq() < 1e-8) out.set(...(state.rig.eyeDir ?? [0, 0, 1]));
+  // square to the part (a part lying along that way: its front, or up)
+  for (const v of [out.clone(), new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 1, 0)]) {
+    out.copy(v).addScaledVector(axis, -v.dot(axis));
+    if (out.lengthSq() > 1e-6) break;
+  }
+  out.normalize();
+  // aim at the part from outside, on that side, to find its surface
+  on.pivot.updateMatrixWorld(true);
+  const flip = (v: THREE.Vector3) => (on.def.sideSign === -1 ? v.setZ(-v.z) : v);
+  const far = on.pivot.localToWorld(flip(skeletonToFrame(on, mid.clone().addScaledVector(out, 10))));
+  const near = on.pivot.localToWorld(flip(skeletonToFrame(on, mid.clone())));
+  raycaster.set(far, near.clone().sub(far).normalize());
+  const hit = on.mesh ? raycaster.intersectObject(on.mesh, false)[0] : undefined;
+  if (!hit?.face) return { on, point: round3(mid.addScaledVector(out, on.def.width * 0.42)) };
+  const inward = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).negate();
+  const local = flip(on.pivot.worldToLocal(hit.point.clone().addScaledVector(inward, 0.03)));
+  return { on, point: round3(frameToSkeleton(on, local)) };
 }
 
 export function deletePiece(id: string) {

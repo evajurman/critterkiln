@@ -50,6 +50,8 @@ import { animOn, pickAnimStuff } from './animateTab';
 
 export const raycaster = new THREE.Raycaster();
 export const pointer = { downX: 0, downY: 0, moved: false, touch: false, held: false };
+/** where the pointer last was over the 3D view (`over` false once it's left), to paste there */
+export const hover = { x: 0, y: 0, over: false };
 /** a finger held still on a part this long picks it along with the others */
 const HOLD_MS = 450;
 let holdTimer = 0;
@@ -850,6 +852,7 @@ export function initControls() {
     drag = { id, kind, plane, body, stretch, moving, startHit: pos, moved: false, rigBase: reshape ? JSON.stringify(state.rig) : undefined, toDef, roll, node: h.userData.node as number | undefined, gap: h.userData.gap === undefined ? undefined : { at: h.userData.gap as number, pos: h.position.clone() } };
   });
   canvas.addEventListener('pointermove', (e) => {
+    Object.assign(hover, { x: e.clientX, y: e.clientY, over: true });
     // a mouse over a handle: what it does, beside it
     if (e.pointerType === 'mouse' && !e.buttons) queueHandleTip(e.clientX, e.clientY);
     else if (!$('#handle-tip').hidden) $('#handle-tip').hidden = true;
@@ -994,7 +997,10 @@ export function initControls() {
     },
     { capture: true, passive: false },
   );
-  canvas.addEventListener('pointerleave', () => ($('#handle-tip').hidden = true));
+  canvas.addEventListener('pointerleave', () => {
+    $('#handle-tip').hidden = true;
+    hover.over = false;
+  });
   canvas.addEventListener('pointerup', (e) => {
     clearTimeout(holdTimer);
     if (eyeDrag) {

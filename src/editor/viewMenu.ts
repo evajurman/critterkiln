@@ -126,7 +126,7 @@ function viewMenu(x: number, y: number) {
   ];
   if (!id) {
     return openContextMenu(x, y, creatureLabel(world.active), [
-      clip?.kind === 'part' && !idle && { label: 'Paste', icon: ctxDuo('paste'), key: keyOf('paste'), run: () => pasteClip() },
+      clip?.kind === 'part' && !idle && { label: 'Paste', icon: ctxDuo('paste'), key: keyOf('paste'), run: () => pasteClip({ x, y }) },
       { label: 'Arrange creature', icon: ctxDuo('arrows-up-down-left-right'), sub: gizmoItems(place, placing ? gizmo.mode : null) },
       buttonItem('#drop-floor', ctxSlab('arrow-down-to-line'), 'Creature to floor'),
       SEP,
@@ -138,7 +138,7 @@ function viewMenu(x: number, y: number) {
   const root = !b.parent;
   return openContextMenu(x, y, name, [
     { label: 'Copy', icon: ctxDuo('copy'), key: keyOf('copy'), disabled: root, title: root ? 'The first part holds everything else' : undefined, run: () => copyPicked() },
-    clip?.kind === 'part' && { label: 'Paste onto this part', icon: ctxDuo('paste'), key: keyOf('paste'), run: () => pasteClip() },
+    clip?.kind === 'part' && { label: 'Paste here', icon: ctxDuo('paste'), key: keyOf('paste'), run: () => pasteClip({ x, y }) },
     { label: 'Delete', icon: ctxSlab('trash'), key: keyOf('delete'), danger: true, disabled: root, title: root ? 'The first part holds everything else' : undefined, run: removePart },
     SEP,
     { label: 'Draw shape', icon: ctxSlab('pencil'), key: keyOf('draw'), run: () => enterDraw({ kind: 'bone', boneId: id }) },
