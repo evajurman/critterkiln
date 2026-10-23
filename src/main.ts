@@ -34,7 +34,7 @@ import { initTrophyPanel } from './editor/trophyPanel';
 import { initLibraryPanel } from './editor/libraryPanel';
 import { initInstall } from './editor/install';
 import { initWidgets } from './editor/widgets';
-import { initPartPanel } from './editor/partPanel';
+import { initPartPanel, selectAllParts } from './editor/partPanel';
 import { initEyesPanel } from './editor/eyesPanel';
 import { renderUI, setMode } from './editor/panels';
 import { guidedOn, guidedTab } from './layout';
@@ -97,6 +97,8 @@ world.creatures.forEach((s, i) => (creatures[i] = makeCreature(s)));
 setBooted(true);
 
 activate(world.active);
+// the very first time: its only creature picked
+if (!loadedWorld) selectAllParts();
 // My creations: the open scene's details are read back; a scene from before
 // the library existed joins it
 if (opened.id) {

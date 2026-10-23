@@ -42,6 +42,7 @@ import { togglePopover } from './popovers';
 import { applyLook, currentLook, forFile, keepInCollection, type SceneLook } from './files';
 import { renderLibrary } from './libraryPanel';
 import { renderUI, setMode } from './panels';
+import { selectAllParts } from './partPanel';
 import { hint } from './hints';
 
 /** What the library keeps for each scene. */
@@ -217,6 +218,8 @@ export function newCreation(keepOld = true) {
   const kept = opened.keep;
   replaceWorld(freshWorld(), []);
   beginCreation(null, false);
+  // with its only creature picked
+  selectAllParts();
   commit();
   unlock('new');
   listCreations().then((l) => reach('prolific', l.length), () => {});

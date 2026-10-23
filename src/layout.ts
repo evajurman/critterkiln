@@ -373,11 +373,11 @@ export function tabNamesMenu(): MenuItem[] {
 }
 
 const GUIDED_KEY = 'creature-creator/guided';
-/** Guided: the rail shows the steps; and the step last open there, and the mode last open in Free */
-let guided = { on: false, step: STEPS[0].id, free: 'shape' as Tab };
+/** Guided: the rail shows the steps; and the step last open there, and the mode last open in Free. Guided the first time. */
+let guided = { on: true, step: STEPS[0].id, free: 'shape' as Tab };
 try {
   const g = JSON.parse(localStorage.getItem(GUIDED_KEY) ?? '{}');
-  guided = { on: g.on === true, step: stepOf(g.step) ? g.step : STEPS[0].id, free: typeof g.free === 'string' && !isStep(g.free) ? g.free : 'shape' };
+  guided = { on: g.on !== false, step: stepOf(g.step) ? g.step : STEPS[0].id, free: typeof g.free === 'string' && !isStep(g.free) ? g.free : 'shape' };
 } catch {}
 function saveGuided() {
   try {
