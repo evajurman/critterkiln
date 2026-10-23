@@ -12,6 +12,7 @@ import { type Mode, redo, undo } from './state';
 import { controls, updateSkeletonVisibility } from './controls';
 import { newCreation } from './creations';
 import { setMode, tintMode } from './panels';
+import { renderScope } from './scope';
 
 /** Drops the top bar's button labels whenever they'd overflow it (narrow window or zoomed in). */
 export function fitTopbar() {
@@ -39,6 +40,8 @@ export function initTopbar() {
     // a tab made, renamed or deleted: maybe the open tab's color changed
     onTabs: tintMode,
     switchTo: (t) => setMode(t),
+    // what each section changes (part or everything): its title's chip, and the toggle up top
+    onSections: renderScope,
     putOn: () => {
       setMode(STUFF_STEP);
       $('#rig-attach').click();

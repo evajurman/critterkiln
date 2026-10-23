@@ -18,7 +18,7 @@ import { drawState, spacePan } from './drawing';
 import { bench, piece, refreshPieceGizmo, selectedPiece, syncTwin, syncWorkbench, workbench } from './workbench';
 import { deselectAttachment, gizmo, selectedAttachment } from './attach';
 import { stopPlacing } from './arrange';
-import { allPicked, partGlowFollow } from './partPanel';
+import { partGlowFollow, wholeFor } from './partPanel';
 import { hint, hintOnce } from './hints';
 import { invalidate } from './loop';
 import { rayAt } from './animateTab';
@@ -31,8 +31,8 @@ export function selPartId(): string {
 let partMarks: MarkingPanel;
 
 export function renderMarkings() {
-  // with every part picked, new markings go over the whole creature; otherwise on the picked part
-  partMarks.all = allPicked();
+  // on Everything (or with every part picked), new markings go over the whole creature; otherwise on the picked part
+  partMarks.all = wholeFor('markings');
   partMarks.render();
 }
 

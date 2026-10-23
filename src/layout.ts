@@ -333,6 +333,8 @@ let onTabs = () => {};
 let switchTo = (_t: Tab) => {};
 /** back to Dress up from Stuff, with the list of things to put on open */
 let putOn = () => {};
+/** after the sections are drawn or one is opened: the editor puts its own bits on their titles */
+let onSections = () => {};
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string) => document.querySelector<T>(s)!;
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', html = '') => {
@@ -414,11 +416,12 @@ export function setLayoutIdle(v: boolean) {
   sync();
 }
 
-export function initLayout(opts: { onGizmos: () => void; onTabs: () => void; switchTo: (t: Tab) => void; putOn: () => void }) {
+export function initLayout(opts: { onGizmos: () => void; onTabs: () => void; switchTo: (t: Tab) => void; putOn: () => void; onSections: () => void }) {
   onGizmos = opts.onGizmos;
   onTabs = opts.onTabs;
   switchTo = opts.switchTo;
   putOn = opts.putOn;
+  onSections = opts.onSections;
   renderTabs();
   for (const w of document.querySelectorAll<HTMLElement>('.ck-tool')) {
     const id = w.dataset.tool!;
@@ -710,6 +713,7 @@ function syncSecTabs() {
   // one section: no tabs, just it
   row.hidden = live.length < 2;
   for (const sec of document.querySelectorAll<HTMLElement>('#ck-side > .ck-sec')) sec.classList.toggle('sec-on', sec.dataset.sec === on);
+  onSections();
 }
 
 function renderBanner() {

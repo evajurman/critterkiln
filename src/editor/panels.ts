@@ -25,6 +25,7 @@ import { applyDof } from './dof';
 import { renderMerge } from './blendPanel';
 import { setPickPill } from './sheet';
 import { ANIM_TAB, renderAnim } from './animateTab';
+import { renderScope } from './scope';
 
 export function renderUI() {
   if (!creature.bones.has(selected)) setSelected(creature.list[0].def.id);
@@ -44,6 +45,7 @@ export function renderUI() {
   renderCreatureBar();
   renderInspectorHead();
   syncIdle();
+  renderScope();
 }
 
 export function setMode(m: Mode) {

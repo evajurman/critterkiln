@@ -20,6 +20,7 @@ import { renderUI } from './panels';
 import { selPartId } from './markingsUi';
 import { switchRig } from './rigEdit';
 import { hintOnce } from './hints';
+import { scopeOf, type ScopeKind } from './scope';
 
 export function partLabel(src: string): string {
   const b = creature.bones.get(src)!;
@@ -48,6 +49,14 @@ function pickedParts(): PartState[] {
 /** Every part of the creature is picked: colors and materials go on the whole creature, markings over all of it. */
 export function allPicked(): boolean {
   return !idle && pickedSrcs().length >= Object.keys(state.parts).length;
+}
+/** A section's changes go on the whole creature: it's set to Everything, or every part is picked. */
+export function wholeFor(k: ScopeKind): boolean {
+  return !idle && (scopeOf(k) === 'all' || allPicked());
+}
+/** The parts a section's changes go on: every one, or the picked ones. */
+function partsFor(k: ScopeKind): PartState[] {
+  return wholeFor(k) ? Object.values(state.parts) : pickedParts();
 }
 
 /**
@@ -180,7 +189,8 @@ export let partGlowFollow: () => void;
 let partSceneColors: () => void;
 
 export function renderStyles() {
-  const current = allPicked() ? state.style : (selPart().style ?? state.style);
+  const whole = wholeFor('material');
+  const current = whole ? state.style : (selPart().style ?? state.style);
   const el = $('#styles');
   el.innerHTML = '';
   for (const s of STYLES) {
@@ -191,6 +201,7 @@ export function renderStyles() {
     btn.onclick = () => setStyle(s.id);
     el.append(btn);
   }
+  renderOwnStyles(whole);
   renderStyleParams(current);
 }
 
@@ -330,9 +341,36 @@ function renderStyleParams(style: StyleId, el: HTMLElement = $('#style-params'),
   }
 }
 
+/** On Everything: the parts with a material of their own (set on Part), each with a × back to the creature's. */
+function renderOwnStyles(whole: boolean) {
+  const el = $('#style-own');
+  const own = whole ? Object.entries(state.parts).filter(([, p]) => p.style && p.style !== state.style) : [];
+  el.hidden = !own.length;
+  el.replaceChildren();
+  if (!own.length) return;
+  el.append(Object.assign(document.createElement('span'), { className: 'muted small', textContent: 'Keep their own:' }));
+  for (const [src, p] of own) {
+    const b = document.createElement('button');
+    b.className = 'own-chip';
+    b.innerHTML = `<span class="ball ${p.style}"></span>`;
+    b.append(`${partLabel(src)} · ${STYLES.find((s) => s.id === p.style)?.name ?? p.style} `);
+    b.insertAdjacentHTML('beforeend', '<i class="fa-duotone fa-regular fa-xmark" aria-hidden="true"></i>');
+    b.title = `Make ${partLabel(src)} ${STYLES.find((s) => s.id === state.style)?.name ?? state.style}, like the rest`;
+    b.onclick = () => {
+      delete p.style;
+      creature.sync();
+      creature.markMergeDirty();
+      commit();
+      renderStyles();
+      renderEyes();
+    };
+    el.append(b);
+  }
+}
+
 function setColor(c: string, doCommit: boolean) {
-  for (const p of pickedParts()) p.color = c;
-  if (allPicked() && doCommit && Object.keys(state.parts).length > 1) unlock('paint-all');
+  for (const p of partsFor('color')) p.color = c;
+  if (wholeFor('color') && doCommit && Object.keys(state.parts).length > 1) unlock('paint-all');
   creature.sync();
   creature.markMergeDirty();
   if (doCommit) {
@@ -342,13 +380,14 @@ function setColor(c: string, doCommit: boolean) {
   renderCreatureBar();
 }
 
-/** A material on the picked parts; with every part picked, it's the whole creature's (parts added later too). */
+/** A material on the picked parts; on Everything (or with every part picked), it's the whole creature's (parts added later too), but not the parts with their own. */
 function setStyle(id: StyleId) {
-  if (!allPicked()) {
+  if (!wholeFor('material')) {
     for (const p of pickedParts()) p.style = id;
   } else {
+    // parts with their own material keep it (listed under the materials, each with a × back to this)
     state.style = id;
-    for (const p of Object.values(state.parts)) delete p.style;
+    for (const p of Object.values(state.parts)) if (p.style === id) delete p.style;
   }
   collect('materials', id);
   creature.sync();
@@ -380,7 +419,7 @@ export function initPartPanel() {
     '#glow-follow',
     () => (creature.bones.has(selected) ? { ...selPart(), markings: markingsOf(state, selPartId()) } : undefined),
     (f) => {
-      for (const p of pickedParts()) {
+      for (const p of partsFor('color')) {
         if (f) p.glowFollow = f;
         else delete p.glowFollow;
       }
@@ -393,7 +432,7 @@ export function initPartPanel() {
   glowSlider(
     '#glow',
     (v) => {
-      for (const p of pickedParts()) {
+      for (const p of partsFor('color')) {
         if (v > 0) p.glow = v;
         else delete p.glow;
       }

@@ -99,6 +99,8 @@
             <span class="inspector-path muted" id="inspector-path"></span>
             <span class="inspector-name" id="inspector-name"></span>
           </div>
+          <!-- what the sections showing change: the picked part, or everything (src/editor/scope.ts) -->
+          <div class="seg scope-toggle" id="scope-toggle" hidden></div>
           <div id="sec-tabs" class="sec-tabs" role="tablist" aria-label="Sections"></div>
           <button id="ck-menu-btn" class="piece-icon ck-menu-btn" title="Sections: bring back hidden ones, gizmos, and arranging this tab" aria-label="Sections"><i class="fa-duotone fa-regular fa-ellipsis" aria-hidden="true"></i></button>
         </div>
@@ -205,7 +207,7 @@
               <span>Blend colors</span><input id="color-blend" type="range" data-default="0.12" min="0" max="0.4" step="0.005" />
               <span class="ends"><em>off</em><em>soft fade</em></span></label>
           </div>
-          <div class="ck-tool" data-tool="materials"><div id="styles" class="styles"></div></div>
+          <div class="ck-tool" data-tool="materials"><div id="styles" class="styles"></div><div id="style-own" class="style-own" hidden></div></div>
           <div class="ck-tool" data-tool="material-params"><div id="style-params" class="style-params"></div></div>
           <div class="ck-tool" data-tool="markings"><div id="markings" class="markings"></div></div>
           <div class="ck-tool" data-tool="marking-params"><div id="marking-params" class="style-params"></div></div>
@@ -404,6 +406,7 @@
           </div>
 
           <div class="card" id="piece-card" hidden>
+            <div class="seg scope-toggle" id="piece-scope"></div>
             <div class="seg" id="piece-kind">
               <button data-kind="flat"><i class="fa-slab-duo fa-regular fa-rectangle-wide" aria-hidden="true"></i> Flat cut-out</button>
               <button data-kind="puffy"><i class="fa-slab-duo fa-regular fa-cloud" aria-hidden="true"></i> Puffy</button>
@@ -419,6 +422,7 @@
             <label class="slider"><span>Opacity</span><input id="piece-opacity" type="range" data-default="1" min="0.05" max="1" step="0.01" /></label>
             <label class="slider" title="Fuse into the pieces this one touches with a smooth fillet. 0 keeps them separate."><span>Blend shape</span><input id="piece-blend-shape" type="range" data-default="0" min="0" max="1" step="0.01" /></label>
             <label class="slider" title="Fade into the colors of the pieces this one touches. 0 keeps colors apart."><span>Blend colors</span><input id="piece-blend-color" type="range" data-default="0" min="0" max="1" step="0.01" /></label>
+            <div class="sub-title scope-title" data-scope="color">Color</div>
             <div class="paint-row">
               <label class="color-pick"><input id="piece-color" type="color" /> Custom</label>
             </div>
@@ -430,9 +434,10 @@
               <button data-follow="even" title="Glow evenly all over">Even</button>
               <button data-follow="material" title="Glow from the material: the bright parts of its texture (markings stay dim)">Material</button>
             </div>
+            <div class="sub-title scope-title" data-scope="material" id="piece-material-title">Material</div>
             <div class="mini-styles" id="piece-styles"></div>
             <div class="thing-material" id="piece-style-params"></div>
-            <div class="sub-title piece-marks-title">Markings</div>
+            <div class="sub-title piece-marks-title scope-title" data-scope="markings">Markings</div>
             <div id="piece-markings" class="markings"></div>
             <div id="piece-marking-params" class="style-params" hidden></div>
           </div>

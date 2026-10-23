@@ -214,6 +214,27 @@ button, input, select { font: inherit; color: inherit; }
 .inspector-path { font-size: 11px; font-weight: var(--w-bold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .inspector-path:empty { display: none; }
 .inspector-name { font-size: 18px; font-weight: var(--w-heavy); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* what the sections change: the picked part, or everything (src/editor/scope.ts); neither lit when they differ */
+.scope-toggle { flex: none; margin: 0; }
+.scope-toggle[hidden] { display: none; }
+.scope-toggle button { flex: none; padding: 5px 10px; white-space: nowrap; }
+.scope-toggle.mixed { box-shadow: inset 0 0 0 1px var(--line); }
+#piece-scope { display: flex; margin-bottom: 10px; }
+#piece-scope button { flex: 1; }
+/* a section title's chip: what it changes, a click flips it */
+.ck-title:has(.scope-chip), .scope-title { display: flex; align-items: center; gap: 6px; }
+.scope-title { margin-top: 12px; }
+.scope-chip {
+  margin-left: auto; border: 0; border-radius: 999px; padding: 2px 9px; font: inherit; font-size: 11px; font-weight: var(--w-bold);
+  letter-spacing: 0; text-transform: none; background: var(--bg); color: var(--muted); cursor: var(--cursor-click);
+}
+.scope-chip + .scope-chip { margin-left: 0; }
+.scope-chip.all { background: var(--ink); color: var(--on-ink); }
+/* on Everything: parts that keep a material of their own */
+.style-own { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 8px; }
+.style-own[hidden] { display: none; }
+.own-chip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line); border-radius: 999px; background: var(--card); color: var(--ink); padding: 2px 8px 2px 3px; font-size: 12px; cursor: var(--cursor-click); }
+.own-chip .ball { width: 16px; height: 16px; }
 
 /* ---------- top bar ---------- */
 .topbar {
@@ -1153,7 +1174,7 @@ button.piece-icon { padding: 0; border: 0; background: transparent; }
   #ck-side > .ck-sec > .ck-title { display: none; }
   /* one section, no tabs: its title instead; and no head left at all if there's nothing in it */
   .panel:has(.sec-tabs[hidden]) #ck-side > .ck-sec > .ck-title { display: block; }
-  .inspector-head:has(.sec-tabs[hidden]):has(.ck-menu-btn[hidden]) { display: none; }
+  .inspector-head:has(.sec-tabs[hidden]):has(.ck-menu-btn[hidden]):has(.scope-toggle[hidden]) { display: none; }
 
   /* drag (or tap) to give the panel more or less room */
   .sheet-grip {

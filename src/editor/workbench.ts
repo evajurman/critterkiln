@@ -46,6 +46,7 @@ import { rigEdit } from './rigEdit';
 import { hint, hintOnce } from './hints';
 import { withCleanScene } from './snapshot';
 import { invalidate } from './loop';
+import { oddKinds, renderScopeToggle, scopeChip, scopeOf, type ScopeKind } from './scope';
 
 // The board sits at chest height; its XY plane is the drawing plane and its
 // origin (the crosshair) is where the thing will attach to a body part.
@@ -75,6 +76,10 @@ export function pickedPieces(): Piece[] {
 /** Every piece of the thing is picked: new markings go over the whole thing. */
 export function allPiecesPicked(): boolean {
   return pickedPieces().length >= workbench().pieces.length;
+}
+/** A section's changes go on every piece: it's set to Everything, or every piece is picked. */
+function wholeThingFor(k: ScopeKind): boolean {
+  return scopeOf(k, 'piece') === 'all' || allPiecesPicked();
 }
 /** Picks a piece: just it; or (`toggle`) one more, as the main one, or one less; or (`range`) every piece from the main one to it in the list, the main one staying main. */
 export function choosePiece(id: string, how: PickHow = 'one') {
@@ -716,13 +721,14 @@ export function renderStuffPanel() {
       b.append(s.name);
       b.classList.toggle('active', s.id === p.style);
       b.title = s.desc;
-      b.onclick = () => updatePicked((q) => (q.style = s.id));
+      b.onclick = () => updatePicked((q) => (q.style = s.id), true, 'material');
       st.append(b);
     }
     renderThingMaterial(wb, [p.style], $('#piece-style-params'), state.style);
   }
-  // with every piece picked, new markings go over the whole thing
-  pieceMarks.all = allPiecesPicked();
+  // on Everything (or with every piece picked), new markings go over the whole thing
+  pieceMarks.all = wholeThingFor('markings');
+  renderPieceScope(!!p && !wb.inherit);
   pieceMarks.render();
   renderCollection();
   refreshPieceGizmo();
@@ -903,9 +909,23 @@ export function deletePiece(id: string) {
   renderStuffPanel();
   autosaveThing();
 }
-/** `updatePiece` for colors, glow and materials: on every picked piece */
-function updatePicked(fn: (p: Piece) => void, doCommit = true) {
-  const others = pickedPieces().slice(1);
+/** The piece card's Piece|Everything toggle, and chips on its Color, Material and Markings titles where they differ. */
+function renderPieceScope(material: boolean) {
+  const kinds: ScopeKind[] = material ? ['color', 'material', 'markings'] : ['color', 'markings'];
+  renderScopeToggle($('#piece-scope'), kinds, 'piece');
+  $('#piece-material-title').hidden = !material;
+  // a chip only on a group that differs from the rest (right-click a group to set just it)
+  const odd = oddKinds(kinds, 'piece');
+  for (const t of document.querySelectorAll<HTMLElement>('#piece-card .scope-title')) {
+    t.querySelector('.scope-chip')?.remove();
+    const k = t.dataset.scope as ScopeKind;
+    if (odd.has(k)) t.append(scopeChip(k, 'piece'));
+  }
+}
+/** `updatePiece` for colors, glow and materials (`k`): on every picked piece, or on Everything every piece */
+function updatePicked(fn: (p: Piece) => void, doCommit = true, k: ScopeKind = 'color') {
+  const main = piece();
+  const others = wholeThingFor(k) ? workbench().pieces.filter((q) => q !== main) : pickedPieces().slice(1);
   updatePiece((p) => {
     fn(p);
     for (const q of others) {

@@ -37,6 +37,7 @@ import { renderUI } from './panels';
 import { pickingParent, removePart, rigLock, setMirror } from './rigEdit';
 import { renderSettings, saveSettings, settings, syncSliderNumbers } from './settings';
 import { pickingFocus } from './dof';
+import { scopeMenu } from './scope';
 
 /** A button's own action as a menu item: greyed when the button is, left out when it's hidden. */
 function buttonItem(id: string, icon: string, label?: string): MenuItem | null {
@@ -184,11 +185,12 @@ export function initViewMenu() {
     if (t.closest('textarea, input:not([type=range]):not([type=checkbox]):not([type=radio])')) return;
     const range = (t as HTMLInputElement).type === 'range' ? (t as HTMLInputElement) : t.closest('.slider, .bar-slider')?.querySelector<HTMLInputElement>('input[type=range]');
     const arrange = arrangeMenu(t);
-    if (!range && !arrange) return;
+    const scope = range ? [] : scopeMenu(t);
+    if (!range && !arrange && !scope.length) return;
     e.preventDefault();
     const def = range?.dataset.default;
     const label = range?.closest('.slider')?.querySelector(':scope > span')?.textContent?.trim();
-    const title = label ?? t.closest<HTMLElement>('.ck-sec')?.querySelector('.ck-title')?.textContent?.trim() ?? 'Tools';
+    const title = label ?? t.closest<HTMLElement>('.ck-sec')?.querySelector('.ck-title')?.firstChild?.textContent?.trim() ?? 'Tools';
     openContextMenu(e.clientX, e.clientY, title, [
       range && def !== undefined && {
         label: 'Reset to default',
@@ -210,6 +212,7 @@ export function initViewMenu() {
           renderSettings();
         },
       },
+      ...scope,
       SEP,
       arrange,
     ]);
