@@ -10,7 +10,8 @@ import { type Piece } from '../stuff';
 import { keyLabel } from '../shortcuts';
 import { $ } from './dom';
 import { canvas, octx, overlay, view, viewport } from './stage';
-import { commit, creature, creatures, mode, selected, state } from './state';
+import { buildCreature, commit, creature, creatures, mode, selected, state } from './state';
+import { refitBone } from '../rigs';
 import { controls, raycaster, setRay, touchScreen, updateSkeletonVisibility } from './controls';
 import { focusOnBone } from './framing';
 import { addPieces, board, focusOnBoard, focusOnPlane, framePiece, holesInside, piece, refreshPieceGizmo, replacePiece, syncWorkbench } from './workbench';
@@ -604,6 +605,36 @@ function drawnShapes(ds: DrawState): PartShape[] {
   return ds.side ? [...there, ...here] : [...here, ...there];
 }
 
+/**
+ * After drawing: move the part's base and tip to the ends of what was drawn,
+ * so it bends along all of it and turns about where it begins. Each end sits
+ * in from the drawing's as far as a default part's rounded end does, so a
+ * part drawn about its bone stays as it is. A posed part keeps its base (it
+ * would jump), and only its tip moves. Says whether anything moved.
+ */
+function fitBoneToDrawing(b: BoneRT, shapes: PartShape[]): boolean {
+  const pts = shapes.flatMap((s) => s.outline);
+  if (!pts.length) return false;
+  const ys = pts.map((p) => p[1]);
+  const lo = Math.min(...ys), hi = Math.max(...ys);
+  const span = Math.max(...shapes.map((s) => Math.max(...s.outline.map((p) => p[0])) - Math.min(...s.outline.map((p) => p[0]))));
+  const cap = Math.min(0.28 * span, (hi - lo) / 4);
+  const posed = creature.list.some((o) => o.def.baseId === b.def.baseId && state.pose?.[o.def.id]);
+  const y0 = posed ? 0 : lo + cap;
+  const y1 = Math.max(hi - cap, y0 + 0.05);
+  const tol = Math.max(0.03, 0.1 * b.length);
+  if (Math.abs(y0) < tol && Math.abs(y1 - b.length) < tol) return false;
+  refitBone(state.rig, b.def.id, y0, y1);
+  // the drawing (and eyes put on it) stay put while the bone moves under them
+  const r4 = (v: number) => Math.round(v * 1e4) / 1e4;
+  setPartShapes(state.parts[b.src], shapes.map((s) => ({ ...s, outline: s.outline.map(([x, y]) => [x, r4(y - y0)] as Vec2) })));
+  for (const pair of state.eyes.pairs) {
+    if (pair.at && creature.eyeBones(pair).some((e) => e.def.baseId === b.def.baseId)) pair.at = [pair.at[0], r4(pair.at[1] - y0), pair.at[2]];
+  }
+  if (!state.rig.base.startsWith('custom')) state.rig.base = 'custom';
+  return true;
+}
+
 /** Show the pending shape: inflated live on the part being drawn, or on the workbench. */
 function previewPending() {
   const ds = drawState;
@@ -647,9 +678,11 @@ export function finishDraw() {
     return;
   }
   const b = creature.bones.get(ds.target.boneId)!;
-  setPartShapes(state.parts[b.src], drawnShapes(ds));
+  const shapes = drawnShapes(ds);
+  setPartShapes(state.parts[b.src], shapes);
   exitDraw(true);
-  creature.sync();
+  if (fitBoneToDrawing(b, shapes)) buildCreature();
+  else creature.sync();
   commit();
   renderCreatureBar();
   flashPart();

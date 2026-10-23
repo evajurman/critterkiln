@@ -525,6 +525,27 @@ export function scaleBone(rig: RigState, sceneId: string, kLen: number, kWidth: 
 }
 
 /**
+ * Re-seat a bone along its own line, in the rest pose: its base moves to
+ * `y0` and its tip to `y1` (heights along it now, in its own frame). Limbs
+ * hanging off it stay where they are; bend points keep their place on it.
+ */
+export function refitBone(rig: RigState, sceneId: string, y0: number, y1: number) {
+  const f = findDef(rig, sceneId);
+  if (!f) return;
+  const d = f.def;
+  const axis = sub3(d.end, d.start);
+  const len = len3(axis);
+  if (len < 1e-6 || y1 - y0 < 1e-3) return;
+  const u = scale3(axis, 1 / len);
+  d.start = round3(add3(d.start, scale3(u, y0)));
+  d.end = round3(add3(d.start, scale3(u, y1 - y0)));
+  // (fractions of the old length -> of the new)
+  const k = len / (y1 - y0);
+  const r = (v: number) => Math.round(v * 1000) / 1000;
+  if (d.bendNodes) d.bendNodes = d.bendNodes.map(([x, y, z]) => [r(x * k), r((y * len - y0) / (y1 - y0)), r(z * k)] as V3);
+}
+
+/**
  * Carry everything hanging off a bone round with it when its roll changes by
  * `delta` (as stored on its definition, i.e. for the left twin). The bone's own
  * roll is left to the caller.
