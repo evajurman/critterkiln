@@ -20,7 +20,20 @@ import { resize } from './loop';
 
 const SETTINGS_KEY = 'creature-creator/settings';
 type Theme = 'light' | 'dark' | 'color';
-export let settings: { numbers: boolean; plainText: boolean; theme: Theme; seamless: SeamlessMode; seamlessLowPoly: boolean; quality: Quality };
+/** The three sidebars: the steps (or modes), what's in the scene to pick, and the picked thing's options */
+type SidebarId = 'rail' | 'outliner' | 'panel';
+type Sidebar = { id: SidebarId; side: 'left' | 'right' };
+const SIDEBARS: Record<SidebarId, { name: string; title: string; width: string }> = {
+  rail: { name: 'Steps', title: "Guided's steps, or the modes in Free", width: 'var(--rail-w)' },
+  outliner: { name: 'Selection', title: 'The creatures in the scene and their parts, to pick from', width: 'var(--out-w)' },
+  panel: { name: 'Options', title: "The picked part's options", width: 'var(--panel-w)' },
+};
+const DEFAULT_SIDEBARS: Sidebar[] = [
+  { id: 'rail', side: 'left' },
+  { id: 'outliner', side: 'left' },
+  { id: 'panel', side: 'right' },
+];
+export let settings: { numbers: boolean; plainText: boolean; theme: Theme; seamless: SeamlessMode; seamlessLowPoly: boolean; quality: Quality; sidebars: Sidebar[] };
 
 export function saveSettings() {
   try {
@@ -45,7 +58,117 @@ export function renderSettings() {
   $<HTMLInputElement>('#set-seamless-lp').disabled = settings.seamless === 'off';
   $('#set-seamless-lp-row').style.opacity = settings.seamless === 'off' ? '.45' : '1';
   document.querySelectorAll<HTMLButtonElement>('#set-quality button').forEach((b) => b.classList.toggle('active', b.dataset.quality === quality));
+  applySidebars();
+  renderSidebarRows();
   if (settings.numbers) syncSliderNumbers();
+}
+
+/** Each sidebar on its side, in their order from left to right (a phone has its own layout: style.css). */
+function applySidebars() {
+  const list = settings.sidebars;
+  const left = list.filter((b) => b.side === 'left');
+  const right = list.filter((b) => b.side === 'right');
+  const cols = [...left.map((b) => SIDEBARS[b.id].width), 'minmax(0, 1fr)', ...right.map((b) => SIDEBARS[b.id].width)];
+  const areas = [...left.map((b) => b.id), 'view', ...right.map((b) => b.id)];
+  const app = $('#app');
+  app.style.setProperty('--cols', cols.join(' '));
+  app.style.setProperty('--areas', `'${areas.join(' ')}'`);
+  for (const b of list) $(`.${b.id}`).dataset.side = b.side;
+}
+
+/**
+ * Settings: a row per sidebar around one for the view, in their order across the
+ * screen. Drag a row by its grip (or focus it and press the up and down arrows):
+ * above the view it sits left of it, below the view right of it.
+ */
+function renderSidebarRows(focus?: SidebarId) {
+  const box = $('#set-sidebars');
+  const list = settings.sidebars;
+  const order: (SidebarId | 'view')[] = [...list.filter((b) => b.side === 'left').map((b) => b.id), 'view', ...list.filter((b) => b.side === 'right').map((b) => b.id)];
+  box.replaceChildren(...order.map(sidebarRow));
+  sideLabels();
+  if (focus) box.querySelector<HTMLElement>(`[data-id="${focus}"]`)?.focus();
+}
+
+const SIDEBAR_ICONS: Record<SidebarId | 'view', string> = { rail: 'list-ol', outliner: 'list-tree', panel: 'sliders', view: 'cube' };
+
+function sidebarRow(id: SidebarId | 'view'): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'sb-row' + (id === 'view' ? ' sb-view' : '');
+  row.dataset.id = id;
+  const icon = `<i class="fa-duotone fa-regular fa-${SIDEBAR_ICONS[id]} sb-icon" aria-hidden="true"></i>`;
+  if (id === 'view') {
+    row.innerHTML = `${icon}<span class="sb-name">The view</span>`;
+    return row;
+  }
+  row.tabIndex = 0;
+  row.title = `${SIDEBARS[id].title}. Drag it to move it`;
+  row.innerHTML = `<i class="fa-duotone fa-regular fa-grip-dots-vertical sb-grip" aria-hidden="true"></i>${icon}<span class="sb-name">${SIDEBARS[id].name}</span><span class="sb-side"></span>`;
+  row.onpointerdown = (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    row.setPointerCapture(e.pointerId);
+    row.classList.add('dragging');
+    let grabY = e.clientY - row.offsetTop;
+    row.onpointermove = (m) => {
+      const y = m.clientY - grabY;
+      row.style.transform = `translateY(${y - row.offsetTop}px)`;
+      // swap past a neighbour once the row's middle crosses that neighbour's
+      // (the neighbour moves: taking the row out of the page would drop the pointer)
+      const mid = y + row.offsetHeight / 2;
+      const prev = row.previousElementSibling as HTMLElement | null;
+      const next = row.nextElementSibling as HTMLElement | null;
+      if (prev && mid < prev.offsetTop + prev.offsetHeight / 2) row.after(prev);
+      else if (next && mid > next.offsetTop + next.offsetHeight / 2) row.before(next);
+      else return;
+      row.style.transform = `translateY(${y - row.offsetTop}px)`;
+      sideLabels();
+    };
+    row.onpointerup = row.onpointercancel = () => {
+      row.onpointermove = row.onpointerup = row.onpointercancel = null;
+      row.classList.remove('dragging');
+      row.style.transform = '';
+      setSidebarOrder();
+    };
+  };
+  row.onkeydown = (e) => {
+    const to = e.key === 'ArrowUp' ? row.previousElementSibling : e.key === 'ArrowDown' ? row.nextElementSibling : null;
+    if (!to) return;
+    e.preventDefault();
+    if (e.key === 'ArrowUp') to.before(row);
+    else to.after(row);
+    setSidebarOrder(id);
+  };
+  return row;
+}
+
+/** Each row's side, from where it is now (and while it's dragged) */
+function sideLabels() {
+  let side = 'Left';
+  for (const r of $('#set-sidebars').children as HTMLCollectionOf<HTMLElement>) {
+    if (r.dataset.id === 'view') side = 'Right';
+    else r.querySelector('.sb-side')!.textContent = side;
+  }
+}
+
+/** The rows' order back into the settings, and the sidebars moved to match */
+function setSidebarOrder(focus?: SidebarId) {
+  const ids = [...$('#set-sidebars').children].map((r) => (r as HTMLElement).dataset.id as SidebarId | 'view');
+  const v = ids.indexOf('view');
+  settings.sidebars = ids.flatMap((id, i) => (id === 'view' ? [] : [{ id, side: i < v ? ('left' as const) : ('right' as const) }]));
+  saveSettings();
+  applySidebars();
+  renderSidebarRows(focus);
+  resize();
+}
+
+/** Saved sidebars, if they're still each of the three exactly once */
+function readSidebars(v: unknown): Sidebar[] {
+  const ok =
+    Array.isArray(v) &&
+    v.length === DEFAULT_SIDEBARS.length &&
+    DEFAULT_SIDEBARS.every((d) => v.filter((b) => b?.id === d.id && (b.side === 'left' || b.side === 'right')).length === 1);
+  return structuredClone(ok ? (v as Sidebar[]) : DEFAULT_SIDEBARS);
 }
 
 /**
@@ -172,13 +295,14 @@ function setQuality(q: Quality) {
 
 export function initSettings() {
   settings = (() => {
-    const defaults = { numbers: false, plainText: false, theme: 'light' as Theme, seamless: 'on' as SeamlessMode, seamlessLowPoly: false, quality };
+    const defaults = { numbers: false, plainText: false, theme: 'light' as Theme, seamless: 'on' as SeamlessMode, seamlessLowPoly: false, quality, sidebars: DEFAULT_SIDEBARS };
     try {
       return { ...defaults, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') };
     } catch {
       return defaults;
     }
   })();
+  settings.sidebars = readSidebars(settings.sidebars);
   setSeamlessMode(settings.seamless);
   setSeamlessLowPoly(settings.seamlessLowPoly);
   $('#settings-btn').onclick = () => {

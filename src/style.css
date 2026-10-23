@@ -107,25 +107,24 @@ body {
 }
 button, input, select { font: inherit; color: inherit; }
 
-/* Studio: the modes down the left, the scene's outliner, the view, and the picked part's inspector on the right */
+/* Studio: the modes down the left, the scene's outliner, the view, and the picked part's inspector on the right
+   (or wherever Settings puts them: --cols and --areas, from src/editor/settings.ts) */
 #app {
+  --rail-w: 76px; --out-w: 240px; --panel-w: 312px;
   display: grid;
   /* minmax(0, …): never let a wide row (the top bar) push the page past the screen */
-  grid-template-columns: 76px 240px minmax(0, 1fr) 312px;
+  grid-template-columns: var(--cols, var(--rail-w) var(--out-w) minmax(0, 1fr) var(--panel-w));
   grid-template-rows: 52px minmax(0, 1fr);
-  grid-template-areas: 'top top top top' 'rail outliner view panel';
+  grid-template-areas: 'top top top top' var(--areas, 'rail outliner view panel');
   height: 100vh;
   height: 100dvh;
 }
 /* a smaller window: a narrower rail and inspector, and the Scene list folds into a strip of its creatures (src/editor/creatureBar.ts) */
 @media (min-width: 761px) and (max-width: 1440px) and (orientation: landscape), (min-width: 1101px) and (max-width: 1440px) {
-  #app { grid-template-columns: 64px 240px minmax(0, 1fr) 284px; }
+  #app { --rail-w: 64px; --panel-w: 284px; }
   .rail button { width: 54px; }
 }
-@media (min-width: 761px) and (orientation: landscape), (min-width: 1101px) { #app.scene-folded { grid-template-columns: 76px 56px minmax(0, 1fr) 312px; } }
-@media (min-width: 761px) and (max-width: 1440px) and (orientation: landscape), (min-width: 1101px) and (max-width: 1440px) {
-  #app.scene-folded { grid-template-columns: 64px 56px minmax(0, 1fr) 284px; }
-}
+@media (min-width: 761px) and (orientation: landscape), (min-width: 1101px) { #app.scene-folded { --out-w: 56px; } }
 .scene-strip { display: none; }
 @media (min-width: 761px) and (orientation: landscape), (min-width: 1101px) {
   #app.scene-folded .outliner { padding: 0; }
@@ -143,11 +142,16 @@ button, input, select { font: inherit; color: inherit; }
 @media (max-width: 760px), (max-width: 1100px) and (orientation: portrait) { .creature-foot .scene-fold { display: none; } }
 
 /* Stuff has no outliner: its things and pieces are in the panel */
-#app:has(#creature-bar[hidden]) { grid-template-columns: 76px 0 minmax(0, 1fr) 312px; }
-@media (min-width: 761px) and (max-width: 1440px) and (orientation: landscape), (min-width: 1101px) and (max-width: 1440px) { #app:has(#creature-bar[hidden]) { grid-template-columns: 64px 0 minmax(0, 1fr) 284px; } }
+#app:has(#creature-bar[hidden]) { --out-w: 0px; }
 #app:has(#creature-bar[hidden]) :is(.outliner, .inspector-head) { display: none; }
 #app:has(#creature-bar[hidden]) .panel { padding-top: 6px; }
 .side-wrap { display: contents; }
+/* a sidebar on the right: its line faces the view, and the Scene list folds the other way */
+@media (min-width: 761px) and (orientation: landscape), (min-width: 1101px) {
+  :is(.rail, .outliner)[data-side='right'] { border-right: 0; border-left: 1px solid var(--line); }
+  .panel[data-side='left'] { border-left: 0; border-right: 1px solid var(--line); }
+  .outliner[data-side='right'] :is(.scene-fold, .strip-unfold) i { transform: scaleX(-1); }
+}
 .topbar { grid-area: top; }
 .rail { grid-area: rail; }
 .outliner { grid-area: outliner; }
@@ -666,6 +670,22 @@ button.primary.slim { width: auto; flex: 1; padding: 8px 10px; font-size: 14px; 
 .cube-side .view-proj { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; border: 0; }
 .cube-side .view-proj button.active { background: var(--ink); color: var(--on-ink); }
 
+.set-sidebars { position: relative; display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+.set-sidebars .sb-row {
+  display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px 0 6px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--card);
+  font-size: 13px; font-weight: var(--w-bold); cursor: grab; touch-action: none; user-select: none;
+}
+.set-sidebars .sb-row:hover { border-color: color-mix(in srgb, var(--ink) 25%, var(--line)); }
+.set-sidebars .sb-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.set-sidebars .sb-row.dragging { position: relative; z-index: 1; cursor: grabbing; box-shadow: 0 6px 16px rgba(0,0,0,.16); }
+.set-sidebars .sb-grip { width: 12px; text-align: center; color: var(--muted); }
+.set-sidebars .sb-icon { width: 16px; text-align: center; }
+.set-sidebars .sb-name { flex: 1; }
+.set-sidebars .sb-side { font-size: 11px; color: var(--muted); }
+/* the view stays put: the sidebars go either side of it */
+.set-sidebars .sb-view { justify-content: center; padding: 0 10px; border-style: dashed; background: transparent; color: var(--muted); cursor: default; }
+.set-sidebars .sb-view .sb-name { flex: none; }
 .pop-sub { font-size: 12px; font-weight: var(--w-heavy); color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin: 12px 0 6px; }
 #floor-mode button { font-size: 11px; padding: 5px 2px; }
 .popover .floor-swatches { grid-template-columns: repeat(8, 1fr); margin: 4px 0 6px; }
