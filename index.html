@@ -33,8 +33,10 @@
     <meta name="theme-color" content="#f5efe4" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=DynaPuff:wdth,wght@75..100,400..700&family=Nunito:wght@500;700;800&display=swap" rel="stylesheet" />
-    <!-- Settings › Theme and Plain text, applied before the first paint so nothing flashes -->
-    <script>try { const s = JSON.parse(localStorage.getItem('creature-creator/settings') || '{}'), h = document.documentElement; if (s.plainText) h.classList.add('plain-text'); if (s.theme === 'dark' || s.theme === 'color') h.classList.add('theme-' + s.theme); } catch {}</script>
+    <!-- Settings › Theme and Plain text, applied before the first paint so nothing flashes; and the app
+         hidden until it's set up (Guided or Free, its step, the creature): shown anyway if setting up fails -->
+    <script>{ const h = document.documentElement, show = () => h.classList.remove('booting'); h.classList.add('booting'); addEventListener('error', show); setTimeout(show, 15000); }
+      try { const s = JSON.parse(localStorage.getItem('creature-creator/settings') || '{}'), h = document.documentElement; if (s.plainText) h.classList.add('plain-text'); if (s.theme === 'dark' || s.theme === 'color') h.classList.add('theme-' + s.theme); } catch {}</script>
     <script src="https://kit.fontawesome.com/16182ad8a7.js" crossorigin="anonymous"></script>
     <link rel="stylesheet" href="/src/style.css" />
   </head>

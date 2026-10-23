@@ -129,6 +129,8 @@ applyFloor();
 setOrtho(sceneOrtho);
 resize();
 requestAnimationFrame(loop);
+// shown once it's all set up and the first frame drawn (hidden till then: index.html)
+requestAnimationFrame(() => requestAnimationFrame(() => document.documentElement.classList.remove('booting')));
 
 // works offline and installs as an app (the worker is written at build time: vite.config.ts)
 if (import.meta.env.PROD && 'serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});

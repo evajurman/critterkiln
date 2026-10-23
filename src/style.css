@@ -118,7 +118,10 @@ button, input, select { font: inherit; color: inherit; }
   grid-template-areas: 'top top top top' var(--areas, 'rail outliner view panel');
   height: 100vh;
   height: 100dvh;
+  transition: opacity .15s;
 }
+/* until main.ts has set it up: not the Free shell of index.html for a moment before Guided */
+html.booting #app { opacity: 0; transition: none; }
 /* a smaller window: a narrower rail and inspector, and the Scene list folds into a strip of its creatures (src/editor/creatureBar.ts) */
 @media (min-width: 761px) and (max-width: 1440px) and (orientation: landscape), (min-width: 1101px) and (max-width: 1440px) {
   #app { --rail-w: 64px; --panel-w: 284px; }
