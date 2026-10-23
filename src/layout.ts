@@ -200,8 +200,8 @@ interface StepDef {
 }
 export const STEPS: readonly StepDef[] = [
   { id: 'step-plan', name: 'Body plan', gizmos: 'none', side: ['plan'], note: 'Pick a starting skeleton. You can add, cut and redraw every part later.' },
-  { id: 'step-draw', name: 'Draw', gizmos: 'part', side: ['part'], corners: { mirror: 'tl' }, note: 'Pick a part, then Draw shape (or double-click the part) and draw its outline: it puffs up like a balloon.' },
   { id: 'step-grow', name: 'Grow & pose', gizmos: 'full', side: ['grow', 'pose', 'parts'], corners: { quick: 'tl', mirror: 'tl' }, note: 'Drag the orange handles to bend joints and the purple ones to slide parts; add, extend or split parts, and choose how smoothly they join.' },
+  { id: 'step-draw', name: 'Draw', gizmos: 'part', side: ['part'], corners: { mirror: 'tl' }, note: 'Pick a part, then Draw shape (or double-click the part) and draw its outline: it puffs up like a balloon.' },
   { id: 'step-face', name: 'Face', gizmos: 'none', side: ['eyes'], note: 'Add eyes: drag them onto the critter, then pick a style and a look.' },
   { id: 'step-color', name: 'Color', gizmos: 'none', side: ['color', 'material', 'markings'], note: 'Click a part (Ctrl-click adds one, Shift-click everything between, Ctrl+A all of them), then pick its colors, material and markings.', touchNote: 'Tap a part (hold one to add it, or use + in the parts list up top), then pick its colors, material and markings.' },
   { id: 'step-dress', name: 'Dress up', gizmos: 'none', side: ['attach'], move: { worn: 'attach' }, note: 'Pick a part, then Attach stuff to put something from My stuff on it. Or make something new.', action: { label: 'Make new stuff ›', to: 'stuff' } },
