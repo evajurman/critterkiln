@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { setMeshDetail } from '../inflate';
 import { setFuzzQuality, setGlassEnvironment, setSketchPixelRatio } from '../materials';
+import { setMarkingQuality } from '../markings';
 import { $ } from './dom';
 import { bokeh, gtao, scenePass } from './post';
 import { fitShadows } from './state';
@@ -22,10 +23,10 @@ export const octx = overlay.getContext('2d')!;
 // performance: how much work each frame and each shape takes (Settings)
 
 export type Quality = 'high' | 'balanced' | 'fast';
-export const QUALITY: Record<Quality, { dpr: number; detail: number; fuzz: number; samples: number; shadow: number; ao: boolean; aoSamples: number; glass: number }> = {
-  high: { dpr: 2, detail: 1, fuzz: 1, samples: 4, shadow: 2048, ao: true, aoSamples: 16, glass: 1 },
-  balanced: { dpr: 1.5, detail: 0.6, fuzz: 0.67, samples: 4, shadow: 2048, ao: true, aoSamples: 8, glass: 0.75 },
-  fast: { dpr: 1, detail: 0.35, fuzz: 0.34, samples: 2, shadow: 1024, ao: false, aoSamples: 8, glass: 0.5 },
+export const QUALITY: Record<Quality, { dpr: number; detail: number; fuzz: number; samples: number; shadow: number; ao: boolean; aoSamples: number; glass: number; textPx: number; paintRes: number }> = {
+  high: { dpr: 2, detail: 1, fuzz: 1, samples: 4, shadow: 2048, ao: true, aoSamples: 16, glass: 1, textPx: 256, paintRes: 128 },
+  balanced: { dpr: 1.5, detail: 0.6, fuzz: 0.67, samples: 4, shadow: 2048, ao: true, aoSamples: 8, glass: 0.75, textPx: 128, paintRes: 96 },
+  fast: { dpr: 1, detail: 0.35, fuzz: 0.34, samples: 2, shadow: 1024, ao: false, aoSamples: 8, glass: 0.5, textPx: 128, paintRes: 96 },
 };
 export let quality: Quality = (() => {
   try {
@@ -41,6 +42,7 @@ export function setQualityValue(v: typeof quality) {
 export const pixelRatio = () => Math.min(devicePixelRatio, QUALITY[quality].dpr);
 setMeshDetail(QUALITY[quality].detail);
 setFuzzQuality(QUALITY[quality].fuzz);
+setMarkingQuality(QUALITY[quality].textPx, QUALITY[quality].paintRes);
 
 export const renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
 renderer.setPixelRatio(pixelRatio());

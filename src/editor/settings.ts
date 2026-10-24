@@ -4,6 +4,7 @@
 import { Creature, setSeamlessLowPoly, setSeamlessMode, type SeamlessMode } from '../creature';
 import { setMeshDetail } from '../inflate';
 import { setFuzzQuality } from '../materials';
+import { setMarkingQuality } from '../markings';
 import { hasCustomShortcuts, labelShortcuts, renderShortcutSheet, resetShortcuts, stopListening } from '../shortcuts';
 import { $ } from './dom';
 import { key, quality, type Quality, QUALITY, renderer, setQualityValue } from './stage';
@@ -261,6 +262,7 @@ function setQuality(q: Quality) {
   const Q = QUALITY[q];
   setMeshDetail(Q.detail);
   setFuzzQuality(Q.fuzz);
+  setMarkingQuality(Q.textPx, Q.paintRes);
   renderer.transmissionResolutionScale = Q.glass;
   // a new shadow map size takes a fresh map
   key.shadow.mapSize.setScalar(Q.shadow);

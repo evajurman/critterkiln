@@ -497,8 +497,8 @@ export class MarkingPanel {
     const old = list[r.i];
     if (!old || old.type === type) return;
     // (how strongly a pattern's cut and what's been painted, written or picked are the old kind's own)
-    const { size, rough, amount, darkness, color, finish, offset, turn, stretch, skip } = old;
-    const keep: Partial<Marking> = { size, rough, amount, darkness, color, finish, offset, turn, stretch, skip };
+    const { size, rough, amount, darkness, color, finish, relief, offset, turn, stretch, skip } = old;
+    const keep: Partial<Marking> = { size, rough, amount, darkness, color, finish, relief, offset, turn, stretch, skip };
     const m: Marking = { ...defaultMarking(type), ...Object.fromEntries(Object.entries(keep).filter(([, v]) => v !== undefined)) };
     // a sticker made from a pattern goes where it's being looked at
     if (STICKERS.includes(type) && !STICKERS.includes(old.type)) this.faceView(m);
@@ -764,7 +764,7 @@ export class MarkingPanel {
       });
     };
     // (the threshold reads the other way round on its slider: further right marks more)
-    const slider = (key: 'size' | 'threshold' | 'rough' | 'amount' | 'darkness' | 'finish', label: string, min: number, max: number, ends: [string, string]) => {
+    const slider = (key: 'size' | 'threshold' | 'rough' | 'amount' | 'darkness' | 'finish' | 'relief', label: string, min: number, max: number, ends: [string, string]) => {
       const flip = key === 'threshold';
       const row = document.createElement('label');
       row.className = 'slider';
@@ -773,8 +773,8 @@ export class MarkingPanel {
       input.min = String(min);
       input.max = String(max);
       input.step = '0.01';
-      input.value = String(flip ? 1 - m[key] : m[key]);
-      const d = defaultMarking(m.type)[key];
+      input.value = String(flip ? 1 - m[key] : (m[key] ?? 0));
+      const d = defaultMarking(m.type)[key] ?? 0;
       input.dataset.default = String(flip ? 1 - d : d);
       input.oninput = () => change({ [key]: flip ? 1 - parseFloat(input.value) : parseFloat(input.value) });
       input.onchange = () => host.commit();
@@ -827,6 +827,7 @@ export class MarkingPanel {
     // its color: the unit's own made darker or lighter, or one picked (as it is)
     if (uses.color && !m.color) slider('darkness', 'Darkness', -1, 1, ['lighter', 'darker']);
     slider('finish', 'Finish', -1, 1, ['matte', 'shiny']);
+    slider('relief', 'Relief', -1, 1, ['pressed in', 'raised']);
     const row = document.createElement('div');
     row.hidden = !uses.color;
     row.className = 'mark-color';

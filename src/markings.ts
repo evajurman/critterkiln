@@ -46,6 +46,8 @@ export interface Marking {
   color?: string;
   /** where it's marked the surface turns matte (down to -1) or shiny (up to 1); 0 = as the material is */
   finish: number;
+  /** where it's marked the surface is pressed in (down to -1) or raised (up to 1), lit as a bump; 0 = flat (unset: flat) */
+  relief?: number;
   /** where the pattern's moved to, in the creature's rest pose (unset: where it falls) */
   offset?: [number, number, number];
   /** how it's turned (a quaternion) */
@@ -137,7 +139,7 @@ function strokesKey(list: PaintStroke[] | undefined): string {
 
 /** Changes whenever a marking would look different. */
 export function markingKey(m: Marking): string {
-  return JSON.stringify([m.type, m.size, m.threshold, m.rough, m.amount, m.darkness, m.color ?? '', m.finish, m.offset ?? 0, m.turn ?? 0, m.stretch ?? 0, m.picture ?? '', m.text ?? '', m.font ?? '', m.id ?? '', strokesKey(m.strokes)]);
+  return JSON.stringify([m.type, m.size, m.threshold, m.rough, m.amount, m.darkness, m.color ?? '', m.finish, m.relief ?? 0, m.offset ?? 0, m.turn ?? 0, m.stretch ?? 0, m.picture ?? '', m.text ?? '', m.font ?? '', m.id ?? '', strokesKey(m.strokes)]);
 }
 
 /** Where a marking's pattern is laid, moved, turned and stretched, in the rest pose (the gizmo's handle on it). */
@@ -214,6 +216,20 @@ function pictureSticker(id: string | undefined): Sticker {
   return e;
 }
 
+/** how finely text and paint are drawn (Settings' performance level) */
+let textPx = 128;
+let paintRes = 96;
+/** Draw text `px` tall and paint on a grid of up to `res` cells a side; what's drawn already is drawn again when next shown. */
+export function setMarkingQuality(px: number, res: number) {
+  if (px === textPx && res === paintRes) return;
+  textPx = px;
+  paintRes = res;
+  for (const e of textTex.values()) e.tex.dispose();
+  textTex.clear();
+  for (const c of paintCanvases.values()) c.tex.dispose();
+  paintCanvases.clear();
+}
+
 const textTex = new Map<string, Sticker>();
 function textSticker(text: string, font: string): Sticker {
   const key = font + '|' + text;
@@ -223,7 +239,7 @@ function textSticker(text: string, font: string): Sticker {
   const tex = new THREE.CanvasTexture(canvas);
   e = { tex, aspect: { value: 1 } };
   const draw = () => {
-    const px = 128;
+    const px = textPx;
     const lines = text.split('\n');
     const ctx = canvas.getContext('2d')!;
     const css = `700 ${px}px ${font}`;
@@ -243,7 +259,7 @@ function textSticker(text: string, font: string): Sticker {
   };
   draw();
   // drawn again once the typeface has arrived
-  document.fonts?.load(`700 128px ${font}`, text).then(() => {
+  document.fonts?.load(`700 ${textPx}px ${font}`, text).then(() => {
     draw();
     textureReady();
   }, () => {});
@@ -256,8 +272,6 @@ function textSticker(text: string, font: string): Sticker {
   return e;
 }
 
-/** the most cells a paint's canvas has along its longest side */
-const PAINT_RES = 96;
 
 /**
  * Paint, baked: a 3D grid of colors (and how much paint) around the strokes,
@@ -326,9 +340,9 @@ function bakePaint(c: PaintCanvas, strokes: PaintStroke[], pad: number) {
   hi.addScalar(grow);
   ext.subVectors(hi, lo);
   // two empty cells all round, so the edges fade to nothing
-  const cell = Math.max(ext.x, ext.y, ext.z, 1e-3) / (PAINT_RES - 5);
+  const cell = Math.max(ext.x, ext.y, ext.z, 1e-3) / (paintRes - 5);
   lo.subScalar(2 * cell);
-  const dims = [ext.x, ext.y, ext.z].map((e) => Math.min(PAINT_RES, Math.ceil(e / cell) + 5)) as [number, number, number];
+  const dims = [ext.x, ext.y, ext.z].map((e) => Math.min(paintRes, Math.ceil(e / cell) + 5)) as [number, number, number];
   c.cell = cell;
   c.dims = dims;
   c.data = new Uint8Array(dims[0] * dims[1] * dims[2] * 4);
@@ -467,6 +481,21 @@ const FIELD: Partial<Record<MarkingType, string>> = {
   belly: 'f = 0.5 - 0.5 * mn.y + (mkFbm(p) - 0.5) * 0.3;',
 };
 
+// Tilts the normal by the slope of the markings' height (Mikkelsen's bump
+// mapping). The height's in real units and the screen-space steps aren't
+// normalized, so the bump looks the same however close the camera is.
+const BUMP_GLSL = /* glsl */ `
+vec3 markBump(vec3 pos, vec3 n, vec2 dH, float faceDir) {
+  vec3 sx = dFdx(pos);
+  vec3 sy = dFdy(pos);
+  vec3 r1 = cross(sy, n);
+  vec3 r2 = cross(n, sx);
+  float det = dot(sx, r1) * faceDir;
+  vec3 grad = sign(det) * (dH.x * r1 + dH.y * r2);
+  return normalize(abs(det) * n - grad);
+}
+`;
+
 /** One marking's turn in the shader: `i` its uniforms, `w` how much of it this point has. */
 function layerGLSL(m: Marking, i: number, w: string): string {
   const u = (n: string) => `mk${i}${n}`;
@@ -479,7 +508,9 @@ function layerGLSL(m: Marking, i: number, w: string): string {
     vec4 t = texture2D(${u('Tex')}, uv);
     float inside = step(0.0, uv.x) * step(uv.x, 1.0) * step(0.0, uv.y) * step(uv.y, 1.0);
     // only on the side it faces, and not through onto parts far behind
-    float m = t.a * inside * smoothstep(0.0, 0.3, mn.z) * (1.0 - smoothstep(0.4, 0.6, abs(q.z))) * ${u('Amt')} * ${w};
+    float side = inside * smoothstep(0.0, 0.3, mn.z) * (1.0 - smoothstep(0.4, 0.6, abs(q.z))) * ${w};
+    float m = t.a * side * ${u('Amt')};
+    float h = t.a * side;
     vec3 c = ${m.type === 'picture' ? 't.rgb;' : shade}`;
   } else if (m.type === 'paint') {
     own = `
@@ -487,6 +518,15 @@ function layerGLSL(m: Marking, i: number, w: string): string {
     float f = t.a + (mkNoise(q * 60.0 + 1.3) - 0.5) * ${u('Rough')} * 0.6;
     float soft = max(fwidth(f), 0.02);
     float m = smoothstep(0.5 - soft, 0.5 + soft, f) * ${u('Amt')} * ${w};
+    // the paint's edge is only a grid cell wide: the bump's is blurred out to a bevel (about a default brush's
+    // radius), and kept about as steep as a pattern's (paint's size isn't a pattern's, so the height's its own)
+    vec3 pt = (q - ${u('PMin')}) * ${u('PScale')} + ${u('POff')};
+    vec3 bd = 0.02 * ${u('PScale')};
+    float hb = 2.0 * t.a
+      + texture(${u('Tex')}, pt + vec3(bd.x, 0.0, 0.0)).a + texture(${u('Tex')}, pt - vec3(bd.x, 0.0, 0.0)).a
+      + texture(${u('Tex')}, pt + vec3(0.0, bd.y, 0.0)).a + texture(${u('Tex')}, pt - vec3(0.0, bd.y, 0.0)).a
+      + texture(${u('Tex')}, pt + vec3(0.0, 0.0, bd.z)).a + texture(${u('Tex')}, pt - vec3(0.0, 0.0, bd.z)).a;
+    float h = smoothstep(0.1, 0.9, hb / 8.0) * 0.4 * ${w};
     vec3 c = t.rgb;`;
   } else {
     own = `
@@ -496,6 +536,8 @@ function layerGLSL(m: Marking, i: number, w: string): string {
     f += (mkNoise(p * 7.0 + 1.3) - 0.5) * ${u('Rough')} * 0.6;
     float soft = max(fwidth(f), 0.015);
     float m = smoothstep(${u('Thr')} - soft, ${u('Thr')} + soft, f) * ${u('Amt')} * ${w};
+    // the bump's edge is a wider ramp than the color's, so it reads as a bevel rather than a line
+    float h = smoothstep(${u('Thr')} - 0.08 - soft, ${u('Thr')} + 0.08 + soft, f) * ${w};
     vec3 c = ${shade}`;
   }
   return /* glsl */ `{
@@ -506,6 +548,8 @@ function layerGLSL(m: Marking, i: number, w: string): string {
     ${own}
     diffuseColor.rgb = mix(diffuseColor.rgb, c * markDetail, m);
     markMask = max(markMask, m);
+    // (relief doesn't wait on the amount: at none, the marking is carved in the surface's own color)
+    markH += ${u('Relief')} * h / ${u('Scale')};
     #ifdef STANDARD
       // matte: rough and not metallic; shiny: polished
       float fin = ${u('Finish')};
@@ -539,6 +583,7 @@ export function applyMarkings(mat: THREE.Material, layers: Marking[] | undefined
       [`mk${i}Color`]: { value: new THREE.Color(m.color ?? '#ffffff') },
       [`mk${i}Own`]: { value: m.color ? 0 : 1 },
       [`mk${i}Finish`]: { value: m.finish ?? 0 },
+      [`mk${i}Relief`]: { value: (m.relief ?? 0) * 0.12 },
       ...(TEXTURED[m.type] ? { [`mk${i}Tex`]: { value: TEXTURED[m.type]!() } } : {}),
     });
     if (STICKERS.includes(m.type)) {
@@ -583,8 +628,10 @@ export function applyMarkings(mat: THREE.Material, layers: Marking[] | undefined
            #endif`,
         );
     }
+    // (the lighting reads the normal after the markings are laid on, so they can tilt it; unlit materials have none)
+    const lit = shader.fragmentShader.includes('#include <normal_fragment_begin>');
     const decls = list
-      .map((m, i) => `uniform float mk${i}Scale, mk${i}Thr, mk${i}Rough, mk${i}Amt, mk${i}Dark, mk${i}Own, mk${i}Finish;\nuniform vec3 mk${i}Color;\nuniform mat4 mk${i}Xf;\nuniform mat3 mk${i}XfN;\n` +
+      .map((m, i) => `uniform float mk${i}Scale, mk${i}Thr, mk${i}Rough, mk${i}Amt, mk${i}Dark, mk${i}Own, mk${i}Finish, mk${i}Relief;\nuniform vec3 mk${i}Color;\nuniform mat4 mk${i}Xf;\nuniform mat3 mk${i}XfN;\n` +
           (TEXTURED[m.type] ? `uniform sampler2D mk${i}Tex;\n` : '') +
           (STICKERS.includes(m.type) ? `uniform sampler2D mk${i}Tex;\nuniform float mk${i}Aspect;\n` : '') +
           (m.type === 'paint' ? `uniform highp sampler3D mk${i}Tex;\nuniform vec3 mk${i}PMin, mk${i}PScale, mk${i}POff;\n` : ''),
@@ -594,7 +641,8 @@ export function applyMarkings(mat: THREE.Material, layers: Marking[] | undefined
       (perPoint ? 'varying vec4 vMarkW;\n' : '') +
       (shared ? '#define vMarkPos vTriPos\n#define vMarkNormal vTriNormal\n' : 'varying vec3 vMarkPos;\nvarying vec3 vMarkNormal;\n') +
       decls +
-      NOISE_GLSL;
+      NOISE_GLSL +
+      (lit ? BUMP_GLSL : '');
     shader.fragmentShader = shader.fragmentShader.replace('void main() {', pars + '\nvoid main() {').replace(
       '#include <emissivemap_fragment>',
       /* glsl */ `{
@@ -604,7 +652,10 @@ export function applyMarkings(mat: THREE.Material, layers: Marking[] | undefined
           markBase *= vColor.rgb;
         #endif
         vec3 markDetail = clamp(diffuseColor.rgb / max(markBase, vec3(1e-3)), 0.0, 2.0);
+        // how far the markings raise (or press in) the surface, in the creature's units
+        float markH = 0.0;
         ${list.map((m, i) => layerGLSL(m, i, perPoint ? `vMarkW.${'xyzw'[i]}` : '1.0')).join('\n')}
+        ${lit ? 'if (markH != 0.0) normal = markBump(-vViewPosition, normal, vec2(dFdx(markH), dFdy(markH)), faceDirection);' : ''}
       }
       #include <emissivemap_fragment>`,
     );
