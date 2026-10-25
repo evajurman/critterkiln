@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import { Creature, defaultState, type Attachment, type BoneRT, type CreatureState, type PartState, type Placement } from '../creature';
 import { ANIM_KINDS } from '../animate';
-import { duplicateLimb } from '../rigs';
+import { duplicateLimb, nextRoot } from '../rigs';
 import { $, fa, pickHow, type PickHow } from './dom';
 import { activate, commit, creature, creatures, idle, makeCreature, save, selected, setCreature, setIdle, state, world } from './state';
 import { creatureLabel } from './controls';
@@ -250,7 +250,7 @@ function partRow(i: number, b: BoneRT, p: PartState, depth: number, active: bool
     save();
     if (again) renamePartRow(b.def.id);
   };
-  // the first part holds everything else: it can't be copied or removed
+  // the first part holds everything else: it can't be copied, and removing it leaves the rest (one of them takes its place)
   const isRoot = !b.parent;
   const dup = document.createElement('button');
   dup.className = 'piece-icon';
@@ -264,8 +264,9 @@ function partRow(i: number, b: BoneRT, p: PartState, depth: number, active: bool
   const del = document.createElement('button');
   del.className = 'piece-icon';
   del.innerHTML = fa('trash');
-  del.title = isRoot ? "The first part holds everything else, so it can't be removed" : `Remove ${name} and everything attached to it`;
-  del.disabled = isRoot;
+  const next = isRoot ? nextRoot(s.rig, b.def.id) : null;
+  del.title = isRoot ? (next ? `Remove ${name} on its own: what's on it stays, hanging off ${next.name}` : "Nothing on it could take its place, so it can't be removed") : `Remove ${name} and everything attached to it`;
+  del.disabled = isRoot && !next;
   del.onclick = () => {
     pickIt(b.def.id);
     removePart();

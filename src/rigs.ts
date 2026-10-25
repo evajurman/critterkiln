@@ -1279,6 +1279,38 @@ export function pasteLimb(rig: RigState, clip: LimbClip, fallback: string, offse
   return parts;
 }
 
+/**
+ * The part that would take the first part's place if it went: of those
+ * hanging off it, a single part (a pair can't hold the rest) carrying the
+ * most. Null when there's none.
+ */
+export function nextRoot(rig: RigState, rootId: string): BoneDef | null {
+  const kids = rig.bones.filter((b) => b.parent === rootId && !b.mirror);
+  if (!kids.length) return null;
+  const size = (b: BoneDef) => subtreeDefs(rig, b.id).size;
+  return kids.reduce((best, b) => (size(b) > size(best) ? b : best));
+}
+
+/**
+ * Remove the first part on its own: the part that takes its place (see
+ * nextRoot) is first now, and everything else that hung off it hangs off
+ * that one instead, where it is. Returns the removed definition and the new
+ * first part, or null if nothing could take its place.
+ */
+export function deleteRoot(rig: RigState, rootId: string): { removed: BoneDef; root: BoneDef } | null {
+  const old = rig.bones.find((b) => b.id === rootId && !b.parent);
+  const next = old && nextRoot(rig, rootId);
+  if (!old || !next) return null;
+  rig.bones = rig.bones.filter((b) => b !== old);
+  delete next.parent;
+  // (it couldn't bend with a part above it any more)
+  next.anchor = true;
+  delete next.loose;
+  for (const b of rig.bones) if (b.parent === rootId) b.parent = next.id;
+  if (rig.headId === rootId) rig.headId = next.id;
+  return { removed: old, root: next };
+}
+
 /** Remove a bone and everything hanging off it. Returns removed definition ids. */
 export function deleteLimb(rig: RigState, sceneId: string): BoneDef[] {
   const f = findDef(rig, sceneId);

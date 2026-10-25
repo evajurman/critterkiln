@@ -38,7 +38,7 @@ import { removeAttachment, syncAttachBar } from './attachPanel';
 import { pickAttachment, pickStuff } from './carry';
 import { flashPart, selectPart } from './partPanel';
 import { renderUI } from './panels';
-import { pickingParent, removePart, rigLock, setMirror } from './rigEdit';
+import { pickingParent, removePart, rigLock, rootStays, setMirror } from './rigEdit';
 import { renderSettings, saveSettings, settings, syncSliderNumbers } from './settings';
 import { pickingFocus } from './dof';
 import { scopeMenu } from './scope';
@@ -156,7 +156,7 @@ function viewMenu(x: number, y: number) {
   return openContextMenu(x, y, name, [
     { label: 'Copy', icon: ctxDuo('copy'), key: keyOf('copy'), disabled: root, title: root ? 'The first part holds everything else' : undefined, run: () => copyPicked() },
     clip?.kind === 'part' && { label: 'Paste here', icon: ctxDuo('paste'), key: keyOf('paste'), run: () => pasteClip({ x, y }) },
-    { label: 'Delete', icon: ctxSlab('trash'), key: keyOf('delete'), danger: true, disabled: root, title: root ? 'The first part holds everything else' : undefined, run: removePart },
+    { label: 'Delete', icon: ctxSlab('trash'), key: keyOf('delete'), danger: true, disabled: !!rootStays(), title: rootStays() ?? (root ? 'Just this part: what’s on it stays, hanging off the part that takes its place' : undefined), run: removePart },
     SEP,
     { label: 'Draw shape', icon: ctxSlab('pencil'), key: keyOf('draw'), run: () => enterDraw({ kind: 'bone', boneId: id }) },
     { label: 'Draw new stuff here', icon: ctxSlab('paperclip'), title: 'Draw something to wear, right on this spot (it goes in My stuff)', run: () => newStuffHere({ x, y }) },

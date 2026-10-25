@@ -10,6 +10,7 @@ import {
   addLimb,
   canParent,
   deleteLimb,
+  deleteRoot,
   deleteSavedRig,
   detachBone,
   expandRig,
@@ -17,6 +18,7 @@ import {
   getRig,
   mirrorLimb,
   mirrorTarget,
+  nextRoot,
   partIds,
   reattachBone,
   moveLimb,
@@ -405,11 +407,44 @@ function mirrorPart() {
 }
 
 /** Delete the picked part and everything on it (the creature's root part stays). */
+/** Why the first part can't go, if it can't: nothing (single) hangs off it to take its place. */
+export function rootStays(): string | null {
+  const b = creature.bones.get(selected);
+  if (!b || b.parent) return null;
+  if (nextRoot(state.rig, b.def.id)) return null;
+  return state.rig.bones.some((d) => d.parent === b.def.id)
+    ? 'Only pairs hang off it, and a pair can’t hold the rest: unlink one first'
+    : 'It’s the only part left';
+}
+
+/**
+ * Remove the first part on its own: the part on it carrying the most takes
+ * its place, and the rest of what hung off it hangs off that instead (its
+ * eyes, stuff, pose and motion go with it).
+ */
+function removeRoot() {
+  const why = rootStays();
+  if (why) return hint(why, 2600, true);
+  const id = selected;
+  let next = '';
+  rigEdit((rig) => {
+    const head = rig.headId;
+    const r = deleteRoot(rig, id);
+    if (!r) return [];
+    next = r.root.id;
+    delete state.parts[id];
+    delete state.pose[id];
+    delete state.anims?.[id];
+    // eyes on it go with it (eyes with no part of their own sat on it if it was the head)
+    state.eyes.pairs = state.eyes.pairs.filter((p) => (p.bone ?? head) !== id);
+    return [];
+  }, false);
+  if (creature.bones.has(next)) selectPart(next);
+  hint(`Removed it: ${partName() || 'the next part'} holds everything now`, 2400);
+}
+
 export function removePart() {
-  if (!creature.bones.get(selected)?.parent) {
-    hint("The first part holds everything else, so it can't be removed", 2000, true);
-    return;
-  }
+  if (!creature.bones.get(selected)?.parent) return removeRoot();
   const parent = creature.bones.get(selected)?.parent?.def.id ?? '';
   rigEdit((rig) => {
     for (const d of deleteLimb(rig, selected)) {
