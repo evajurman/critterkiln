@@ -253,6 +253,13 @@
                     <span class="ends"><em>matte</em><em>glossy</em></span></label>
                   <label class="slider"><span>Pupil</span><input id="eye-pupil" type="range" data-default="0.5" min="0" max="1" step="0.01" />
                     <span class="ends"><em>small</em><em>big</em></span></label>
+                  <label class="slider" title="A round pupil, or a cat's narrow slit"><span>Cat eye</span><input id="eye-cat" type="range" data-default="0" min="0" max="1" step="0.01" />
+                    <span class="ends"><em>round</em><em>slit</em></span></label>
+                  <div class="eye-pupil-colors">
+                    <label class="color-pick" title="The pupil's color"><input id="eye-pupil-color" type="color" /> Pupil</label>
+                    <label class="color-pick" title="The color round the pupil"><input id="eye-eyeball-color" type="color" /> Eyeball</label>
+                    <button id="eye-colors-reset" class="link" title="Back to black on white">Reset</button>
+                  </div>
                   <label class="slider" title="Where the pupils point, side to side"><span>Look</span><input id="eye-look-x" type="range" data-default="0" min="-1" max="1" step="0.01" />
                     <span class="ends"><em>one way</em><em>the other</em></span></label>
                   <label class="slider" title="Where the pupils point, up and down"><span>Look up</span><input id="eye-look-y" type="range" data-default="0" min="-1" max="1" step="0.01" />

@@ -127,6 +127,10 @@ export function renderEyes() {
     $('#eye-shine-row').hidden = e.style !== 'googly';
     $<HTMLInputElement>('#eye-shine').value = String(e.shine ?? 1);
     $<HTMLInputElement>('#eye-pupil').value = String(e.pupil ?? 0.5);
+    $<HTMLInputElement>('#eye-cat').value = String(e.cat ?? 0);
+    $<HTMLInputElement>('#eye-pupil-color').value = e.pupilColor ?? (e.style === 'flat' ? '#151216' : '#1b1720');
+    $<HTMLInputElement>('#eye-eyeball-color').value = e.eyeballColor ?? '#ffffff';
+    $('#eye-colors-reset').hidden = !e.pupilColor && !e.eyeballColor;
     $<HTMLInputElement>('#eye-look-x').value = String(e.lookX ?? 0);
     // a sticker's loose pupil has fallen to the bottom
     $<HTMLInputElement>('#eye-look-y').value = String(e.lookY ?? (e.style === 'flat' ? -1 : 0));
@@ -192,7 +196,7 @@ export function initEyesPanel() {
     };
     input.onchange = () => commit();
   }
-  for (const [id, key] of [['#eye-shine', 'shine'], ['#eye-pupil', 'pupil'], ['#eye-look-x', 'lookX'], ['#eye-look-y', 'lookY'], ['#eye-cross', 'cross'], ['#eye-lid-top', 'lidTop'], ['#eye-lid-bottom', 'lidBottom'], ['#eye-crescent', 'crescent'], ['#eye-tilt', 'tilt']] as const) {
+  for (const [id, key] of [['#eye-shine', 'shine'], ['#eye-pupil', 'pupil'], ['#eye-cat', 'cat'], ['#eye-look-x', 'lookX'], ['#eye-look-y', 'lookY'], ['#eye-cross', 'cross'], ['#eye-lid-top', 'lidTop'], ['#eye-lid-bottom', 'lidBottom'], ['#eye-crescent', 'crescent'], ['#eye-tilt', 'tilt']] as const) {
     const input = $<HTMLInputElement>(id);
     input.oninput = () => {
       state.eyes[key] = parseFloat(input.value);
@@ -200,6 +204,22 @@ export function initEyesPanel() {
     };
     input.onchange = () => commit();
   }
+  for (const [id, key] of [['#eye-pupil-color', 'pupilColor'], ['#eye-eyeball-color', 'eyeballColor']] as const) {
+    const input = $<HTMLInputElement>(id);
+    input.oninput = () => {
+      state.eyes[key] = input.value;
+      creature.sync();
+    };
+    input.onchange = () => {
+      commit();
+      renderEyes();
+    };
+  }
+  $('#eye-colors-reset').onclick = () =>
+    setEyeLook((e) => {
+      delete e.pupilColor;
+      delete e.eyeballColor;
+    });
   $('#eye-shape-reset').onclick = () =>
     setEyeLook((e) => {
       delete e.lidTop;

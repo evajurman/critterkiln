@@ -29,8 +29,11 @@ const shapedSphereGeo = new THREE.SphereGeometry(1, 64, 40);
  * (each column keeps a round cross-section, so the cut eye stays a smooth
  * pebble with tapered corners), the crescent bends it into an arch or a cup,
  * and the tilt turns it, mirrored so both eyes lean toward or away from the nose.
+ * `keepDepth` (0..1): how much of its depth a cut column keeps. A bead sits
+ * sunk into the face, so it keeps all of it (cut thinner, it would sink under
+ * the skin); a dot lies on it, and thins out with the cut.
  */
-function shapedEye(sx: number, sy: number, sz: number, sgn: number, e: EyesState): THREE.BufferGeometry {
+function shapedEye(sx: number, sy: number, sz: number, sgn: number, e: EyesState, keepDepth = 0): THREE.BufferGeometry {
   const top = e.lidTop ?? 1;
   const bottom = e.lidBottom ?? -1;
   const crescent = e.crescent ?? 0;
@@ -65,7 +68,7 @@ function shapedEye(sx: number, sy: number, sz: number, sgn: number, e: EyesState
     // the arch rises in the middle, kept centred on the eye
     const ny = mid + y * k + bend * (0.5 - x * x);
     const px = nx * sx, py = ny * sy;
-    pos.setXYZ(i, px * cos - py * sin, px * sin + py * cos, z * k * sz);
+    pos.setXYZ(i, px * cos - py * sin, px * sin + py * cos, z * (k + (1 - k) * keepDepth) * sz);
   }
   const merged = mergeVertices(g);
   g.dispose();
@@ -102,6 +105,12 @@ function pupilScale(e: EyesState): number {
   return 0.5 + (e.pupil ?? 0.5);
 }
 
+/** A pupil's width and height against round, for Cat eye: narrowed to a slit, a touch taller. */
+function catShape(e: EyesState): [number, number] {
+  const c = e.cat ?? 0;
+  return [1 - 0.78 * c, 1 + 0.25 * c];
+}
+
 /**
  * `sgn` is which side the eye is on: 1 the creature's left (+X), -1 its right,
  * 0 a single eye in the middle (which has no other eye to cross with).
@@ -123,9 +132,11 @@ export function buildEye(style: EyeStyle, r: number, sgn: number, headStyle: Sty
     case 'googly': {
       const shine = e.shine ?? 1;
       const white = glossyWhite();
+      if (e.eyeballColor) white.color.set(e.eyeballColor);
       white.roughness = 0.75 - 0.6 * shine;
       white.clearcoat = shine;
       const black = glossyBlack();
+      if (e.pupilColor) black.color.set(e.pupilColor);
       black.roughness = 0.7 - 0.58 * shine;
       black.clearcoat = shine;
       add(sphereGeo, white, [0, 0, -r * 0.35], [r, r, r]);
@@ -138,7 +149,8 @@ export function buildEye(style: EyeStyle, r: number, sgn: number, headStyle: Sty
       const k = pupilScale(e);
       const pupil = new THREE.Mesh(sphereGeo, black);
       pupil.position.set(0, 0, r * 0.82);
-      pupil.scale.set(r * 0.55 * k, r * 0.6 * k, r * 0.3);
+      const [cw, ch] = catShape(e);
+      pupil.scale.set(r * 0.55 * k * cw, r * 0.6 * k * ch, r * 0.3);
       roll.add(pupil);
       // the catchlight is a reflection: it stays put, and fades out on a matte eye
       if (shine > 0.05) {
@@ -152,7 +164,7 @@ export function buildEye(style: EyeStyle, r: number, sgn: number, headStyle: Sty
       const R = r * 1.15;
       const disc = new THREE.CylinderGeometry(1, 1, 1, 40);
       disc.rotateX(Math.PI / 2);
-      add(disc, new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.55 }), [0, 0, R * 0.06], [R, R, R * 0.12]);
+      add(disc, new THREE.MeshStandardMaterial({ color: e.eyeballColor ?? 0xffffff, roughness: 0.55 }), [0, 0, R * 0.06], [R, R, R * 0.12]);
       const pr = Math.min(0.85, 0.58 * pupilScale(e));
       // how far the pupil can roll before it reaches the rim
       const travel = Math.max(0, 0.94 - pr);
@@ -163,7 +175,8 @@ export function buildEye(style: EyeStyle, r: number, sgn: number, headStyle: Sty
       // kept inside the disc when pushed into a corner (the loose one is as it always was)
       const placed = e.lookX !== undefined || e.lookY !== undefined || !!e.cross;
       const d = Math.hypot(px, py), k = placed && d > travel && d > 0 ? travel / d : 1;
-      add(disc, new THREE.MeshStandardMaterial({ color: 0x151216, roughness: 0.4 }), [px * k * R, py * k * R, R * 0.14], [R * pr, R * pr, R * 0.04]);
+      const [cw, ch] = catShape(e);
+      add(disc, new THREE.MeshStandardMaterial({ color: e.pupilColor ?? 0x151216, roughness: 0.4 }), [px * k * R, py * k * R, R * 0.14], [R * pr * cw, R * pr * ch, R * 0.04]);
       const dome = new THREE.SphereGeometry(1, 40, 16, 0, Math.PI * 2, 0, Math.PI / 2);
       dome.rotateX(Math.PI / 2);
       add(
@@ -176,7 +189,7 @@ export function buildEye(style: EyeStyle, r: number, sgn: number, headStyle: Sty
     }
     case 'bead': {
       // a bead, by default in the creature's own material
-      add(shapedEye(r * 0.8, r * 0.8, r * 0.8, sgn, e), eyeGlow(eyeMaterial(finish, e.color ?? '#1d1a22', headStyle, headSettings), e.color ?? '#1d1a22', e), [0, 0, -r * 0.3], [1, 1, 1]);
+      add(shapedEye(r * 0.8, r * 0.8, r * 0.8, sgn, e, 1), eyeGlow(eyeMaterial(finish, e.color ?? '#1d1a22', headStyle, headSettings), e.color ?? '#1d1a22', e), [0, 0, -r * 0.3], [1, 1, 1]);
       break;
     }
     case 'dot': {

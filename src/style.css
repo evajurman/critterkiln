@@ -767,6 +767,7 @@ button.primary.slim { width: auto; flex: 1; padding: 8px 10px; font-size: 14px; 
 .stuff-row .part-pick i { font-size: 10px; opacity: .7; width: 10px; }
 .creature-row .piece-pick { min-width: 0; }
 .creature-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.eye-pupil-colors { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 4px 0 8px; }
 .creature-tag { margin-left: 6px; font-size: 11px; color: var(--muted); }
 /* a creature off stage: its row a little faded */
 .creature-row.offstage .creature-name { opacity: 0.6; font-style: italic; }

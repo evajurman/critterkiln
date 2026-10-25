@@ -191,6 +191,12 @@ export interface EyesState {
   shine?: number;
   /** googly / sticker: pupil size, 0..1 (default 0.5) */
   pupil?: number;
+  /** googly / sticker: 0 a round pupil .. 1 a cat's slit (default round) */
+  cat?: number;
+  /** googly / sticker: the pupil's color (default near black) */
+  pupilColor?: string;
+  /** googly / sticker: the eyeball's (or sticker's) color round the pupil (default white) */
+  eyeballColor?: string;
   /**
    * googly / sticker: where the pupils look, -1..1 across (to the eye's right)
    * and up. A sticker's pupil left unset has fallen loose to the bottom.
