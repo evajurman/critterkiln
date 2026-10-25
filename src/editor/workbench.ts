@@ -1,9 +1,12 @@
 // ---------------------------------------------------------------------------
-// The stuff workbench (the Stuff tab): pieces drawn on the board make a thing
-// to wear; moving, turning, mirroring and saving them, and the stuff panel.
+// The stuff workbench: a thing is drawn and changed right where it is on the
+// creature, worn or scattered (see editStuff), on a board that sits where it
+// does; moving, turning, mirroring and saving its pieces, the stuff panel and
+// My stuff.
 
 import * as THREE from 'three';
-import { type BoneRT, type PartState } from '../creature';
+import { type Attachment, type BoneRT, type CreatureState, type PartState } from '../creature';
+import { type Marking } from '../markings';
 import { unlock } from '../achievements';
 import { bounds, getMeshDetail, pointInPolygon, type Vec2 } from '../inflate';
 import {
@@ -29,18 +32,21 @@ import { copyLimb, flipLimbClip, partIds, pasteLimb, type LimbClip, type V3 } fr
 import { $, fa, faClassic, iconLabel, pickHow, type PickHow } from './dom';
 import { camera, canvas, key, scene, view } from './stage';
 import { composer } from './post';
-import { commit, creature, creatures, idle, mode, save, selected, setIdle, state, world } from './state';
-import { hover, raycaster, setRay, updateSkeletonVisibility } from './controls';
+import { commit, creature, creatures, idle, type Mode, mode, save, selected, setIdle, state, world } from './state';
+import { controls, hover, raycaster, setRay, updateSkeletonVisibility } from './controls';
+import { setMode } from './panels';
 import { flyTo } from './framing';
 import { drawState, enterDraw, exitDraw, pendingPieces, symOn } from './drawing';
 import { gizmo, selectedAttachment } from './attach';
 import { placing } from './arrange';
 import { attachThing } from './attachPanel';
-import { carryFrom } from './carry';
+import { carryFrom, pickStuff, sitOnSurface } from './carry';
 import { saveBundle } from './files';
 import { queueCreationSave } from './creations';
 import { glowFollowSeg, glowSlider, sceneColorRow, SWATCHES } from './widgets';
-import { flashPart, renderThingMaterial } from './partPanel';
+import { flashPart, partLabel, renderThingMaterial } from './partPanel';
+import { creatureId, editCreature, setOffstage, wearCreature } from './riders';
+import { creatureLabel } from './controls';
 import { pieceMarks } from './markingsUi';
 import { rigEdit } from './rigEdit';
 import { hint, hintOnce } from './hints';
@@ -48,12 +54,220 @@ import { withCleanScene } from './snapshot';
 import { invalidate } from './loop';
 import { oddKinds, renderScopeToggle, scopeChip, scopeOf, type ScopeKind } from './scope';
 
-// The board sits at chest height; its XY plane is the drawing plane and its
-// origin (the crosshair) is where the thing will attach to a body part.
+// The board sits where the thing being edited is on the creature (see
+// followBoard); its XY plane is the drawing plane and its origin (the
+// crosshair, while drawing) is where the thing attaches.
 export const board = new THREE.Group();
-board.position.set(0, 1, 0);
+board.matrixAutoUpdate = false;
 board.visible = false;
 const boardGrid = new THREE.Group();
+boardGrid.visible = false;
+
+/** What the workbench is editing, where it is: a worn thing (attachment id), or what a scatter scatters (marking id; shown on its first copy). */
+export type StuffTarget = { kind: 'worn'; id: string } | { kind: 'scatter'; id: string };
+export let stuffTarget: StuffTarget | null = null;
+/** the tab editing stuff goes back to, and the view it was seen from there */
+let stuffReturn: Mode = 'look';
+let viewBefore: { pos: THREE.Vector3; target: THREE.Vector3 } | null = null;
+
+/** The active creature's scatter with this id, on the whole creature or one part. */
+function scatterMarking(id: string): Marking | undefined {
+  return [...(state.markings ?? []), ...Object.values(state.parts).flatMap((p) => p.markings ?? [])].find((m) => m.type === 'scatter' && m.id === id);
+}
+
+/** Where the edited thing sits: the part it's on and its place in that part's frame (null: it's gone). */
+function targetFrame(t: StuffTarget): { bone: BoneRT; place: THREE.Matrix4 } | null {
+  if (t.kind === 'worn') {
+    const a = state.attachments?.find((x) => x.id === t.id);
+    const bone = a && creature.bones.get(a.bone);
+    if (!a || !bone) return null;
+    return { bone, place: new THREE.Matrix4().compose(new THREE.Vector3(...a.position), new THREE.Quaternion(...a.quaternion), new THREE.Vector3(...a.scale)) };
+  }
+  const f = creature.scatterCopyFrame(t.id);
+  const bone = f && creature.bones.get(f.pivot.userData.boneId as string);
+  return f && bone ? { bone, place: f.matrix } : null;
+}
+
+/** Keep the board on the thing being edited, as the creature is posed now. */
+export function followBoard() {
+  const t = stuffTarget;
+  if (!t || mode !== 'stuff') return;
+  const f = targetFrame(t);
+  // undone out of existence (or its scatter turned off): nothing left to edit
+  if (!f) {
+    queueMicrotask(finishStuff);
+    return;
+  }
+  creature.root.updateMatrixWorld(true);
+  board.matrix.multiplyMatrices(f.bone.pivot.matrixWorld, f.place);
+  board.updateMatrixWorld(true);
+}
+
+/**
+ * Edit a worn thing, or what a scatter scatters, right where it is on the
+ * creature: everything wearing it (every copy) changes with it, and it's kept
+ * in My stuff as you go.
+ */
+export function editStuff(target: StuffTarget) {
+  const thing = target.kind === 'worn' ? state.attachments?.find((a) => a.id === target.id)?.thing : scatterMarking(target.id)?.thing;
+  if (!thing) return;
+  if (mode === 'stuff') leaveStuff();
+  else {
+    stuffReturn = mode;
+    viewBefore = { pos: camera.position.clone(), target: controls.target.clone() };
+  }
+  stuffTarget = target;
+  unlock('stuff');
+  world.workbench = stripThumb(thing);
+  setSelectedPiece('');
+  $('#thing-saved').textContent = '';
+  creature.setEditingStuff(target.id);
+  setMode('stuff');
+}
+
+/** Done editing: back to the tab it was opened from, with a worn thing picked. */
+export function finishStuff() {
+  if (mode !== 'stuff') return;
+  const t = stuffTarget;
+  setMode(stuffReturn === 'stuff' ? 'look' : stuffReturn);
+  if (t?.kind === 'worn' && state.attachments?.some((a) => a.id === t.id)) pickStuff(t.id);
+  // back to how the creature was seen before
+  if (viewBefore) flyTo(viewBefore.pos, viewBefore.target);
+  viewBefore = null;
+}
+
+/** Leaving the workbench (whichever way): keep what's on it, and put away a thing nothing was drawn for. */
+export function leaveStuff() {
+  const t = stuffTarget;
+  saveWorkbenchNow();
+  stuffTarget = null;
+  creature.setEditingStuff(null);
+  if (!t || world.workbench?.pieces.length) return;
+  if (t.kind === 'worn') state.attachments = (state.attachments ?? []).filter((a) => a.id !== t.id);
+  else delete scatterMarking(t.id)?.thing;
+  creature.sync();
+  commit();
+}
+
+/**
+ * Something new, drawn on the creature: at the spot under `at` on the screen
+ * (or the front of the picked part), worn there, and drawn straight away.
+ */
+export function newStuffHere(at?: { x: number; y: number }) {
+  if (!creature.bones.has(selected)) return;
+  let hit = null;
+  if (at) {
+    setRay(at.x, at.y);
+    hit = creature.surfaceAt(raycaster);
+  }
+  if (!hit) {
+    // where the camera looks at the picked part
+    const b = creature.bones.get(selected)!;
+    b.pivot.updateMatrixWorld(true);
+    const mid = b.pivot.localToWorld(new THREE.Vector3(0, b.length / 2, 0));
+    raycaster.set(camera.position.clone(), mid.sub(camera.position).normalize());
+    const h = creature.surfaceAt(raycaster);
+    if (h?.bone === b) hit = h;
+  }
+  // (sat on the surface as a small thing would, so what's drawn isn't half buried)
+  const spot = hit ? sitOnSurface(hit, new THREE.Box3(new THREE.Vector3(-0.05, -0.05, -0.03), new THREE.Vector3(0.05, 0.05, 0.03))) : null;
+  const thing = { ...newThing(), name: 'Thing' };
+  const a: Attachment = {
+    id: uid(),
+    bone: hit?.bone.def.id ?? selected,
+    thing,
+    position: spot?.position ?? creature.attachPoint(selected),
+    quaternion: spot?.quaternion ?? [0, 0, 0, 1],
+    scale: [1, 1, 1],
+    mirror: false,
+  };
+  state.attachments = [...(state.attachments ?? []), a];
+  creature.sync();
+  commit();
+  editStuff({ kind: 'worn', id: a.id });
+  enterDraw({ kind: 'piece' });
+}
+
+/** A scatter's thing, drawn new where its first copy goes. */
+function newScatterThing(m: Marking, set: (patch: Partial<Marking>) => void) {
+  set({ thing: { ...newThing(), name: 'Thing' } });
+  if (!creature.scatterCopyFrame(m.id!)) {
+    hint('Nowhere to put them yet: try another Where, or more of them', 2600, true);
+    return;
+  }
+  editStuff({ kind: 'scatter', id: m.id! });
+  enterDraw({ kind: 'piece' });
+}
+
+/** What a scatter scatters, in its settings: one of My stuff, something new, or the one it has, to edit where it is. */
+export function renderScatterThing(el: HTMLElement, m: Marking, set: (patch: Partial<Marking>) => void) {
+  el.innerHTML = '';
+  const head = document.createElement('div');
+  head.className = 'sub-title';
+  head.textContent = 'What';
+  const list = document.createElement('div');
+  list.className = 'thing-list scatter-things';
+  const card = (name: string, inner: string, title: string, on: boolean, onclick: () => void) => {
+    const c = document.createElement('button');
+    c.className = 'thing-card pick' + (on ? ' current' : '');
+    c.title = title;
+    c.innerHTML = `<span class="thumb">${inner}</span><span class="thing-name"></span>`;
+    c.querySelector('.thing-name')!.textContent = name;
+    c.onclick = onclick;
+    list.append(c);
+    return c;
+  };
+  card('Draw new', faClassic('pencil'), 'Draw something new, right where the first one goes; every copy follows as you draw', false, () => newScatterThing(m, set)).classList.add('new-card');
+  const things = collection();
+  for (const t of things) {
+    card(t.name, t.thumb ? `<img src="${t.thumb}" alt="" />` : fa('box'), `Scatter ${t.name}`, !m.source && m.thing?.id === t.id, () => {
+      set({ thing: stripThumb(t), source: undefined });
+      unlock('scatter');
+    });
+  }
+  // one it has that's not in My stuff (from a file, say)
+  if (!m.source && m.thing?.pieces.length && !things.some((t) => t.id === m.thing!.id)) card(m.thing.name, fa('box'), m.thing.name, true, () => {});
+  // or another creature in the scene: little critters all over this one (off stage, it's only seen here)
+  world.creatures.forEach((s, i) => {
+    if (i === world.active) return;
+    const id = creatureId(s);
+    const c = card(creatureLabel(i), '', `Scatter copies of ${creatureLabel(i)}: change it, and they change too`, m.source === id, () => {
+      set({ source: id, thing: undefined });
+      unlock('scatter');
+    });
+    creatureSwatch(c.querySelector('.thumb')!, s);
+  });
+  el.append(head, list);
+  const source = m.source ? world.creatures.findIndex((s) => s.id === m.source) : -1;
+  if (source >= 0) {
+    const edit = document.createElement('button');
+    edit.className = 'ghost scatter-edit';
+    edit.innerHTML = `${fa('pencil')} Change ${creatureLabel(source)}`;
+    edit.title = 'Edit that creature: every copy follows (click this one to come back)';
+    edit.onclick = () => editCreature(m.source!);
+    el.append(edit);
+    if (!world.creatures[source].offstage) {
+      const off = document.createElement('button');
+      off.className = 'link';
+      off.textContent = 'Keep it off stage';
+      off.title = 'Only seen scattered here (and while you edit it)';
+      off.onclick = () => setOffstage(creatures[source], true);
+      el.append(off);
+    }
+  } else if (m.thing?.pieces.length) {
+    const edit = document.createElement('button');
+    edit.className = 'ghost scatter-edit';
+    edit.innerHTML = `${fa('pencil')} Change it here`;
+    edit.title = 'Change it where the first one is: every copy (and anything wearing it) follows';
+    edit.onclick = () => editStuff({ kind: 'scatter', id: m.id! });
+    el.append(edit);
+  } else if (!things.length) {
+    const p = document.createElement('p');
+    p.className = 'muted small';
+    p.textContent = 'Draw something to scatter: spikes, scales, a flower…';
+    el.append(p);
+  }
+}
 export let bench: THREE.Group | null = null;
 export let benchKey = '';
 export function setBenchKey(v: typeof benchKey) {
@@ -151,14 +365,20 @@ function benchThing(): Thing {
   return shown;
 }
 
-/** On the workbench, a thing that inherits its material shows the creature's. */
+/** On the workbench, a thing that inherits its material shows the part it's on's (as it does worn or scattered). */
 function benchWearer(): Wearer {
-  return { style: state.style, settingsFor: (s) => creature.settingsFor(s) };
+  const f = stuffTarget && targetFrame(stuffTarget);
+  const style = (f && state.parts[f.bone.src]?.style) || state.style;
+  return { style, settingsFor: (s) => creature.settingsFor(s) };
 }
 
 export function syncWorkbench() {
+  followBoard();
+  // the grid (and the crosshair where it attaches) only while drawing
+  boardGrid.visible = drawState?.target.kind === 'piece';
   const thing = benchThing();
-  const key = JSON.stringify([thing.pieces, thing.markings, thing.pictures, thing.ownMaterial, thing.inherit, thing.materialSettings, thing.bend, thing.bendMode, state.materialSettings, state.style, getMeshDetail()]);
+  const wearer = benchWearer();
+  const key = JSON.stringify([thing.pieces, thing.markings, thing.pictures, thing.ownMaterial, thing.inherit, thing.materialSettings, thing.bend, thing.bendMode, state.materialSettings, wearer.style, getMeshDetail()]);
   if (key === benchKey) {
     refreshPieceGizmo();
     return;
@@ -169,7 +389,7 @@ export function syncWorkbench() {
     board.remove(bench);
     disposeThing(bench);
   }
-  bench = buildThing(thing, benchWearer());
+  bench = buildThing(thing, wearer);
   board.add(bench);
   refreshPieceGizmo();
 }
@@ -448,34 +668,40 @@ export function saveWorkbenchNow() {
   else badge.textContent = 'Storage full: download it to keep it';
   badge.classList.toggle('warn', !ok);
   if (!ok) return;
-  // creatures already wearing it get the new shape; how its material looks
-  // stays each wearer's own choice
-  world.creatures.forEach((s, i) => {
-    let changed = false;
-    for (const a of s.attachments ?? []) {
-      if (a.thing.id !== wb.id) continue;
-      const { inherit, ownMaterial, materialSettings, scaleMaterial } = a.thing;
-      a.thing = { ...stripThumb(saved), inherit, ownMaterial, materialSettings, scaleMaterial };
-      changed = true;
-    }
-    if (changed) creatures[i]?.sync();
-  });
+  spreadThing(saved);
   save();
   // My stuff is saved with the creation
   queueCreationSave();
   renderCollection();
 }
 
-/** Put a thing on the workbench (saving the one that was there first). */
-function openOnBench(t: Thing) {
-  saveWorkbenchNow();
-  world.workbench = stripThumb(t);
-  setSelectedPiece('');
-  $('#thing-saved').textContent = '';
-  syncWorkbench();
-  commit();
-  renderStuffPanel();
-  focusOnBoard();
+/** Every creature wearing (or scattered with) this thing gets it as it is now: a thing is the same thing everywhere (copy it in My stuff for one of its own). */
+function spreadThing(t: Thing) {
+  world.creatures.forEach((s, i) => {
+    let changed = false;
+    for (const a of s.attachments ?? []) {
+      if (a.thing.id !== t.id || a.thing === t) continue;
+      a.thing = stripThumb(t);
+      changed = true;
+    }
+    for (const m of [...(s.markings ?? []), ...Object.values(s.parts).flatMap((p) => p.markings ?? [])]) {
+      if (m.type !== 'scatter' || m.thing?.id !== t.id || m.thing === t) continue;
+      m.thing = stripThumb(t);
+      changed = true;
+    }
+    if (changed) creatures[i]?.sync();
+  });
+  if (world.workbench?.id === t.id && world.workbench !== t) world.workbench = stripThumb(t);
+}
+
+/** A worn (or scattered) thing changed where it is (its colors, materials, markings): the same change in My stuff and on everything else with it. */
+export function shareThing(t: Thing) {
+  if (!t.pieces.length) return;
+  const kept = collection().find((x) => x.id === t.id);
+  putThing({ ...stripThumb(t), thumb: kept?.thumb });
+  spreadThing(t);
+  queueCreationSave();
+  renderCollection();
 }
 
 /** Look straight at a drawing plane (a tilted piece's), from the side it faces. */
@@ -484,18 +710,33 @@ export function focusOnPlane(frame: THREE.Object3D) {
   const n = new THREE.Vector3(0, 0, 1).transformDirection(frame.matrixWorld);
   // face it from whichever side the camera is already on
   if (n.dot(camera.position.clone().sub(c)) < 0) n.negate();
-  flyTo(c.clone().addScaledVector(n, 1.4), c);
+  flyTo(c.clone().addScaledVector(n, 1.4 * boardScale()), c);
 }
 
+/** How big the board is in the scene (a scatter's copies are small). */
+function boardScale(): number {
+  return Math.abs(new THREE.Vector3().setFromMatrixScale(board.matrixWorld).x) || 1;
+}
+
+/** Look at the thing being edited from in front of it (the way the board faces, out of the creature). */
 export function focusOnBoard() {
+  followBoard();
   const c = board.getWorldPosition(new THREE.Vector3());
-  let r = 0.7;
+  const k = boardScale();
+  // what's drawn so far, with room round it (nothing yet: a board's worth)
+  let r = 0.5 * k;
   if (bench) {
     const box = new THREE.Box3().setFromObject(bench);
-    if (!box.isEmpty()) r = Math.max(0.5, box.getSize(new THREE.Vector3()).length() * 0.7);
+    if (!box.isEmpty()) r = Math.max(0.25 * k, box.getSize(new THREE.Vector3()).length() * 0.7);
   }
-  const dist = r / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
-  flyTo(c.clone().add(new THREE.Vector3(0, 0, Math.max(1.4, dist))), c);
+  const n = new THREE.Vector3(0, 0, 1).transformDirection(board.matrixWorld);
+  let dist = r / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+  if (stuffTarget?.kind === 'scatter') {
+    // one of many small copies: from further off, and a little from above it, so the ones round it and the surface they're on show too
+    n.addScaledVector(new THREE.Vector3(0, 1, 0).transformDirection(board.matrixWorld), 0.6).normalize();
+    dist = Math.max(0.9, dist * 2.5);
+  }
+  flyTo(c.clone().addScaledVector(n, Math.max(0.5, dist)), c);
 }
 
 /** Done on the workbench: add the drawn pieces, with any holes erased in them. */
@@ -515,6 +756,7 @@ export function addPieces(shapes: { outline: Vec2[]; holes: Vec2[][] }[]) {
   wb.pieces.push(...made);
   setSelectedPiece(made[0].id);
   unlock('piece');
+  if (stuffTarget?.kind === 'scatter') unlock('scatter');
   exitDraw(true);
   syncWorkbench();
   commit();
@@ -577,10 +819,16 @@ export function flashPiece(k: number) {
   });
 }
 
-/** Render just the thing, framed, into a small square image for the collection. */
+/** Render just the thing, framed, into a small square image for the collection (the creature it's on stepping out of the picture). */
 function captureThumb(): string {
   if (!bench) return '';
-  return snapThumb(new THREE.Box3().setFromObject(bench));
+  const shown = creatures.map((c) => c.root.visible);
+  for (const c of creatures) c.root.visible = false;
+  try {
+    return snapThumb(new THREE.Box3().setFromObject(bench));
+  } finally {
+    creatures.forEach((c, i) => (c.root.visible = shown[i]));
+  }
 }
 
 /** Render a clean frame and crop a small square round `box` as the camera sees it. */
@@ -601,6 +849,7 @@ export function snapThumb(box: THREE.Box3, size = 160): string {
   const side = Math.min(Math.max(x1 - x0, y1 - y0) * 1.15, canvas.width, canvas.height);
   const sx = THREE.MathUtils.clamp((x0 + x1) / 2 - side / 2, 0, canvas.width - side);
   const sy = THREE.MathUtils.clamp((y0 + y1) / 2 - side / 2, 0, canvas.height - side);
+  const grid = boardGrid.visible;
   boardGrid.visible = false;
   const url = withCleanScene(() => {
     composer.render();
@@ -609,7 +858,7 @@ export function snapThumb(box: THREE.Box3, size = 160): string {
     out.getContext('2d')!.drawImage(canvas, sx, sy, side, side, 0, 0, size, size);
     return out.toDataURL('image/jpeg', 0.82);
   });
-  boardGrid.visible = true;
+  boardGrid.visible = grid;
   // put the grid and handles straight back on screen
   invalidate();
   return url;
@@ -624,6 +873,15 @@ export function renderStuffPanel() {
   const wb = workbench();
   const nameInput = $<HTMLInputElement>('#thing-name');
   if (document.activeElement !== nameInput) nameInput.value = wb.name;
+  // what it is and where: worn on a part, or scattered
+  const t = stuffTarget;
+  const f = t && targetFrame(t);
+  const on = f ? partLabel(f.bone.src).toLowerCase() : 'creature';
+  $('#stuff-where').textContent = t?.kind === 'scatter' ? 'Scattered' : `On the ${on}`;
+  $('#stuff-note').textContent =
+    t?.kind === 'scatter'
+      ? 'Draw it where the first one is: every copy follows. It’s kept in My stuff as you go.'
+      : 'Draw it right where it sits. It’s kept in My stuff as you go, and anything else wearing it changes too.';
   if (!wb.pieces.some((p) => p.id === selectedPiece)) setSelectedPiece(wb.pieces[wb.pieces.length - 1]?.id ?? '');
   const picked = new Set(pickedPieces().map((p) => p.id));
 
@@ -673,7 +931,8 @@ export function renderStuffPanel() {
   $('#thing-bend-card').hidden = !wb.pieces.length;
   document.querySelectorAll<HTMLButtonElement>('#thing-bend-mode button').forEach((b) => b.classList.toggle('active', b.dataset.bend === (wb.bendMode ?? 'axis')));
   $<HTMLInputElement>('#thing-bend').value = String(wb.bend ?? 0);
-  $('#thing-wrap-card').hidden = !wb.pieces.length;
+  // (only worn things wrap onto the body)
+  $('#thing-wrap-card').hidden = !wb.pieces.length || stuffTarget?.kind === 'scatter';
   $<HTMLInputElement>('#thing-wrap-smooth').value = String(wb.wrapSmooth ?? WRAP_SMOOTH);
   $<HTMLInputElement>('#thing-wrap-strength').value = String(wb.wrapStrength ?? WRAP_STRENGTH);
 
@@ -746,61 +1005,63 @@ function updatePiece(fn: (p: Piece) => void, doCommit = true) {
   }
 }
 
+/** My stuff, to put on the picked part (click, or drag it onto the creature), or draw something new there. */
 export function renderCollection() {
-  const current = world.workbench?.id;
-  for (const [sel, forAttach] of [['#thing-list', false], ['#attach-options', true]] as const) {
-    const el = $(sel);
-    el.innerHTML = '';
-    const things = collection();
-    if (forAttach && !things.length) {
-      el.innerHTML = `<p class="muted small">Nothing here yet. Make something first:</p>`;
-      const make = document.createElement('button');
-      make.className = 'ghost';
-      make.innerHTML = `${fa('briefcase')} Make new stuff`;
-      // (Stuff from the rail: in Guided it's still part of Dress up)
-      make.onclick = () => document.querySelector<HTMLButtonElement>('.rail [data-mode="stuff"]')?.click();
-      el.append(make);
-      continue;
-    }
-    const card = (name: string, thumb: string | undefined, onclick: () => void) => {
-      const c = document.createElement('div');
-      c.className = 'thing-card pick';
-      const img = document.createElement(thumb ? 'img' : 'div');
-      img.className = 'thumb';
-      if (thumb) (img as HTMLImageElement).src = thumb;
-      const label = document.createElement('span');
-      label.className = 'thing-name';
-      label.textContent = name;
-      c.title = name;
-      c.append(img, label);
-      c.onclick = onclick;
-      el.append(c);
-      return c;
-    };
-    if (!forAttach) {
-      // start something new (an empty workbench already is something new)
-      const fresh = card('New', undefined, () => {
-        if (world.workbench?.pieces.length) openOnBench(newThing());
-      });
-      fresh.classList.add('new-card');
-      fresh.querySelector('.thumb')!.innerHTML = faClassic('plus');
-      fresh.classList.toggle('current', !things.some((t) => t.id === current));
-    }
-    for (const t of things) {
-      const c = card(t.name, t.thumb, () => {
-        if (forAttach) attachThing(t);
-        else if (t.id !== current) openOnBench(t);
-      });
-      if (forAttach) {
-        c.classList.add('carry');
-        carryFrom(c, () => t, () => (t.thumb ? `<img src="${t.thumb}" alt="" />` : fa('box')));
-      }
-      if (!forAttach) {
-        c.classList.toggle('current', t.id === current);
-        c.append(thingActions(t));
-      }
-    }
+  const el = $('#attach-options');
+  el.innerHTML = '';
+  const things = collection();
+  const card = (name: string, thumb: string | undefined, onclick: () => void) => {
+    const c = document.createElement('div');
+    c.className = 'thing-card pick';
+    const img = document.createElement(thumb ? 'img' : 'div');
+    img.className = 'thumb';
+    if (thumb) (img as HTMLImageElement).src = thumb;
+    const label = document.createElement('span');
+    label.className = 'thing-name';
+    label.textContent = name;
+    c.title = name;
+    c.append(img, label);
+    c.onclick = onclick;
+    el.append(c);
+    return c;
+  };
+  const fresh = card('Draw new', undefined, () => {
+    $('#attach-pop').hidden = true;
+    newStuffHere();
+  });
+  fresh.title = 'Draw something new, right on this part';
+  fresh.classList.add('new-card');
+  fresh.querySelector('.thumb')!.innerHTML = faClassic('pencil');
+  for (const t of things) {
+    const c = card(t.name, t.thumb, () => attachThing(t));
+    c.classList.add('carry');
+    carryFrom(c, () => t, () => (t.thumb ? `<img src="${t.thumb}" alt="" />` : fa('box')));
+    c.append(thingActions(t));
   }
+  if (!things.length) el.insertAdjacentHTML('beforeend', '<p class="muted small">Nothing in My stuff yet: draw something, right on your critter.</p>');
+  // the scene's other creatures can be worn too (they stay creatures: click one to change it)
+  const others = world.creatures.map((s, i) => ({ s, i })).filter(({ i }) => i !== world.active);
+  if (!others.length) return;
+  const head = document.createElement('div');
+  head.className = 'sub-title attach-creatures-head';
+  head.textContent = 'Creatures in the scene';
+  head.title = 'Put one on this part: it rides there, wherever the part goes, and stays a creature you can click and change';
+  el.append(head);
+  for (const { s, i } of others) {
+    const c = card(creatureLabel(i), undefined, () => {
+      $('#attach-pop').hidden = true;
+      wearCreature(i, selected);
+    });
+    creatureSwatch(c.querySelector('.thumb')!, s);
+    c.title = `Put ${creatureLabel(i)} on this part`;
+  }
+}
+
+/** A creature's card picture: its color, with a paw. */
+function creatureSwatch(el: Element, s: CreatureState) {
+  el.classList.add('creature-swatch');
+  (el as HTMLElement).style.background = Object.values(s.parts)[0]?.color ?? '#ccc';
+  el.innerHTML = fa('paw');
 }
 /** A copy of a piece, nudged aside so it shows, right after it and picked. */
 export function copyPiece(id: string) {
@@ -1043,43 +1304,28 @@ function thingActions(t: Thing): HTMLElement {
     };
     actions.append(b);
   };
-  action('copy', 'Make a copy of this thing to change', () => copyThing(t));
+  action('copy', 'Make a copy of this thing (to change one and not the other)', () => copyThing(t));
   action('arrow-down-to-line', 'Download as a .stuff file', () => downloadThing(t));
   action('trash', 'Remove from My stuff', () => deleteThing(t));
   return actions;
 }
-/** The open thing is the one on the workbench (its latest changes may not be saved yet). */
-const latest = (t: Thing): Thing => (t.id === world.workbench?.id ? workbench() : t);
 function copyThing(t: Thing) {
-  const src = latest(t);
-  if (!src.pieces.length) return;
-  openOnBench({ ...stripThumb(src), id: uid(), name: `${src.name.trim() || 'Thing'} copy` });
-  hint('Made a copy to change', 1800);
+  if (!t.pieces.length) return;
+  putThing({ ...structuredClone(t), id: uid(), name: `${t.name.trim() || 'Thing'} copy` });
+  queueCreationSave();
+  renderCollection();
+  hint('Copied: put the copy on, then change it', 2000);
 }
 function downloadThing(t: Thing) {
-  const src = latest(t);
   // one kind of file: a save holding just this thing opens straight into My stuff
-  saveBundle({ creatures: [], stuff: [stripThumb(src)], rigs: [] }, src.name.trim() || 'thing');
+  saveBundle({ creatures: [], stuff: [stripThumb(t)], rigs: [] }, t.name.trim() || 'thing');
 }
 function deleteThing(t: Thing) {
-  const src = latest(t);
-  const name = src.name.trim() || 'this thing';
-  if (src.pieces.length && !confirm(`Delete "${name}" from My stuff? (Creatures already wearing it keep their copy.)`)) return;
-  if (t.id !== world.workbench?.id) {
-    removeThing(t.id);
-    renderStuffPanel();
-    return;
-  }
-  clearTimeout(thingSaveTimer);
+  const name = t.name.trim() || 'this thing';
+  if (t.pieces.length && !confirm(`Delete "${name}" from My stuff? (Creatures already wearing it keep their copy.)`)) return;
   removeThing(t.id);
-  // carry on with the last thing in the list, or a fresh one
-  const next = collection().at(-1);
-  world.workbench = next ? stripThumb(next) : newThing();
-  setSelectedPiece('');
-  $('#thing-saved').textContent = '';
-  syncWorkbench();
-  commit();
-  renderStuffPanel();
+  queueCreationSave();
+  renderCollection();
 }
 
 export function initWorkbench() {
@@ -1115,6 +1361,7 @@ export function initWorkbench() {
     b.onclick = () => setPieceDim(b.dataset.dim as '2d' | '3d');
   });
   $('#piece-flat').onclick = () => layPieceFlat();
+  $('#stuff-done').onclick = () => finishStuff();
   $('#piece-draw').onclick = () => enterDraw({ kind: 'piece' });
   document.querySelectorAll<HTMLButtonElement>('#piece-kind button').forEach((b) => {
     b.onclick = () =>

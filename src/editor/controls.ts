@@ -34,7 +34,7 @@ import {
 } from './state';
 import { creatureBox } from './framing';
 import { drawState, enterDraw, spacePan } from './drawing';
-import { choosePiece, pickPiece, renderStuffPanel, selectedPiece, setSelectedPiece } from './workbench';
+import { choosePiece, editStuff, pickPiece, renderStuffPanel, selectedPiece, setSelectedPiece } from './workbench';
 import { deselectAttachment, gizmo, selectedAttachment } from './attach';
 import { placing, stopPlacing } from './arrange';
 import { pickAttachment, pickStuff } from './carry';
@@ -47,6 +47,7 @@ import { hint, hintOnce } from './hints';
 import { focusAt, pickingFocus } from './dof';
 import { invalidate } from './loop';
 import { animOn, pickAnimStuff } from './animateTab';
+import { pickingRide, rideClick } from './riders';
 
 export const raycaster = new THREE.Raycaster();
 export const pointer = { downX: 0, downY: 0, moved: false, touch: false, held: false };
@@ -532,6 +533,12 @@ function onDoubleClick(x: number, y: number) {
   if (other) activate(other.index);
   // the first click already went to the eye settings
   else if (pickEye(x, y) !== null) return;
+  // worn stuff: change it right where it is
+  const att = other || animOn() ? null : pickAttachment(x, y);
+  if (att) {
+    editStuff({ kind: 'worn', id: att });
+    return;
+  }
   const id = pickPart(x, y);
   if (!id) return;
   selectPart(id);
@@ -560,7 +567,8 @@ export function setRay(clientX: number, clientY: number) {
 export function pickOtherCreature(x: number, y: number): { index: number; boneId?: string } | null {
   if (creatures.length < 2) return null;
   setRay(x, y);
-  const targets = creatures.flatMap((c) => [...c.meshes(), ...c.attachmentMeshes()]);
+  // (not one off stage: it isn't there to click)
+  const targets = creatures.filter((c) => c.root.visible).flatMap((c) => [...c.meshes(), ...c.attachmentMeshes()]);
   const hit = raycaster.intersectObjects(targets, false)[0];
   if (!hit) return null;
   let o: THREE.Object3D | null = hit.object;
@@ -1066,6 +1074,10 @@ export function initControls() {
     if (doubleTapped(e)) return;
     if (pickingFocus) {
       focusAt(e.clientX, e.clientY);
+      return;
+    }
+    if (pickingRide) {
+      rideClick(e.clientX, e.clientY);
       return;
     }
     if (pickingParent) {

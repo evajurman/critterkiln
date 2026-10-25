@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import { Creature, defaultState, type CreatureState } from '../creature';
 import { bump, checkScene } from '../achievements';
-import { type Thing } from '../stuff';
+import { uid, type Thing } from '../stuff';
 import { migrateMarkings } from '../markings';
 import { stopMarkTools } from '../markingPanel';
 import { type Tab } from '../layout';
@@ -279,9 +279,10 @@ export function makeCreature(s: CreatureState): Creature {
     }
   }
   parentsChecked.set(s, structuredClone(s.rig));
+  // (what rides on it, or scatters it, knows it by this)
+  s.id ??= uid();
   const c = new Creature(s);
   scene.add(c.root);
-  c.root.visible = mode !== 'stuff';
   c.setSkeletonVisible(false);
   return c;
 }

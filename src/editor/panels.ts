@@ -5,13 +5,10 @@ import { unlock } from '../achievements';
 import { stopMarkTools } from '../markingPanel';
 import { customTabs, guidedOn, isStep, noteTab, setGuided, setLayoutTab, STUFF_STEP } from '../layout';
 import { $ } from './dom';
-import { sceneOrtho, setOrtho } from './stage';
-import { backdrop, paintBackdrop, STUFF_BACKDROP } from './floor';
-import { alsoPicked, creature, creatures, idle, type Mode, mode, selected, setModeValue, setSelected, state, world } from './state';
+import { alsoPicked, creature, idle, type Mode, mode, selected, setModeValue, setSelected, state, world } from './state';
 import { creatureLabel, syncIdle, updateSkeletonVisibility } from './controls';
-import { frameCreature } from './framing';
 import { drawState, exitDraw } from './drawing';
-import { autosaveThing, board, focusOnBoard, refreshPieceGizmo, renderStuffPanel, saveWorkbenchNow, syncWorkbench } from './workbench';
+import { autosaveThing, board, focusOnBoard, leaveStuff, newStuffHere, refreshPieceGizmo, renderStuffPanel, stuffTarget, syncWorkbench } from './workbench';
 import { deselectAttachment } from './attach';
 import { stopPlacing } from './arrange';
 import { renderCreatureBar } from './creatureBar';
@@ -26,6 +23,8 @@ import { renderMerge } from './blendPanel';
 import { setPickPill } from './sheet';
 import { ANIM_TAB, renderAnim } from './animateTab';
 import { renderScope } from './scope';
+import { wornPieces } from './attachPanel';
+import { stopPattern } from './pattern';
 
 export function renderUI() {
   if (!creature.bones.has(selected)) setSelected(creature.list[0].def.id);
@@ -49,14 +48,16 @@ export function renderUI() {
 }
 
 export function setMode(m: Mode) {
-  if (drawState) exitDraw();
-  // leaving the workbench: keep what's on it (while it's still there to photograph)
-  if (mode === 'stuff' && m !== 'stuff') saveWorkbenchNow();
-  // the workbench's own backdrop and flat (ortho) view last only while it's open
-  if ((mode === 'stuff') !== (m === 'stuff')) {
-    paintBackdrop(m === 'stuff' ? STUFF_BACKDROP : backdrop);
-    setOrtho(m === 'stuff' || sceneOrtho);
+  // stuff is edited where it is on the creature (see editStuff): with nothing to edit, something new on the picked part
+  if (m === 'stuff' && !stuffTarget) {
+    newStuffHere();
+    return;
   }
+  if (drawState) exitDraw();
+  // (a pattern's preview is for the tab it was started in)
+  stopPattern();
+  // leaving the workbench: keep what's on it (while it's still there to photograph)
+  if (mode === 'stuff' && m !== 'stuff') leaveStuff();
   setModeValue(m);
   // a step is Guided, any other mode Free (its key, say); Stuff is either: in Guided it's part of Dress up
   if (m !== 'stuff' && isStep(m) !== guidedOn()) setGuided(isStep(m));
@@ -65,7 +66,7 @@ export function setMode(m: Mode) {
   if (m === ANIM_TAB) deselectAttachment();
   stopMarkTools();
   applyDof();
-  if (m === 'look' || m === 'stuff') unlock(m);
+  if (m === 'look') unlock(m);
   const lit = m === 'stuff' && guidedOn() ? STUFF_STEP : m;
   document.querySelectorAll<HTMLButtonElement>('.modes button').forEach((b) => b.classList.toggle('active', b.dataset.mode === lit));
   // on a phone the rail is a row that scrolls: keep the open mode (or step) in sight
@@ -78,17 +79,13 @@ export function setMode(m: Mode) {
   if (m === 'stuff') stopPlacing();
   if (m === 'stuff') deselectAttachment();
   if (m === 'stuff') $('#attach-pop').hidden = true;
-  const wasStuff = board.visible;
   board.visible = m === 'stuff';
-  for (const c of creatures) c.root.visible = m !== 'stuff';
   if (m === 'stuff') {
     syncWorkbench();
     renderStuffPanel();
     focusOnBoard();
     autosaveThing();
-    hintOnce('Draw pieces on the board; the blue crosshair is where it attaches', 3200);
-  } else if (wasStuff) {
-    frameCreature();
+    hintOnce('Draw pieces right on your critter; Done when it’s right', 3200);
   }
   updateSkeletonVisibility();
   syncIdle();
@@ -109,9 +106,16 @@ function renderInspectorHead() {
   const side = (n: string) => n.replace(/ \((L|R)\)$/, '');
   const srcs = pickedSrcs();
   const several = !idle && srcs.length > 1;
-  const path = idle ? '' : several ? creatureLabel(world.active) : [creatureLabel(world.active), b?.parent && side(b.parent.def.name)].filter(Boolean).join(' › ');
+  let path = idle ? '' : several ? creatureLabel(world.active) : [creatureLabel(world.active), b?.parent && side(b.parent.def.name)].filter(Boolean).join(' › ');
   let name = idle ? 'Nothing picked' : partName() || (b ? side(b.def.name) : '');
   if (several) name = allPicked() ? `All ${Object.keys(state.parts).length} parts` : srcs.length === 2 ? srcs.map(partLabel).join(' + ') : `${srcs.length} parts`;
+  // a worn thing picked: it (or its picked pieces), on its part
+  const w = wornPieces();
+  if (w) {
+    const n = w.pieces.length;
+    path = [creatureLabel(world.active), b && side(b.def.name)].filter(Boolean).join(' › ');
+    name = (w.thing.name || 'Thing') + (n < w.thing.pieces.length ? ` · ${n === 1 ? `Piece ${w.thing.pieces.indexOf(w.pieces[0]) + 1}` : `${n} pieces`}` : '');
+  }
   $('#inspector-path').textContent = path;
   $('#inspector-name').textContent = name;
   setPickPill(name, idle ? null : (state.parts[b?.src ?? '']?.color ?? null));

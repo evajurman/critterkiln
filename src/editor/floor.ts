@@ -164,7 +164,6 @@ export function tintForBackdrop(c: THREE.Color) {
 }
 
 /** The Stuff workbench has its own backdrop while it's open; the scene's comes back after. */
-export const STUFF_BACKDROP = '#adcfa5';
 export function paintBackdrop(hex: string) {
   const c = new THREE.Color(hex);
   scene.background = untoned(c);
@@ -174,7 +173,7 @@ export function paintBackdrop(hex: string) {
 
 export function setBackdrop(hex: string) {
   backdrop = hex;
-  paintBackdrop(mode === 'stuff' ? STUFF_BACKDROP : hex);
+  paintBackdrop(hex);
   try {
     localStorage.setItem(BG_KEY, hex);
   } catch {

@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // The Markings panel, for anything that can be marked: a creature's parts
-// (the Look tab) or a stuff item's pieces (the Stuff tab). A MarkTarget says
+// (the Look tab) or a stuff item's pieces (while it's made). A MarkTarget says
 // where its markings live: on the whole (creature, item), where any one
 // part or piece can turn them off, or on one part or piece. The panel lists
 // the picked one's, edits them, and runs the tools that work in the view:
@@ -13,6 +13,8 @@ import {
   FONTS,
   MARKINGS,
   MAX_MARKINGS,
+  SCATTER_MOTIONS,
+  SCATTER_WHERE,
   STICKERS,
   defaultMarking,
   endLivePaint,
@@ -55,6 +57,11 @@ export interface MarkTarget {
   surface(ray: THREE.Raycaster): { point: THREE.Vector3; at: THREE.Vector3 } | null;
   /** a spot's mirror image across its middle, in the pattern space (paint can go on both sides at once) */
   mirror?(v: THREE.Vector3): THREE.Vector3;
+  /**
+   * It can be scattered over: draws what a scatter scatters into `el` (a
+   * thing to pick, or one to draw), changing the marking with `set`.
+   */
+  scatterThing?(el: HTMLElement, m: Marking, set: (patch: Partial<Marking>) => void): void;
 }
 
 /** What the panels need from the app. */
@@ -203,7 +210,7 @@ export function initMarkingTools(h: MarkHost) {
     if (!p || !r) return;
     const list = p.list(r.all);
     const i = list.indexOf(m) >= 0 ? list.indexOf(m) : r.i;
-    if (list[i]?.type !== 'paint') return;
+    if (!paints(list[i])) return;
     list[i] = { ...list[i], strokes };
     p.save(list, true, r.all);
     p.render();
@@ -254,10 +261,13 @@ export function markGizmoMode(m: GizmoMode): boolean {
   return true;
 }
 
+/** Whether the brush paints on this marking: paint, or a scatter laid where it's painted. */
+const paints = (m: Marking | undefined) => m?.type === 'paint' || (m?.type === 'scatter' && m.where === 'paint');
+
 /** The paint marking the brush paints on, if it's picked up. */
 function paintMarking(): Marking | undefined {
   const m = brush.on ? tools?.openRef()?.m : undefined;
-  return m?.type === 'paint' ? m : undefined;
+  return paints(m) ? m : undefined;
 }
 
 /**
@@ -422,7 +432,8 @@ export class MarkingPanel {
 
   /** How many markings a unit shows. */
   private count(id: string, except?: Marking): number {
-    return shownMarkings(this.target.wholeMarkings(), this.target.ownMarkings(id), id).filter((m) => m !== except).length;
+    // (scatters aren't drawn by the material: they don't use up its markings)
+    return shownMarkings(this.target.wholeMarkings(), this.target.ownMarkings(id), id).filter((m) => m !== except && m.type !== 'scatter').length;
   }
 
   /** Make these the whole's markings (`all`), or the picked unit's own. */
@@ -442,7 +453,8 @@ export class MarkingPanel {
   }
 
   /** Why a marking can't go on (the whole, or the picked unit), if it can't: a unit already shows as many as it can. */
-  private noRoomFor(all: boolean, except?: Marking): string | null {
+  private noRoomFor(all: boolean, except?: Marking, type?: Marking['type']): string | null {
+    if (type === 'scatter') return null;
     const t = this.target;
     const picked = t.picked();
     const ids = all ? t.units() : picked !== null ? [picked] : [];
@@ -500,6 +512,8 @@ export class MarkingPanel {
     const { size, rough, amount, darkness, color, finish, relief, offset, turn, stretch, skip } = old;
     const keep: Partial<Marking> = { size, rough, amount, darkness, color, finish, relief, offset, turn, stretch, skip };
     const m: Marking = { ...defaultMarking(type), ...Object.fromEntries(Object.entries(keep).filter(([, v]) => v !== undefined)) };
+    // a scatter keeps what it scattered, should it come back
+    if (type === 'scatter' && old.thing) m.thing = old.thing;
     // a sticker made from a pattern goes where it's being looked at
     if (STICKERS.includes(type) && !STICKERS.includes(old.type)) this.faceView(m);
     list[r.i] = m;
@@ -575,7 +589,7 @@ export class MarkingPanel {
   }
 
   /** Pick up the brush (or the eraser) for the open paint marking. */
-  private startBrush(erase: boolean) {
+  startBrush(erase: boolean) {
     if (tools && tools !== this) stopMarkTools();
     if (gizmoOn) {
       gizmoOn = false;
@@ -595,7 +609,7 @@ export class MarkingPanel {
     if (tools !== this) return;
     const m = this.openRef()?.m;
     const f = m && this.target.frame();
-    if (!m || !f || (brush.on && m.type !== 'paint') || (!brush.on && !gizmoOn)) {
+    if (!m || !f || (brush.on && !paints(m)) || (!brush.on && !gizmoOn)) {
       if (markToolsOut()) stopMarkTools();
       return;
     }
@@ -682,7 +696,8 @@ export class MarkingPanel {
     add.className = 'ghost mark-add' + (this.adding ? ' on' : '');
     add.innerHTML = `<i class="fa-duotone fa-regular fa-plus" aria-hidden="true"></i> Add marking ${this.all ? `to the whole ${t.whole}` : `to this ${t.unit}`}`;
     const why = this.noRoomFor(this.all);
-    add.disabled = !!why;
+    // (a scatter always fits)
+    add.disabled = !!why && !this.target.scatterThing;
     add.title = why ?? (this.all ? `Lay a pattern over every ${t.unit} (it can be taken off any one of them after)` : `Lay a pattern over just this ${t.unit}`);
     add.onclick = () => {
       this.adding = !this.adding;
@@ -693,6 +708,8 @@ export class MarkingPanel {
     if (this.adding) {
       el.append(
         this.kinds(undefined, (type) => {
+          const full = this.noRoomFor(this.all, undefined, type);
+          if (full) return host.hint(full, 2600, true);
           const m = defaultMarking(type);
           if (STICKERS.includes(type)) this.faceView(m);
           const all = this.all;
@@ -716,6 +733,7 @@ export class MarkingPanel {
     const kinds = document.createElement('div');
     kinds.className = 'mark-kinds';
     for (const k of MARKINGS) {
+      if (k.type === 'scatter' && !this.target.scatterThing) continue;
       const btn = document.createElement('button');
       btn.title = k.title;
       if (k.type === now) btn.className = 'active';
@@ -744,7 +762,7 @@ export class MarkingPanel {
     reset.textContent = 'Reset';
     reset.onclick = () => {
       // (what's been painted, written or picked stays, and a sticker where it is)
-      const keep: Partial<Marking> = { picture: m.picture, text: m.text, font: m.font, strokes: m.strokes, id: m.id, skip: m.skip };
+      const keep: Partial<Marking> = { picture: m.picture, text: m.text, font: m.font, strokes: m.strokes, id: m.id, skip: m.skip, thing: m.thing, where: m.where, seed: m.seed };
       if (STICKERS.includes(m.type)) Object.assign(keep, { offset: m.offset, turn: m.turn, stretch: m.stretch });
       list[list.indexOf(m)] = { ...defaultMarking(m.type), ...Object.fromEntries(Object.entries(keep).filter(([, v]) => v !== undefined)) };
       this.save(list, true, all);
@@ -786,6 +804,10 @@ export class MarkingPanel {
       row.append(name, input, e);
       el.append(row);
     };
+    if (m.type === 'scatter') {
+      this.scatterParams(el, r, m, list, change);
+      return;
+    }
     const uses = markingUses(m.type);
     if (m.type === 'picture') {
       const choose = document.createElement('button');
@@ -852,7 +874,14 @@ export class MarkingPanel {
     color.onchange = () => host.commit();
     row.append(own, color);
     el.append(row);
-    // where the pattern lies: a gizmo in the view moves, turns and stretches it
+    this.placeRow(el, m, list, all);
+    this.whereRow(el, r);
+    this.syncTools();
+  }
+
+  /** Where the pattern lies: a gizmo in the view moves, turns and stretches it. */
+  private placeRow(el: HTMLElement, m: Marking, list: Marking[], all: boolean) {
+    const t = this.target;
     const place = document.createElement('div');
     place.className = 'mark-place';
     const seg = document.createElement('div');
@@ -887,7 +916,12 @@ export class MarkingPanel {
     };
     place.append(seg, back);
     el.append(place);
-    // where it lives: moved to the whole, or kept to just this unit
+  }
+
+  /** Where it lives: moved to the whole, or kept to just this unit. */
+  private whereRow(el: HTMLElement, r: MarkRef) {
+    const t = this.target;
+    const all = r.all;
     const where = document.createElement('div');
     where.className = 'mark-where';
     const move = document.createElement('button');
@@ -897,6 +931,131 @@ export class MarkingPanel {
     move.onclick = () => this.move(r);
     where.append(all ? `On the whole ${t.whole}` : `On this ${t.unit}`, move);
     el.append(where);
+  }
+
+  /** A scatter's settings: what's scattered, where, how many, how big, which way and how they move. */
+  private scatterParams(el: HTMLElement, r: MarkRef, m: Marking, list: Marking[], change: (patch: Partial<Marking>) => void) {
+    const all = r.all;
+    const t = this.target;
+    const sub = (text: string) => {
+      const d = document.createElement('div');
+      d.className = 'sub-title';
+      d.textContent = text;
+      el.append(d);
+    };
+    const pick = document.createElement('div');
+    pick.className = 'scatter-thing';
+    el.append(pick);
+    t.scatterThing?.(pick, m, (patch) => {
+      Object.assign(m, patch);
+      this.save(list, true, all);
+      this.render();
+    });
+    const slider = (label: string, get: () => number, set: (v: number) => void, min: number, max: number, ends: [string, string], def: number, step = 0.01, title = '') => {
+      const row = document.createElement('label');
+      row.className = 'slider';
+      if (title) row.title = title;
+      const input = document.createElement('input');
+      input.type = 'range';
+      input.min = String(min);
+      input.max = String(max);
+      input.step = String(step);
+      input.value = String(get());
+      input.dataset.default = String(def);
+      input.oninput = () => set(parseFloat(input.value));
+      input.onchange = () => host.commit();
+      const name = document.createElement('span');
+      name.textContent = label;
+      const e = document.createElement('span');
+      e.className = 'ends';
+      e.innerHTML = `<em>${ends[0]}</em><em>${ends[1]}</em>`;
+      row.append(name, input, e);
+      el.append(row);
+    };
+    const seg = <T extends string>(items: { id: T; label: string; title: string }[], now: T, set: (v: T) => void) => {
+      const s = document.createElement('div');
+      s.className = 'seg scatter-seg';
+      for (const it of items) {
+        const b = document.createElement('button');
+        b.className = it.id === now ? 'active' : '';
+        b.innerHTML = it.label;
+        b.title = it.title;
+        b.onclick = () => set(it.id);
+        s.append(b);
+      }
+      el.append(s);
+    };
+    const keep = () => {
+      this.save(list, true, all);
+      this.render();
+    };
+    sub('Where');
+    const where = m.where ?? 'all';
+    seg(SCATTER_WHERE.map((w) => ({ id: w.where, label: w.name, title: w.title })), where, (w) => {
+      m.where = w;
+      if (w === 'paint') m.strokes ??= [];
+      keep();
+      if (w === 'paint') this.startBrush(false);
+      else if (brush.on && tools === this) stopMarkTools();
+    });
+    if (where === 'paint') this.paintTools(el, m, list, all);
+    else if (where !== 'all') {
+      slider('Size', () => m.size, (v) => change({ size: v }), 0.2, 3, ['small', 'big'], 1, 0.01, 'How big the patches they gather in are');
+      slider('Threshold', () => 1 - m.threshold, (v) => change({ threshold: 1 - v }), 0, 1, ['less', 'more'], 0.55, 0.01, 'How much of it they cover');
+    }
+    sub('How many and how big');
+    slider('Amount', () => m.amount, (v) => change({ amount: v }), 0, 1, ['few', 'lots'], 0.35);
+    slider('Size', () => m.scale ?? 0.25, (v) => change({ scale: v }), 0.03, 1, ['tiny', 'as drawn'], 0.25, 0.005, 'How big each copy is, against the thing as it was drawn');
+    slider('Variety', () => m.vary ?? 0.3, (v) => change({ vary: v }), 0, 1, ['alike', 'mixed'], 0.3);
+    slider('Spacing', () => m.spacing ?? 0.5, (v) => change({ spacing: v }), 0, 1.5, ['close', 'apart'], 0.5);
+    sub('Which way');
+    seg(
+      [
+        { id: 'stand', label: '<i class="fa-duotone fa-regular fa-arrow-up" aria-hidden="true"></i> Stand up', title: 'The way it was drawn up points out of the surface: spikes, grass, flowers' },
+        { id: 'lie', label: '<i class="fa-duotone fa-regular fa-layer-group" aria-hidden="true"></i> Lie flat', title: 'Lying on the surface, its front facing out: scales, badges, sequins' },
+      ],
+      m.lie ? 'lie' : 'stand',
+      (v) => {
+        if (v === 'lie') m.lie = true;
+        else delete m.lie;
+        keep();
+      },
+    );
+    slider('Upright', () => m.upright ?? 0, (v) => change({ upright: v }), 0, 1, ['out', 'up'], 0, 0.01, 'Out of the surface, or up towards the sky (grass grows up)');
+    slider('Turn', () => m.spin ?? 1, (v) => change({ spin: v }), 0, 1, ['alike', 'any way'], 1, 0.01, 'Each turned round at random');
+    slider('Lean', () => m.lean ?? 0, (v) => change({ lean: v }), 0, 1, ['straight', 'tipped'], 0.15);
+    slider('Sink in', () => m.sink ?? 0, (v) => change({ sink: v }), 0, 1, ['on top', 'deep'], 0.1);
+    sub('Motion');
+    const kind = m.motion?.kind ?? 'none';
+    seg(
+      [{ id: 'none', label: 'Still', title: 'They keep still (they still ride along as it is posed)' }, ...SCATTER_MOTIONS.map((k) => ({ id: k.kind as string, label: `<i class="fa-duotone fa-regular fa-${k.icon}" aria-hidden="true"></i> ${k.name}`, title: k.title }))],
+      kind as string,
+      (v) => {
+        if (v === 'none') delete m.motion;
+        else m.motion = { size: m.motion?.size ?? 0.5, speed: m.motion?.speed ?? 1, kind: v as NonNullable<Marking['motion']>['kind'] };
+        keep();
+      },
+    );
+    if (m.motion) {
+      const mo = m.motion;
+      slider('How much', () => mo.size, (v) => change({ motion: { ...mo, size: (mo.size = v) } }), 0.05, 1, ['a little', 'lots'], 0.5);
+      slider('Speed', () => mo.speed, (v) => change({ motion: { ...mo, speed: (mo.speed = Math.round(v)) } }), 1, 6, ['slow', 'fast'], 1, 1, 'Times each one goes back and forth in one loop of the Animate tab');
+    }
+    const foot = document.createElement('div');
+    foot.className = 'mark-place';
+    const shuffle = document.createElement('button');
+    shuffle.className = 'link';
+    shuffle.innerHTML = '<i class="fa-duotone fa-regular fa-shuffle" aria-hidden="true"></i> Shuffle';
+    shuffle.title = 'Scatter them again, somewhere else';
+    shuffle.onclick = () => {
+      m.seed = Math.floor(Math.random() * 1e6);
+      keep();
+    };
+    foot.append(shuffle);
+    el.append(foot);
+    // a pattern (or paint) can be moved about: the copies follow it
+    if (where !== 'all') this.placeRow(el, m, list, all);
+    this.whereRow(el, r);
     this.syncTools();
   }
 

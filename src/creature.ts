@@ -23,7 +23,8 @@ import {
 } from './materials';
 import { expandRig, type ExpandedBone, type ExpandedRig, type RigState, type V3 } from './rigs';
 import type { PartAnim, StuffAnim } from './animate';
-import { MAX_LAYERS, applyMarkings, markingKey, markingsKey, setPictures, shownMarkings, type Marking } from './markings';
+import { MAX_LAYERS, applyMarkings, markingKey, markingsKey, painted, setPictures, shownMarkings, type Marking } from './markings';
+import { copyMove, scatterCopies, type ScatterBlocker, type ScatterCopy } from './scatter';
 import { buildThing, disposeThing, type Thing, type WrapSurface } from './stuff';
 import {
   type Bend,
@@ -78,11 +79,16 @@ export interface PartState {
 export type PartKind = 'puffy' | 'flat' | 'turned';
 
 /**
- * The markings a part shows: the whole creature's (but those turned off on
- * it), then its own, the last on top.
+ * The markings a part's material draws: the whole creature's (but those
+ * turned off on it), then its own, the last on top. (Not its scatters: see scattersOf.)
  */
 export function markingsOf(s: CreatureState, id: string): Marking[] {
-  return shownMarkings(s.markings, s.parts[id]?.markings, id);
+  return painted(shownMarkings(s.markings, s.parts[id]?.markings, id));
+}
+
+/** The scatters a part shows (once they've a thing or a creature to scatter, even a thing not drawn yet), the whole creature's first. */
+export function scattersOf(s: CreatureState, id: string): Marking[] {
+  return shownMarkings(s.markings, s.parts[id]?.markings, id).filter((m) => m.type === 'scatter' && !!m.id && (!!m.thing || !!m.source));
 }
 
 /**
@@ -226,6 +232,12 @@ export interface Attachment {
 
 export interface CreatureState {
   name?: string;
+  /** stays the same however the scene changes (what rides on it, or scatters it, holds on to) */
+  id?: string;
+  /** worn on a part of another creature: it goes where that part goes (instead of standing on the floor) */
+  rides?: Ride;
+  /** kept off the stage: only seen scattered over others (and while it's the one being edited) */
+  offstage?: boolean;
   /** the creature's own (editable) skeleton */
   rig: RigState;
   style: StyleId;
@@ -265,6 +277,15 @@ export interface CreatureState {
   pictures?: Record<string, string>;
   /** 1 once patterns that used to be material settings (stone cracks, metal patina...) are parts' markings (see migrateMarkings) */
   markingsV?: number;
+}
+
+/** Where a creature rides on another: the other's id, the part, and its place in that part's frame (its floor point there). */
+export interface Ride {
+  on: string;
+  bone: string;
+  position: V3;
+  quaternion: [number, number, number, number];
+  scale: V3;
 }
 
 export interface Placement {
@@ -438,6 +459,10 @@ function disposeSkins(skins: SkinEntry[]) {
 }
 
 export class Creature {
+  /** Another creature in the scene, by its id (for scattering copies of it): set by the editor. */
+  static find: (id: string) => Creature | undefined = () => undefined;
+  /** goes up whenever it's rebuilt or posed (creatures scattered with it look again) */
+  version = 0;
   /** placement in the scene (floor position + facing); holds `group` */
   readonly root = new THREE.Group();
   /** the creature itself; its position is the pose's root offset */
@@ -490,6 +515,16 @@ export class Creature {
     if (!on) this.mergeDirty = true;
   }
   private attached = new Map<string, { key: string; main: THREE.Group; twin: THREE.Group | null; bone: BoneRT; twinBone: BoneRT | null }>();
+  /** scattered copies, per part and scatter (bone id | marking id) */
+  private scattered = new Map<string, ScatterRec>();
+  /**
+   * Stuff being edited where it is (see the workbench): a worn thing (its
+   * attachment id) or a scatter's first copy (its marking id). Hidden while the
+   * editor shows its own.
+   */
+  editingStuff: string | null = null;
+  /** the scatters' motion clock: seconds, and how long one loop is */
+  private scatterClock = { t: 0, loop: 1.5 };
 
   /** `skeletonOnly`: just the posed skeleton, no meshes (for measuring it, cheaply) */
   constructor(state: CreatureState, skeletonOnly = false) {
@@ -739,6 +774,7 @@ export class Creature {
   }
 
   sync() {
+    this.version++;
     this.baseTouch.clear();
     const s = this.state;
     setPictures(s.pictures);
@@ -856,6 +892,7 @@ export class Creature {
     this.applyPose();
     this.syncEyes();
     this.syncAttachments();
+    this.syncScatter();
     this.refreshHighlight();
     this.updateRollRing();
   }
@@ -925,6 +962,7 @@ export class Creature {
         for (const g of [rec.main, rec.twin]) g?.traverse((o) => (o.userData.attachmentId = a.id));
       }
       this.placeStuff(a, rec.main);
+      rec.main.visible = this.editingStuff !== a.id;
       this.updateTwin(a.id);
     }
     for (const [id, rec] of this.attached) {
@@ -1073,6 +1111,211 @@ export class Creature {
     };
   }
 
+  // -------------------------------------------------------------------------
+  // scattered stuff: copies of a thing over parts (scatter markings, see src/scatter.ts)
+
+  private syncScatter() {
+    const s = this.state;
+    const alive = new Set<string>();
+    // where copies go hangs on every part's shape (they keep out of each other)
+    const shapes = hashString(this.list.map((b) => b.meshKey).join('|'));
+    let blockers: (ScatterBlocker & { bone: BoneRT })[] | null = null;
+    for (const b of this.list) {
+      if (!b.mesh) continue;
+      for (const m of scattersOf(s, b.src)) {
+        const id = b.def.id + '|' + m.id;
+        alive.add(id);
+        const style = s.parts[b.src]?.style ?? s.style;
+        // (how they move doesn't change where they are)
+        const key = JSON.stringify([{ ...m, motion: 0, skip: 0 }, style, s.materialSettings, getMeshDetail(), shapes]);
+        let rec = this.scattered.get(id);
+        if (rec?.key === key) {
+          rec.m = m;
+          continue;
+        }
+        if (rec) this.dropScatter(rec);
+        blockers ??= this.scatterBlockers();
+        rec = this.buildScatter(b, m, style, blockers.filter((o) => o.bone !== b));
+        rec.key = key;
+        this.scattered.set(id, rec);
+      }
+    }
+    for (const [id, rec] of this.scattered) {
+      if (alive.has(id)) continue;
+      this.dropScatter(rec);
+      this.scattered.delete(id);
+    }
+    for (const rec of this.scattered.values()) this.placeCopies(rec);
+  }
+
+  /** Every part, as something copies mustn't sit inside, in the rest pose. */
+  private scatterBlockers(): (ScatterBlocker & { bone: BoneRT })[] {
+    return this.list.flatMap((o) => {
+      const geo = o.mesh?.userData.baseGeo as THREE.BufferGeometry | undefined;
+      if (!geo) return [];
+      if (!geo.boundingSphere) geo.computeBoundingSphere();
+      return [{ bone: o, geo, bvh: bvhFor(geo), fromRest: o.restGroup.clone().invert(), sphere: geo.boundingSphere!.clone().applyMatrix4(o.restGroup) }];
+    });
+  }
+
+  private buildScatter(b: BoneRT, m: Marking, style: StyleId, blockers: ScatterBlocker[]): ScatterRec {
+    // a thing is built for these copies; a creature lends its own meshes, as they are
+    const built = m.thing ? buildThing(m.thing, { style, settingsFor: (st) => this.settingsFor(st) }) : null;
+    built?.updateMatrixWorld(true);
+    const looks = built ? meshesIn(built) : this.sourceMeshes(m);
+    const box = new THREE.Box3();
+    for (const l of looks) {
+      if (!l.mesh.geometry.boundingBox) l.mesh.geometry.computeBoundingBox();
+      box.union(l.mesh.geometry.boundingBox!.clone().applyMatrix4(l.rel));
+    }
+    const extent = box.isEmpty() ? 0.3 : box.getSize(new THREE.Vector3()).length();
+    const geo = b.mesh!.userData.baseGeo as THREE.BufferGeometry;
+    // (a pair of parts share their part's spots: mirror images)
+    const copies = scatterCopies(m, { geo, toRest: b.restGroup, up: this.upIn(b.def.id) }, blockers, extent, b.src);
+    const group = new THREE.Group();
+    b.pivot.add(group);
+    const rec: ScatterRec = { key: '', m, bone: b, group, built, copies, parts: [], look: m.source ? this.sourceLook(m.source) : '' };
+    this.dressCopies(rec, looks);
+    return rec;
+  }
+
+  /** One instanced mesh per mesh of what's scattered (fuzz and ink too): every copy in one go. */
+  private dressCopies(rec: ScatterRec, looks: { mesh: THREE.Mesh; rel: THREE.Matrix4 }[]) {
+    for (const p of rec.parts) {
+      p.mesh.removeFromParent();
+      p.mesh.dispose();
+    }
+    rec.parts = [];
+    if (!rec.copies.length) return;
+    for (const { mesh: o, rel } of looks) {
+      const mesh = new THREE.InstancedMesh(o.geometry, o.material, rec.copies.length);
+      mesh.castShadow = o.castShadow;
+      mesh.receiveShadow = o.receiveShadow;
+      mesh.renderOrder = o.renderOrder;
+      // (copies move: their bounds aren't kept up to date)
+      mesh.frustumCulled = false;
+      mesh.raycast = () => {};
+      rec.parts.push({ mesh, rel });
+      rec.group.add(mesh);
+    }
+  }
+
+  /** A scattered creature's meshes, as it looks now (none if it's gone, or it's this one). */
+  private sourceMeshes(m: Marking): { mesh: THREE.Mesh; rel: THREE.Matrix4 }[] {
+    const src = m.source ? Creature.find(m.source) : undefined;
+    return src && src !== this ? src.lookMeshes() : [];
+  }
+
+  /** What a scattered creature looks like now, in short: a change means its copies need dressing again. */
+  private sourceLook(id: string): string {
+    const src = Creature.find(id);
+    if (!src || src === this) return 'none';
+    return src.version + ':' + src.lookMeshes().map((l) => `${l.mesh.geometry.id}.${(l.mesh.material as THREE.Material).uuid}`).join(',');
+  }
+
+  /** Copies of other creatures follow them as they're changed or posed. True if any did. */
+  refreshScatterSources(): boolean {
+    let changed = false;
+    for (const rec of this.scattered.values()) {
+      if (!rec.m.source) continue;
+      const look = this.sourceLook(rec.m.source);
+      if (look === rec.look) continue;
+      rec.look = look;
+      this.dressCopies(rec, this.sourceMeshes(rec.m));
+      this.placeCopies(rec);
+      changed = true;
+    }
+    return changed;
+  }
+
+  /**
+   * What this creature looks like: each mesh showing (parts or their skin,
+   * eyes, worn stuff; no handles, no scattered copies) and where it sits on
+   * it, posed but not placed. For scattering copies of it over another.
+   */
+  lookMeshes(): { mesh: THREE.Mesh; rel: THREE.Matrix4 }[] {
+    this.root.updateMatrixWorld(true);
+    const toRoot = this.root.matrixWorld.clone().invert();
+    const shown = (o: THREE.Object3D) => {
+      for (let p: THREE.Object3D | null = o; p && p !== this.root; p = p.parent) if (!p.visible) return false;
+      return true;
+    };
+    const out: { mesh: THREE.Mesh; rel: THREE.Matrix4 }[] = [];
+    this.group.traverse((o) => {
+      if (!(o instanceof THREE.Mesh) || o instanceof THREE.InstancedMesh || o.userData.handle || o.userData.kind || !shown(o)) return;
+      // (the editor's own see-through guides and highlights draw over everything: not part of its look)
+      const mat = o.material as THREE.Material;
+      if (mat.depthTest === false) return;
+      out.push({ mesh: o, rel: toRoot.clone().multiply(o.matrixWorld) });
+    });
+    return out;
+  }
+
+  private dropScatter(rec: ScatterRec) {
+    rec.group.removeFromParent();
+    for (const p of rec.parts) p.mesh.dispose();
+    if (rec.built) disposeThing(rec.built);
+  }
+
+  /** The scatter's first copy (the one hidden while it's edited): on the first part with any, in order. */
+  private firstCopies(id: string): ScatterRec | null {
+    for (const b of this.list) {
+      const rec = this.scattered.get(b.def.id + '|' + id);
+      if (rec?.copies.length) return rec;
+    }
+    return null;
+  }
+
+  /** Put each copy where it goes, moved (by the clock) if the scatter moves. */
+  private placeCopies(rec: ScatterRec) {
+    const move = new THREE.Matrix4(), out = new THREE.Matrix4();
+    const hide = this.editingStuff === rec.m.id && this.firstCopies(rec.m.id) === rec;
+    rec.copies.forEach((c, i) => {
+      const gone = hide && i === 0;
+      if (gone) out.makeScale(0, 0, 0);
+      else copyMove(rec.m, c.phase, this.scatterClock.t, this.scatterClock.loop, move);
+      for (const p of rec.parts) {
+        if (!gone) out.multiplyMatrices(c.matrix, move).multiply(p.rel);
+        p.mesh.setMatrixAt(i, out);
+      }
+    });
+    for (const p of rec.parts) p.mesh.instanceMatrix.needsUpdate = true;
+  }
+
+  /** Move scattered copies to `t` seconds (on a loop `loop` long). True if any moved. */
+  tickScatter(t: number, loop: number): boolean {
+    this.scatterClock = { t, loop };
+    let moved = false;
+    for (const rec of this.scattered.values()) {
+      if (!rec.m.motion || !rec.copies.length || !rec.group.visible) continue;
+      this.placeCopies(rec);
+      moved = true;
+    }
+    return moved;
+  }
+
+  /** Show or hide every scattered copy. */
+  setScatterVisible(on: boolean) {
+    for (const rec of this.scattered.values()) rec.group.visible = on;
+  }
+
+  /** Where a scatter's first copy is (not moving): the part it's on, and its place in that part's frame. */
+  scatterCopyFrame(id: string): { pivot: THREE.Object3D; matrix: THREE.Matrix4 } | null {
+    const rec = this.firstCopies(id);
+    return rec ? { pivot: rec.bone.pivot, matrix: rec.copies[0].matrix.clone() } : null;
+  }
+
+  /** Something's being edited where it is (or nothing now): hide it, and show what was hidden before. */
+  setEditingStuff(id: string | null) {
+    if (id === this.editingStuff) return;
+    this.editingStuff = id;
+    for (const a of this.state.attachments ?? []) {
+      const rec = this.attached.get(a.id);
+      if (rec) rec.main.visible = a.id !== id;
+    }
+    for (const rec of this.scattered.values()) this.placeCopies(rec);
+  }
+
   /** Which way is up (the creature's +Y, at rest) in a part's frame. */
   upIn(boneId: string): THREE.Vector3 {
     const b = this.bones.get(boneId);
@@ -1115,6 +1358,7 @@ export class Creature {
   }
 
   applyPose() {
+    this.version++;
     this.baseTouch.clear();
     // only a real change re-merges: sync() calls this on every look edit too
     const before = this.list.map((b) => b.pivot.quaternion.clone());
@@ -2862,6 +3106,30 @@ export class Creature {
     }
     this.mergeDirty = true;
   }
+}
+
+/** One part's copies of one scatter. */
+interface ScatterRec {
+  key: string;
+  m: Marking;
+  bone: BoneRT;
+  group: THREE.Group;
+  /** the thing, built once (its meshes' geometry and materials are what the copies draw); none for a creature, whose own meshes are drawn */
+  built: THREE.Group | null;
+  /** a scattered creature's look when the copies were dressed (see sourceLook) */
+  look: string;
+  copies: ScatterCopy[];
+  /** each mesh of the thing, as instances, and where it sits in the thing */
+  parts: { mesh: THREE.InstancedMesh; rel: THREE.Matrix4 }[];
+}
+
+/** Every mesh in a group, and where it sits in it. */
+function meshesIn(g: THREE.Object3D): { mesh: THREE.Mesh; rel: THREE.Matrix4 }[] {
+  const out: { mesh: THREE.Mesh; rel: THREE.Matrix4 }[] = [];
+  g.traverse((o) => {
+    if (o instanceof THREE.Mesh) out.push({ mesh: o, rel: o.matrixWorld.clone() });
+  });
+  return out;
 }
 
 function hashString(s: string): number {

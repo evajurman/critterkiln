@@ -18,8 +18,14 @@
 
 import * as THREE from 'three';
 import { getStoneTex } from './materials';
+import type { Thing } from './stuff';
 
-export type MarkingType = 'spots' | 'speckles' | 'stripes' | 'patches' | 'cells' | 'cracks' | 'veins' | 'belly' | 'picture' | 'text' | 'paint';
+export type MarkingType = 'spots' | 'speckles' | 'stripes' | 'patches' | 'cells' | 'cracks' | 'veins' | 'belly' | 'picture' | 'text' | 'paint' | 'scatter';
+
+/** Scatter: where the copies go (all over, or where a pattern or paint would mark) */
+export type ScatterWhere = 'all' | 'spots' | 'stripes' | 'patches' | 'belly' | 'paint';
+/** Scatter: how each copy moves, each a little out of step with the others */
+export type ScatterMotion = 'sway' | 'bob' | 'spin' | 'pulse';
 
 /** One stroke of paint: points along it (x, y, z one after the other, in the pattern's space) painted round to radius r. */
 export interface PaintStroke {
@@ -66,6 +72,37 @@ export interface Marking {
   id?: string;
   /** on the whole creature: the parts it's turned off on */
   skip?: string[];
+  // Scatter: copies of a thing over the surface (src/scatter.ts). The pattern's
+  // size, threshold and place say where they go; amount says how many.
+  /** the thing (an embedded copy, so creature files are self-contained) */
+  thing?: Thing;
+  /** or another creature in the scene (its id): copies of it, as it looks now */
+  source?: string;
+  where?: ScatterWhere;
+  /** how big each copy is, against the thing as drawn */
+  scale?: number;
+  /** how much the copies' sizes differ, 0..1 */
+  vary?: number;
+  /** how far apart they keep, 0..1 (against their size) */
+  spacing?: number;
+  /** each turned round at random, 0..1 */
+  spin?: number;
+  /** each leaning at random, 0..1 */
+  lean?: number;
+  /** 0 = straight out of the surface .. 1 = straight up */
+  upright?: number;
+  /** how far each sinks into the surface, 0..1 */
+  sink?: number;
+  /** lying on the surface (its drawing facing out) rather than standing up from it */
+  lie?: boolean;
+  /** a different shuffle */
+  seed?: number;
+  motion?: { kind: ScatterMotion; size: number; speed: number };
+}
+
+/** The markings drawn by the material (scatters are copies of a thing instead). */
+export function painted(list: Marking[]): Marking[] {
+  return list.some((m) => m.type === 'scatter') ? list.filter((m) => m.type !== 'scatter') : list;
 }
 
 /** markings one part can show (the whole creature's and its own) */
@@ -85,6 +122,23 @@ export const MARKINGS: { type: MarkingType; name: string; title: string; base: P
   { type: 'picture', name: 'Picture', title: 'A picture of your own, stuck on like a sticker', base: {} },
   { type: 'text', name: 'Text', title: 'Words written on: names, numbers, labels', base: { color: '#ffffff' } },
   { type: 'paint', name: 'Paint', title: 'Paint on it with a brush', base: {} },
+  { type: 'scatter', name: 'Scatter', title: 'Copies of a thing scattered over it: spikes, scales, flowers, warts. They can sway too', base: { threshold: 0.45, amount: 0.35 } },
+];
+
+export const SCATTER_WHERE: { where: ScatterWhere; name: string; title: string }[] = [
+  { where: 'all', name: 'All over', title: 'Everywhere on it' },
+  { where: 'spots', name: 'Spots', title: 'In clumps, where spots would be' },
+  { where: 'stripes', name: 'Stripes', title: 'In bands, where stripes would be' },
+  { where: 'patches', name: 'Patches', title: 'In big soft patches' },
+  { where: 'belly', name: 'Back', title: 'Along the top and back, away from the belly' },
+  { where: 'paint', name: 'Paint', title: 'Where you paint with the brush' },
+];
+
+export const SCATTER_MOTIONS: { kind: ScatterMotion; name: string; icon: string; title: string }[] = [
+  { kind: 'sway', name: 'Sway', icon: 'wind', title: 'Rock from where they grow: grass, hair, tentacles' },
+  { kind: 'bob', name: 'Bob', icon: 'arrows-up-down', title: 'Float in and out' },
+  { kind: 'spin', name: 'Spin', icon: 'arrows-spin', title: 'Turn round where they stand' },
+  { kind: 'pulse', name: 'Pulse', icon: 'heart-pulse', title: 'Grow and shrink' },
 ];
 
 /**
@@ -100,7 +154,7 @@ export function shownMarkings(whole: Marking[] | undefined, own: Marking[] | und
 export const STICKERS: MarkingType[] = ['picture', 'text'];
 /** what each kind of marking has settings for */
 export function markingUses(t: MarkingType) {
-  const pattern = !STICKERS.includes(t) && t !== 'paint';
+  const pattern = !STICKERS.includes(t) && t !== 'paint' && t !== 'scatter';
   return { size: t !== 'paint', threshold: pattern, rough: pattern || t === 'paint', color: pattern || t === 'text' };
 }
 
@@ -120,7 +174,13 @@ export function defaultMarking(type: MarkingType): Marking {
   const m: Marking = { type, size: 1, threshold: 0.5, rough: 0, amount: 1, darkness: 0.8, finish: 0, color: MARKING_COLOR, ...MARKINGS.find((m) => m.type === type)!.base };
   if (type === 'text') Object.assign(m, { text: 'Hello', font: FONTS[0].css });
   if (type === 'paint') Object.assign(m, { id: Math.random().toString(36).slice(2, 10), strokes: [] });
+  if (type === 'scatter') Object.assign(m, scatterDefaults(), { id: Math.random().toString(36).slice(2, 10), seed: Math.floor(Math.random() * 1e6) });
   return m;
+}
+
+/** A new scatter's own settings. */
+export function scatterDefaults(): Partial<Marking> {
+  return { where: 'all', scale: 0.25, vary: 0.3, spacing: 0.5, spin: 1, lean: 0.15, upright: 0, sink: 0.1 };
 }
 
 function hash(s: string): string {
@@ -160,7 +220,15 @@ const BASE_SIZE: Record<MarkingType, number> = {
   spots: 0.14, speckles: 0.035, stripes: 0.2, patches: 0.45, cells: 0.16, cracks: 1.33, veins: 1.33, belly: 0.25,
   // a sticker's height
   picture: 0.3, text: 0.15, paint: 1,
+  // (scatter: the size of the pattern it follows)
+  scatter: 0.2,
 };
+
+/** Where a scatter follows a pattern: the size of that pattern. */
+export function scatterPatternSize(m: Marking): number {
+  const t = m.where && m.where !== 'all' && m.where !== 'paint' ? m.where : 'spots';
+  return BASE_SIZE[t] * Math.max(0.05, m.size);
+}
 
 // ---------------------------------------------------------------------------
 // The textures pictures, text and paint are drawn from. Each is shared by
@@ -567,7 +635,7 @@ function layerGLSL(m: Marking, i: number, w: string): string {
  * (the shader is put together then).
  */
 export function applyMarkings(mat: THREE.Material, layers: Marking[] | undefined, perPoint = false) {
-  const list = (layers ?? []).slice(0, MAX_LAYERS);
+  const list = painted(layers ?? []).slice(0, MAX_LAYERS);
   if (!list.length || mat.userData.ink) return;
   const uniforms: Record<string, THREE.IUniform> = {};
   list.forEach((m, i) => {
@@ -841,6 +909,7 @@ export function markingThumbnails(): Map<MarkingType, string> {
   const camera = new THREE.OrthographicCamera(-0.27, 0.27, 0.27, -0.27, 0.1, 10);
   camera.position.set(0, 0, 3);
   const geo = new THREE.SphereGeometry(0.25, 48, 32);
+  const spikeGeo = new THREE.ConeGeometry(0.03, 0.09, 12).translate(0, 0.035, 0);
   const demo = new THREE.CanvasTexture(demoPicture());
   demo.colorSpace = THREE.SRGBColorSpace;
   pictureTex.set('demo', { tex: demo, aspect: { value: 1 } });
@@ -849,6 +918,17 @@ export function markingThumbnails(): Map<MarkingType, string> {
     const mat = new THREE.MeshStandardMaterial({ color: '#d08a4c', roughness: 0.55 });
     applyMarkings(mat, [{ ...defaultMarking(type), ...THUMB[type] }]);
     const ball = new THREE.Mesh(geo, mat);
+    // a scatter: little spikes standing out of the ball
+    if (type === 'scatter') {
+      const spike = new THREE.Mesh(spikeGeo, new THREE.MeshStandardMaterial({ color: '#f4ead8', roughness: 0.5 }));
+      for (const [x, y] of [[-0.12, 0.13], [0.06, 0.17], [0.15, 0.02], [-0.03, -0.02], [-0.16, -0.06], [0.08, -0.14], [-0.07, -0.17]]) {
+        const n = new THREE.Vector3(x, y, Math.sqrt(Math.max(0, 0.0625 - x * x - y * y))).normalize();
+        const s = spike.clone();
+        s.position.copy(n).multiplyScalar(0.245);
+        s.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), n);
+        ball.add(s);
+      }
+    }
     scene.add(ball);
     renderer.render(scene, camera);
     thumbs.set(type, renderer.domElement.toDataURL());
@@ -856,6 +936,7 @@ export function markingThumbnails(): Map<MarkingType, string> {
     mat.dispose();
   }
   geo.dispose();
+  spikeGeo.dispose();
   renderer.dispose();
   renderer.forceContextLoss();
   return thumbs;

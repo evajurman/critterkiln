@@ -99,6 +99,7 @@ export function showAnimAt(t: number) {
   if (key === animKey) return;
   animKey = key;
   for (const c of creatures) {
+    c.tickScatter(t * animSecs(), animSecs());
     const moving = (c.state.attachments ?? []).filter((x) => x.anim);
     c.setStuffAnim(moving.length ? new Map(moving.map((x) => [x.id, stuffMove(x.anim!, stuffP(x.anim!, t), c.stuffFrame(x.id)?.center)])) : null);
     const list = Object.entries(c.state.anims ?? {}).filter(([id]) => c.bones.has(id));

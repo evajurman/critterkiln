@@ -4,7 +4,8 @@
 
 import { markingsOf, setPartShapes, type BoneRT, type Creature, type CreatureState, type PartKind, type PartState } from '../creature';
 import { collect, unlock } from '../achievements';
-import { type Thing } from '../stuff';
+import { type Piece, type Thing } from '../stuff';
+import { shownMarkings } from '../markings';
 import { STYLE_PARAMS, STYLES, styleSettings, type StyleId } from '../materials';
 import { RIGS, savedRigs } from '../rigs';
 import { $, type PickHow } from './dom';
@@ -12,7 +13,8 @@ import { buildFloorMesh, floorPrefs } from './floor';
 import { alsoPicked, commit, creature, idle, mode, selected, setIdle, setSelected, state } from './state';
 import { touchScreen, updateSkeletonVisibility } from './controls';
 import { enterDraw, exitDraw } from './drawing';
-import { renderStuffPanel, syncWorkbench } from './workbench';
+import { renderStuffPanel, shareThing, syncWorkbench } from './workbench';
+import { wornPieces } from './attachPanel';
 import { renderCreatureBar } from './creatureBar';
 import { glowFollowSeg, glowSlider, sceneColorRow, SWATCHES } from './widgets';
 import { renderEyes } from './eyesPanel';
@@ -57,6 +59,46 @@ export function wholeFor(k: ScopeKind): boolean {
 /** The parts a section's changes go on: every one, or the picked ones. */
 function partsFor(k: ScopeKind): PartState[] {
   return wholeFor(k) ? Object.values(state.parts) : pickedParts();
+}
+
+// Worn pieces picked (in the Scene list, or Material on the stuff bar): Look's
+// colors, glow and materials go on them as they would on parts, and the thing
+// changes everywhere it is (My stuff, and every creature with it on).
+
+/** A section's changes go on every piece of the worn thing: it's set to Everything, or every piece is picked. */
+function wornWhole(k: ScopeKind): boolean {
+  const w = wornPieces();
+  return !!w && (scopeOf(k) === 'all' || w.pieces.length >= w.thing.pieces.length);
+}
+/** Change the picked worn pieces (each with its mirror image), or on Everything every piece. */
+function changeWorn(k: ScopeKind, fn: (p: Piece) => void, doCommit: boolean) {
+  const w = wornPieces();
+  if (!w) return;
+  const list = wornWhole(k) ? w.thing.pieces : w.pieces;
+  const done = new Set<Piece>();
+  for (const p of list) {
+    const twin = p.twin ? w.thing.pieces.find((q) => q.id === p.twin) : undefined;
+    for (const q of twin ? [p, twin] : [p]) {
+      if (done.has(q)) continue;
+      done.add(q);
+      fn(q);
+    }
+  }
+  creature.sync();
+  if (!doCommit) return;
+  shareThing(w.thing);
+  commit();
+  renderUI();
+}
+/** The material a worn piece shows: its own, or (inheriting) the part's it's on. */
+function wornStyle(): StyleId | undefined {
+  const w = wornPieces();
+  if (!w) return undefined;
+  return w.thing.inherit ? (state.parts[creature.bones.get(w.a.bone)?.src ?? '']?.style ?? state.style) : w.pieces[0].style;
+}
+/** What Look shows the color and glow of: the main worn piece, or the main part. */
+function shownLook(): { color: string; glow?: number } {
+  return wornPieces()?.pieces[0] ?? selPart();
 }
 
 /**
@@ -169,7 +211,7 @@ export function renderPartCard() {
 let opacityPending = false;
 
 export function renderColors() {
-  const p = selPart();
+  const p = shownLook();
   const el = $('#swatches');
   el.innerHTML = '';
   for (const c of SWATCHES) {
@@ -189,8 +231,9 @@ export let partGlowFollow: () => void;
 let partSceneColors: () => void;
 
 export function renderStyles() {
-  const whole = wholeFor('material');
-  const current = whole ? state.style : (selPart().style ?? state.style);
+  const w = wornPieces();
+  const whole = !w && wholeFor('material');
+  const current = w ? wornStyle()! : whole ? state.style : (selPart().style ?? state.style);
   const el = $('#styles');
   el.innerHTML = '';
   for (const s of STYLES) {
@@ -202,7 +245,11 @@ export function renderStyles() {
     el.append(btn);
   }
   renderOwnStyles(whole);
-  renderStyleParams(current);
+  if (w) {
+    // a worn thing's own material settings (or inheriting the part's)
+    const styles = [...new Set(w.thing.pieces.map((p) => p.style))];
+    renderThingMaterial(w.thing, styles, $('#style-params'), wornStyle()!, () => shareThing(w.thing));
+  } else renderStyleParams(current);
 }
 
 type SettingsOwner = { materialSettings?: CreatureState['materialSettings'] };
@@ -212,7 +259,7 @@ type SettingsOwner = { materialSettings?: CreatureState['materialSettings'] };
  * material of whatever wears it (type and settings: the body part it's on);
  * otherwise each piece keeps its own material, with sliders just for this item.
  */
-export function renderThingMaterial(thing: Thing, styles: StyleId[], el: HTMLElement, wearerStyle: StyleId) {
+export function renderThingMaterial(thing: Thing, styles: StyleId[], el: HTMLElement, wearerStyle: StyleId, after?: () => void) {
   el.innerHTML = '';
   // items from before inheriting meant this shared the creature's settings:
   // give them their own copy, looking just as they do now
@@ -236,9 +283,10 @@ export function renderThingMaterial(thing: Thing, styles: StyleId[], el: HTMLEle
     }
     creature.sync();
     syncWorkbench();
+    after?.();
     commit();
     if (mode === 'stuff') renderStuffPanel();
-    else renderThingMaterial(thing, styles, el, wearerStyle);
+    else renderThingMaterial(thing, styles, el, wearerStyle, after);
   };
   row.append(box, ' Inherits material');
   el.append(row);
@@ -255,6 +303,7 @@ export function renderThingMaterial(thing: Thing, styles: StyleId[], el: HTMLEle
   scaleBox.onchange = () => {
     thing.scaleMaterial = scaleBox.checked;
     creature.sync();
+    after?.();
     commit();
   };
   scaleRow.append(scaleBox, ' Re-adjust material on scale');
@@ -264,7 +313,7 @@ export function renderThingMaterial(thing: Thing, styles: StyleId[], el: HTMLEle
     const sub = document.createElement('div');
     sub.className = 'style-params';
     el.append(sub);
-    renderStyleParams(st, sub, thing);
+    renderStyleParams(st, sub, thing, after);
   }
 }
 
@@ -273,7 +322,7 @@ export function renderThingMaterial(thing: Thing, styles: StyleId[], el: HTMLEle
  * everywhere that material is used, stuff included unless the item has its
  * own settings. The number boxes take any value, past either end of the slider.
  */
-function renderStyleParams(style: StyleId, el: HTMLElement = $('#style-params'), owner: SettingsOwner = state) {
+function renderStyleParams(style: StyleId, el: HTMLElement = $('#style-params'), owner: SettingsOwner = state, after?: () => void) {
   el.innerHTML = '';
   const values = styleSettings(style, owner.materialSettings?.[style]);
   const head = document.createElement('div');
@@ -286,8 +335,9 @@ function renderStyleParams(style: StyleId, el: HTMLElement = $('#style-params'),
     if (owner.materialSettings) delete owner.materialSettings[style];
     creature.sync();
     syncWorkbench();
+    after?.();
     commit();
-    renderStyleParams(style, el, owner);
+    renderStyleParams(style, el, owner, after);
   };
   head.append(reset);
   el.append(head);
@@ -328,14 +378,18 @@ function renderStyleParams(style: StyleId, el: HTMLElement = $('#style-params'),
       num.value = input.value;
       apply(parseFloat(input.value));
     };
-    input.onchange = () => commit();
+    const keep = () => {
+      after?.();
+      commit();
+    };
+    input.onchange = keep;
     num.oninput = () => {
       const v = parseFloat(num.value);
       if (!Number.isFinite(v)) return;
       input.value = String(v); // the slider just pins at its end
       apply(v);
     };
-    num.onchange = () => commit();
+    num.onchange = keep;
     row.append(name, input, num);
     el.append(row);
   }
@@ -369,6 +423,7 @@ function renderOwnStyles(whole: boolean) {
 }
 
 function setColor(c: string, doCommit: boolean) {
+  if (wornPieces()) return changeWorn('color', (p) => (p.color = c), doCommit);
   for (const p of partsFor('color')) p.color = c;
   if (wholeFor('color') && doCommit && Object.keys(state.parts).length > 1) unlock('paint-all');
   creature.sync();
@@ -382,6 +437,14 @@ function setColor(c: string, doCommit: boolean) {
 
 /** A material on the picked parts; on Everything (or with every part picked), it's the whole creature's (parts added later too), but not the parts with their own. */
 function setStyle(id: StyleId) {
+  const w = wornPieces();
+  if (w) {
+    // picking a material for its pieces: they stop taking the part's
+    w.thing.inherit = false;
+    collect('materials', id);
+    changeWorn('material', (p) => (p.style = id), true);
+    return;
+  }
   if (!wholeFor('material')) {
     for (const p of pickedParts()) p.style = id;
   } else {
@@ -417,8 +480,19 @@ export function initPartPanel() {
   };
   partGlowFollow = glowFollowSeg(
     '#glow-follow',
-    () => (creature.bones.has(selected) ? { ...selPart(), markings: markingsOf(state, selPartId()) } : undefined),
+    () => {
+      const w = wornPieces();
+      if (w) return { ...w.pieces[0], markings: shownMarkings(w.thing.markings, w.pieces[0].markings, w.pieces[0].id) };
+      return creature.bones.has(selected) ? { ...selPart(), markings: markingsOf(state, selPartId()) } : undefined;
+    },
     (f) => {
+      if (wornPieces()) {
+        changeWorn('color', (p) => {
+          if (f) p.glowFollow = f;
+          else delete p.glowFollow;
+        }, true);
+        return;
+      }
       for (const p of partsFor('color')) {
         if (f) p.glowFollow = f;
         else delete p.glowFollow;
@@ -428,10 +502,18 @@ export function initPartPanel() {
       commit();
     },
   );
-  partSceneColors = sceneColorRow($('#scene-colors'), () => (creature.bones.has(selected) ? selPart().color : undefined), (c) => setColor(c, true));
+  partSceneColors = sceneColorRow($('#scene-colors'), () => (creature.bones.has(selected) ? shownLook().color : undefined), (c) => setColor(c, true));
   glowSlider(
     '#glow',
     (v) => {
+      if (wornPieces()) {
+        changeWorn('color', (p) => {
+          if (v > 0) p.glow = v;
+          else delete p.glow;
+        }, false);
+        partGlowFollow();
+        return;
+      }
       for (const p of partsFor('color')) {
         if (v > 0) p.glow = v;
         else delete p.glow;
@@ -440,7 +522,11 @@ export function initPartPanel() {
       creature.markMergeDirty();
       partGlowFollow();
     },
-    () => commit(),
+    () => {
+      const w = wornPieces();
+      if (w) shareThing(w.thing);
+      commit();
+    },
   );
   $('#draw').onclick = () => enterDraw({ kind: 'bone', boneId: selected });
   $('#cancel-draw').onclick = () => exitDraw();

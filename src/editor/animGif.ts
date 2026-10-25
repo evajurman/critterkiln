@@ -9,6 +9,7 @@ import { creatures, state, world } from './state';
 import { hint } from './hints';
 import { invalidate } from './loop';
 import { animKey, animPlaying, animSecs, animT, animViz, renderAnim, setAnimKey, setAnimPlaying, setAnimT, showAnimAt } from './animateTab';
+import { followRiders } from './riders';
 
 // Not a live recording: each frame is posed, then waits for its joins to finish
 // fusing (and, with Seamless, for the seamless skin to be built) before it's
@@ -78,6 +79,7 @@ export function initAnimGif() {
         showAnimAt(i / frames);
         await finishJoins(gifSeamless);
         // draw it now and copy it straight off (the canvas clears after it's shown)
+        followRiders();
         scene.updateMatrixWorld();
         renderer.shadowMap.needsUpdate = true;
         composer.render();

@@ -27,6 +27,7 @@ import { hint } from './hints';
 import { renderBackdropUI } from './backdropPanel';
 import { applyDof, dof, saveDof } from './dof';
 import { invalidate, viewPutBack } from './loop';
+import { creatureId } from './riders';
 
 /** Files are named after who's in the scene: "Bimble", or "Bimble-Twin-Creature 3". */
 export function sceneFileName(): string {
@@ -164,6 +165,7 @@ export function loadBundle(b: Bundle, pick: LoadChoice, replace: boolean) {
     for (const s of incoming) {
       s.placement = { ...s.placement, x: spot.x + ((s.placement?.x ?? 0) - minX), z: s.placement?.z ?? 0, yaw: s.placement?.yaw ?? 0 };
       world.creatures.push(s);
+      creatureId(s);
       creatures.push(makeCreature(s));
     }
     activate(world.creatures.length - 1);

@@ -4,7 +4,7 @@
 
 import { unlock } from '../achievements';
 import { installScrollbars } from '../scrollbars';
-import { guidedOn, guidedTab, initLayout, setGuided, STUFF_STEP } from '../layout';
+import { guidedOn, guidedTab, initLayout, setGuided } from '../layout';
 import { installCursorPress } from '../cursorPress';
 import { installTooltips } from '../tooltip';
 import { $ } from './dom';
@@ -12,6 +12,7 @@ import { type Mode, redo, undo } from './state';
 import { controls, updateSkeletonVisibility } from './controls';
 import { newCreation } from './creations';
 import { setMode, tintMode } from './panels';
+import { finishStuff } from './workbench';
 import { renderScope } from './scope';
 
 /** Drops the top bar's button labels whenever they'd overflow it (narrow window or zoomed in). */
@@ -42,10 +43,8 @@ export function initTopbar() {
     switchTo: (t) => setMode(t),
     // what each section changes (part or everything): its title's chip, and the toggle up top
     onSections: renderScope,
-    putOn: () => {
-      setMode(STUFF_STEP);
-      $('#rig-attach').click();
-    },
+    // (it's already on: done making it)
+    putOn: () => finishStuff(),
   });
   // Guided or Free: each opens where it was left
   $('#guided-seg').addEventListener('click', (e) => {

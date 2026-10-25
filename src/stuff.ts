@@ -1004,8 +1004,11 @@ export function turnedProfile(p: Piece): THREE.Vector2[] {
   const ys: number[] = [];
   const rs: number[] = [];
   for (let i = 0; i <= steps; i++) {
-    // pull the sample heights slightly inside so the scanline always hits the outline
-    const y = y0 + (y1 - y0) * (0.002 + (0.996 * i) / steps);
+    // closer together towards the ends, where a round end's radius drops away
+    // fastest: evenly spaced, the last ones stop short of the tip and leave a
+    // flat cap (pulled a hair inside so the scanline always hits the outline)
+    const t = 0.5 - 0.5 * Math.cos((Math.PI * i) / steps);
+    const y = y0 + (y1 - y0) * (1e-4 + (1 - 2e-4) * t);
     const r = radiusAt(p.outline, y);
     if (r === null || r < 1e-4) continue;
     ys.push(y);
@@ -1014,10 +1017,12 @@ export function turnedProfile(p: Piece): THREE.Vector2[] {
   if (rs.length < 3) return [];
 
   // Smooth away hand wobble: a small median first (kills spikes), then a few
-  // gentle averaging passes. Ends are kept so the base and rim stay put.
-  const med = rs.map((_, i) => {
-    const w = rs.slice(Math.max(0, i - 2), i + 3).sort((a, c) => a - c);
-    return w[w.length >> 1];
+  // gentle averaging passes. Ends are kept so the base and rim stay put (a
+  // median there would push a round end's tip out to its neighbours' width).
+  const med = rs.map((r, i) => {
+    if (i < 2 || i > rs.length - 3) return r;
+    const w = rs.slice(i - 2, i + 3).sort((a, c) => a - c);
+    return w[2];
   });
   for (let pass = 0; pass < 6; pass++) {
     for (let i = 1; i < med.length - 1; i++) med[i] = med[i] * 0.5 + (med[i - 1] + med[i + 1]) * 0.25;

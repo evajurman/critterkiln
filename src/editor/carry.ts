@@ -16,6 +16,7 @@ import { stripThumb } from './workbench';
 import { deselectAttachment, selectAttachment, selectedAttachment } from './attach';
 import { partLabel, selectPart } from './partPanel';
 import { hint } from './hints';
+import { renderCreatureBar } from './creatureBar';
 
 let carry: {
   what: 'eyes' | Thing;
@@ -73,7 +74,7 @@ export function carryFrom(el: HTMLElement, what: () => 'eyes' | Thing | null, gh
 }
 
 /** Where a carried thing's middle goes, and how it's turned, to sit on the surface at `hit` (in its part's frame). */
-function sitOnSurface(hit: NonNullable<ReturnType<Creature['surfaceAt']>>, box: THREE.Box3): { position: V3; quaternion: [number, number, number, number] } {
+export function sitOnSurface(hit: NonNullable<ReturnType<Creature['surfaceAt']>>, box: THREE.Box3): { position: V3; quaternion: [number, number, number, number] } {
   const rootQ = creature.root.getWorldQuaternion(new THREE.Quaternion());
   const up = new THREE.Vector3(0, 1, 0).applyQuaternion(rootQ);
   // upright, facing out from the surface (on top of something: facing the creature's front)
@@ -178,6 +179,8 @@ function endCarry(drop: boolean) {
 
 /** Everything the creature is wearing, under Parts: picking one goes to Look with it selected, as clicking it would. */
 export function renderCreatureStuff() {
+  // (the Scene list has a row for each too)
+  renderCreatureBar();
   const el = $('#creature-stuff');
   el.innerHTML = '';
   const all = state.attachments ?? [];

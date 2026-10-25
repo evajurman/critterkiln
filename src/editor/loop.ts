@@ -13,13 +13,14 @@ import { creature, creatures, mode, selected } from './state';
 import { controls, drag, viewChanged, viewMoved } from './controls';
 import { frameCreature, setTween, syncViewCube, tween } from './framing';
 import { drawState, renderOverlay } from './drawing';
-import { flashPiece } from './workbench';
+import { flashPiece, followBoard } from './workbench';
+import { followRiders } from './riders';
 import { gizmo } from './attach';
 import { flashStart, pickedBones } from './partPanel';
 import { hint } from './hints';
 import { settings, syncSliderNumbers } from './settings';
 import { dof, focusMarkerUntil, updateFocus } from './dof';
-import { animMoving, tickAnim } from './animateTab';
+import { animMoving, animOn, animSecs, tickAnim } from './animateTab';
 import { animRendering } from './animGif';
 
 // Render on demand: the loop only draws when something asked for it (any
@@ -85,6 +86,8 @@ function shadowsChanged(): boolean {
     if (!(o instanceof THREE.Mesh) || !(o.castShadow || o.receiveShadow)) return;
     const pos = o.geometry.getAttribute('position');
     next.push(o, o.geometry, pos?.version ?? 0, o.material, ...o.matrixWorld.elements);
+    // (scattered copies move inside one mesh)
+    if (o instanceof THREE.InstancedMesh) next.push(o.instanceMatrix.version);
   });
   const changed = next.length !== shadowState.length || next.some((v, i) => v !== shadowState[i]);
   shadowState = next;
@@ -168,6 +171,10 @@ export function loop(now: number) {
   else creature.flash(drawState ? null : pickedBones(), Math.max(0, f));
   if (creature.tickBoing(now)) invalidate(1);
   tickAnim(now);
+  // scattered copies that move (in Animate they keep to its timeline: see showAnimAt)
+  if (!animOn()) for (const c of creatures) if (c.tickScatter(now / 1000, animSecs())) invalidate(1);
+  // copies of a creature follow it as it's changed
+  for (const c of creatures) if (c.refreshScatterSources()) invalidate();
   // while something's dragged, moving joins blend colors more cheaply (see setDragging)
   const dragging = !!drag || gizmo.dragging;
   // on the fast setting, moving joins aren't fused at all until it's let go
@@ -183,8 +190,11 @@ export function loop(now: number) {
   updateFocus(now);
   if (renderFrames <= 0) return;
   renderFrames--;
-  // the marking gizmo stays on its part as it's posed
+  // the marking gizmo stays on its part as it's posed (and the workbench on the stuff it's editing)
   followMarkTools();
+  // creatures riding on others go where those parts are now
+  followRiders();
+  followBoard();
   // sliders moved by code (undo, switching parts...) keep their numbers in step
   if (settings.numbers) syncSliderNumbers();
   if (shadowsChanged()) renderer.shadowMap.needsUpdate = true;

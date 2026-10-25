@@ -281,7 +281,7 @@ export function exitDraw(keep = false) {
   sideFrame.removeFromParent();
   creature.setDrawFocus(null);
   if (ds?.target.kind === 'piece') syncWorkbench();
-  for (const c of creatures) c.root.visible = mode !== 'stuff';
+  for (const c of creatures) c.root.visible = true;
   updateSkeletonVisibility();
   octx.clearRect(0, 0, overlay.width, overlay.height);
   hint('');

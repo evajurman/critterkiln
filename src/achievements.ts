@@ -55,8 +55,9 @@ export const TROPHIES: Trophy[] = [
   { id: 'rainbow', area: 'look', icon: 'rainbow', title: 'Taste the Rainbow', desc: 'Paint one creature in six different colors.' },
   { id: 'ghost', area: 'look', icon: 'ghost', title: 'Ghost Mode', desc: 'Make a part see-through.' },
   // stuff
-  { id: 'stuff', area: 'stuff', icon: 'briefcase', title: 'Arts and Crafts', desc: 'Visit the Stuff tab.' },
-  { id: 'piece', area: 'stuff', icon: 'scissors', title: 'Tinkerer', desc: 'Draw a piece of stuff on the workbench.' },
+  { id: 'stuff', area: 'stuff', icon: 'briefcase', title: 'Arts and Crafts', desc: 'Start making something of your own to wear.' },
+  { id: 'piece', area: 'stuff', icon: 'scissors', title: 'Tinkerer', desc: 'Draw a piece of stuff.' },
+  { id: 'scatter', area: 'stuff', icon: 'sparkles', title: 'Sprinkles', desc: 'Scatter something you made all over a creature.' },
   { id: 'turned', area: 'stuff', icon: 'jar', title: 'Wheel Deal', desc: 'Make a turned piece.' },
   { id: 'attach', area: 'stuff', icon: 'hat-wizard', title: 'Accessorize!', desc: 'Put something you made onto a creature.' },
   // scene

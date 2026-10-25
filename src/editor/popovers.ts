@@ -28,5 +28,4 @@ export function closeTopPopovers() {
 }
 export function closeAttachPops() {
   $('#attach-pop').hidden = true;
-  $('#attach-mat-pop').hidden = true;
 }

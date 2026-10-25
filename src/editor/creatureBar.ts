@@ -3,7 +3,7 @@
 // pick, rename, add, copy and remove them.
 
 import * as THREE from 'three';
-import { Creature, defaultState, type BoneRT, type CreatureState, type PartState, type Placement } from '../creature';
+import { Creature, defaultState, type Attachment, type BoneRT, type CreatureState, type PartState, type Placement } from '../creature';
 import { ANIM_KINDS } from '../animate';
 import { duplicateLimb } from '../rigs';
 import { $, fa, pickHow, type PickHow } from './dom';
@@ -16,6 +16,12 @@ import { partTree, pickedSrcs, selectAllParts, selectPart } from './partPanel';
 import { renderUI } from './panels';
 import { freshRig, partName, removePart, rigEdit, setPartName } from './rigEdit';
 import { hint, hintOnce } from './hints';
+import { creatureId, setOffstage } from './riders';
+import { selectedAttachment } from './attach';
+import { pickStuff } from './carry';
+import { pickAllWornPieces, pickWornPiece, removeAttachment, wornPieces } from './attachPanel';
+import { type Piece } from '../stuff';
+import { editStuff } from './workbench';
 
 /** creatures whose parts are folded away under their row (the > beside it); the rest show theirs, like a tree */
 export const partsShut = new WeakSet<CreatureState>();
@@ -72,7 +78,22 @@ export function renderCreatureBar() {
       renderCreatureBar();
     };
     row.prepend(fold);
-    row.append(pick, dup, del);
+    // a creature worn by another says so; one off stage can be brought back on
+    const host = s.rides && world.creatures.findIndex((o) => o.id === s.rides!.on);
+    if (host !== undefined && host >= 0) {
+      const tag = document.createElement('span');
+      tag.className = 'creature-tag';
+      tag.innerHTML = fa('paperclip');
+      tag.title = `Rides on ${creatureLabel(host)} (right-click it in the view to take it off)`;
+      name.append(tag);
+    }
+    const stage = document.createElement('button');
+    stage.className = 'piece-icon' + (s.offstage ? ' on' : '');
+    stage.innerHTML = fa(s.offstage ? 'eye-slash' : 'eye');
+    stage.title = s.offstage ? 'Off stage: only seen while you edit it, or scattered. Click to bring it back' : 'Take it off stage: only seen while you edit it, or where it’s scattered over another creature';
+    stage.onclick = () => setOffstage(creatures[i], !s.offstage);
+    row.classList.toggle('offstage', !!s.offstage);
+    row.append(pick, stage, dup, del);
     el.append(row);
     if (open) el.append(partRows(i));
   });
@@ -88,6 +109,8 @@ function partRows(i: number): HTMLElement {
   const c = creatures[i];
   const list = document.createElement('div');
   list.className = 'part-rows';
+  // (mid-swap, a creature can be in the scene before it's built)
+  if (!c) return list;
   const picked = new Set(i === world.active && !idle ? pickedSrcs() : []);
   const pickIt = (id: string, how: PickHow = 'one') => {
     if (i !== world.active || idle) {
@@ -100,8 +123,99 @@ function partRows(i: number): HTMLElement {
   for (const { bone, depth } of partTree(c)) {
     const p = s.parts[bone.src];
     if (p) list.append(partRow(i, bone, p, depth, picked.has(bone.src), pickIt));
+    // what it wears, under it (on either of a pair)
+    for (const a of s.attachments ?? []) {
+      const on = c.bones.get(a.bone);
+      if (!on || (on !== bone && on.def.mirrorOf !== bone.def.id)) continue;
+      list.append(stuffRow(i, a, depth + 1));
+      if (stuffOpen.has(a.id)) a.thing.pieces.forEach((p, n) => list.append(pieceRow(i, a, p, n, depth + 2)));
+    }
   }
   return list;
+}
+
+/** Worn things whose pieces show under them in the Scene list (by attachment id). */
+const stuffOpen = new Set<string>();
+
+/** Pick a worn thing (on creature `i`), as clicking it in the view does. */
+function pickWorn(i: number, a: Attachment) {
+  if (i !== world.active || idle) {
+    setIdle(false);
+    activate(i);
+  }
+  if (selectedAttachment !== a.id) pickStuff(a.id);
+}
+
+/** A row for a thing a part wears: picking it picks it (as clicking it in the view does); its icons change it where it is, or take it off. */
+function stuffRow(i: number, a: Attachment, depth: number): HTMLElement {
+  const row = document.createElement('div');
+  // (while some of its pieces are picked, shown under it, they're the dark rows)
+  const w = i === world.active && a.id === selectedAttachment ? wornPieces() : null;
+  const some = !!w && w.pieces.length < a.thing.pieces.length && stuffOpen.has(a.id);
+  row.className = 'part-row stuff-row' + (i === world.active && a.id === selectedAttachment && !some ? ' active' : '');
+  row.style.setProperty('--depth', String(depth));
+  // picking it picks all of it: Look (if it's showing) works on every piece
+  const pickIt = () => {
+    pickWorn(i, a);
+    pickAllWornPieces(false);
+  };
+  const btn = document.createElement('button');
+  btn.className = 'part-pick';
+  btn.innerHTML = `${fa('paperclip')}<span class="part-name"></span>`;
+  btn.querySelector('.part-name')!.textContent = a.thing.name || 'Thing';
+  btn.title = `${a.thing.name || 'Thing'}: worn stuff. Click to pick it`;
+  btn.onclick = pickIt;
+  const edit = document.createElement('button');
+  edit.className = 'piece-icon';
+  edit.innerHTML = fa('pencil');
+  edit.title = 'Change it right where it is';
+  edit.onclick = () => {
+    pickIt();
+    editStuff({ kind: 'worn', id: a.id });
+  };
+  const del = document.createElement('button');
+  del.className = 'piece-icon';
+  del.innerHTML = fa('trash');
+  del.title = 'Take it off';
+  del.onclick = () => {
+    pickIt();
+    removeAttachment();
+  };
+  // its pieces, folded away under it
+  if (a.thing.pieces.length > 1 || stuffOpen.has(a.id)) {
+    const open = stuffOpen.has(a.id);
+    const fold = document.createElement('button');
+    fold.className = 'piece-icon stuff-fold' + (open ? ' open' : '');
+    fold.innerHTML = '<i class="fa-duotone fa-regular fa-chevron-down" aria-hidden="true"></i>';
+    fold.title = open ? 'Hide its pieces' : 'Show its pieces: pick one to change its color, material and markings in Look';
+    fold.onclick = () => {
+      if (open) stuffOpen.delete(a.id);
+      else stuffOpen.add(a.id);
+      renderCreatureBar();
+    };
+    row.append(btn, fold, edit, del);
+  } else row.append(btn, edit, del);
+  return row;
+}
+
+/** A row for one piece of a worn thing: picking it (Ctrl: one more, Shift: everything between) puts its colors, material and markings in Look. */
+function pieceRow(i: number, a: Attachment, p: Piece, n: number, depth: number): HTMLElement {
+  const w = i === world.active ? wornPieces() : null;
+  const row = document.createElement('div');
+  row.className = 'part-row piece-of-row' + (w?.a.id === a.id && w.pieces.includes(p) ? ' active' : '');
+  row.style.setProperty('--depth', String(depth));
+  const btn = document.createElement('button');
+  btn.className = 'part-pick';
+  btn.innerHTML = `<i style="background:${p.color}"></i><span class="part-name">Piece ${n + 1}</span>`;
+  if (p.twin) btn.insertAdjacentHTML('beforeend', `<span class="part-mark" title="A mirrored pair">${fa('arrow-right-arrow-left')}</span>`);
+  btn.title = `Piece ${n + 1} of ${a.thing.name || 'Thing'}: its colors, material and markings in Look (a change goes on it everywhere it’s worn) · Ctrl-click to pick one more · Shift-click to pick everything between`;
+  btn.onclick = (e) => {
+    const how = pickHow(e);
+    pickWorn(i, a);
+    pickWornPiece(p.id, how);
+  };
+  row.append(btn);
+  return row;
 }
 
 function partRow(i: number, b: BoneRT, p: PartState, depth: number, active: boolean, pickIt: (id: string, how?: PickHow) => void): HTMLElement {
@@ -293,6 +407,7 @@ function addCreature(s: CreatureState) {
   setIdle(false);
   exitDraw();
   world.creatures.push(s);
+  creatureId(s);
   creatures.push(makeCreature(s));
   activate(world.creatures.length - 1);
   commit();
@@ -303,6 +418,10 @@ function duplicateCreature(i: number) {
   const src = world.creatures[i];
   const s = structuredClone(src);
   delete s.workbench;
+  // a copy of its own: it stands on the floor, beside the rest
+  delete s.id;
+  delete s.rides;
+  s.keepFloor = src.rides ? true : src.keepFloor;
   s.name = src.name?.trim() ? `${src.name.trim()} copy` : undefined;
   // same size, turn and height; just moved over to free floor
   const spot = freeSpot();

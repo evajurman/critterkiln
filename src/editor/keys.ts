@@ -8,11 +8,13 @@ import { $ } from './dom';
 import { creature, idle, mode, redo, undo } from './state';
 import { focusOnBone, frameAll, frameCreature } from './framing';
 import { drawState, enterDraw, exitDraw, finishDraw, setDrawSide, setDrawTool, setSpacePan, toggleSymmetry } from './drawing';
-import { board, copyPicked, deletePiece, selectAllPieces, focusOnBoard, focusOnPlane, pasteClip, piece, piecePivot, setPieceMirror, setPieceMode } from './workbench';
+import { board, copyPicked, finishStuff, deletePiece, selectAllPieces, focusOnBoard, focusOnPlane, pasteClip, piece, piecePivot, setPieceMirror, setPieceMode } from './workbench';
 import { gizmo, selectedAttachment } from './attach';
 import { placing, setPlaceMode } from './arrange';
 import { removeAttachment, syncAttachBar } from './attachPanel';
 import { setMode } from './panels';
+import { pickingRide, stopPickingRide } from './riders';
+import { patterning, stopPattern } from './pattern';
 import { selectAllParts } from './partPanel';
 import { pickingParent, removePart, rigLock, setMirror, setPickingParent } from './rigEdit';
 import { closeShortcutSheet, shortcutsChanged, toggleShortcutSheet } from './settings';
@@ -43,8 +45,14 @@ export function initKeys() {
       toggleShortcutSheet();
     } else if (k === 'escape' && pickingParent) {
       setPickingParent(false);
+    } else if (k === 'escape' && pickingRide) {
+      stopPickingRide();
+    } else if (k === 'escape' && patterning()) {
+      stopPattern();
     } else if (k === 'escape' && drawState) {
       exitDraw();
+    } else if (k === 'escape' && mode === 'stuff') {
+      finishStuff();
     } else if (k === 'enter' && drawState) {
       e.preventDefault();
       finishDraw();
@@ -67,7 +75,6 @@ export function initKeys() {
       else focusOnBoard();
     } else if (is(e, 'draw') && mode === 'stuff') enterDraw({ kind: 'piece' });
     else if (is(e, 'draw') && !idle) enterDraw();
-    else if (is(e, 'stuff')) setMode('stuff');
     else if (is(e, 'animate')) setMode('animate');
     else if (is(e, 'mirror') && mode === 'stuff') {
       if (piece()) setPieceMirror(!piece()!.twin);

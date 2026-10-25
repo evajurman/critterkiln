@@ -53,6 +53,8 @@ import { initViewMenu } from './editor/viewMenu';
 import { initLoop, loop, resize } from './editor/loop';
 import { initAnimateTab } from './editor/animateTab';
 import { initAnimGif } from './editor/animGif';
+import { initRiders } from './editor/riders';
+import { initPattern } from './editor/pattern';
 
 initFloor();
 initPost();
@@ -63,6 +65,8 @@ initWorkbench();
 initAttach();
 initArrange();
 initCreatureBar();
+initRiders();
+initPattern();
 initAttachPanel();
 initCarry();
 initFiles();

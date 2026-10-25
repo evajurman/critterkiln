@@ -7,7 +7,8 @@ import { arrangeMenu, tabNamesMenu } from '../layout';
 import { keyLabel, type ShortcutId } from '../shortcuts';
 import { openContextMenu, SEP, type MenuEntry, type MenuItem } from '../contextMenu';
 import { canvas, key } from './stage';
-import { activate, creature, creatures, idle, mode, save, selected, setIdle, setSelected, world } from './state';
+import { activate, creature, creatures, idle, mode, save, selected, setIdle, setSelected, state, world } from './state';
+import { setOffstage, startPickingRide, takeOff } from './riders';
 import { creatureLabel, pickOtherCreature, pickPart, pointer } from './controls';
 import { frameAll, frameCreature, partToFloor } from './framing';
 import { drawState, enterDraw } from './drawing';
@@ -16,7 +17,10 @@ import {
   copyPicked,
   copyPiece,
   deletePiece,
+  editStuff,
+  finishStuff,
   focusOnBoard,
+  newStuffHere,
   pasteClip,
   pickPiece,
   piece,
@@ -70,7 +74,8 @@ function viewMenu(x: number, y: number) {
         { label: 'Draw a piece', icon: ctxSlab('pencil'), key: keyOf('draw'), run: () => enterDraw({ kind: 'piece' }) },
         clip?.kind === 'piece' && { label: 'Paste', icon: ctxDuo('paste'), key: keyOf('paste'), run: () => pasteClip() },
         SEP,
-        { label: 'Frame the workbench', icon: ctxDuo('crosshairs'), key: keyOf('frame'), run: focusOnBoard },
+        { label: 'Look at it', icon: ctxDuo('crosshairs'), key: keyOf('frame'), run: focusOnBoard },
+        { label: 'Done', icon: ctxDuo('check'), run: finishStuff },
       ]);
     }
     return openContextMenu(x, y, 'Piece', [
@@ -84,7 +89,8 @@ function viewMenu(x: number, y: number) {
       SEP,
       ...gizmoItems(setPieceMode, pieceMode),
       SEP,
-      { label: 'Frame the workbench', icon: ctxDuo('crosshairs'), key: keyOf('frame'), run: focusOnBoard },
+      { label: 'Look at it', icon: ctxDuo('crosshairs'), key: keyOf('frame'), run: focusOnBoard },
+      { label: 'Done', icon: ctxDuo('check'), run: finishStuff },
     ]);
   }
 
@@ -102,6 +108,8 @@ function viewMenu(x: number, y: number) {
   if (att) {
     pickStuff(att);
     return openContextMenu(x, y, 'Worn stuff', [
+      { label: 'Edit it here', icon: ctxSlab('pencil'), title: 'Draw more pieces, or reshape them, right where it is', run: () => editStuff({ kind: 'worn', id: att }) },
+      SEP,
       ...gizmoItems((m) => {
         gizmo.setMode(m);
         syncAttachBar();
@@ -124,11 +132,20 @@ function viewMenu(x: number, y: number) {
     { label: 'Frame this creature', icon: ctxDuo('crosshairs'), key: keyOf('frame'), run: () => frameCreature() },
     creatures.length > 1 && { label: 'Frame everyone', icon: ctxDuo('users'), key: keyOf('frameAll'), run: frameAll },
   ];
+  // a creature as an item: worn on another, or kept for scattering
+  const item: MenuEntry[] = [
+    state.rides
+      ? { label: 'Take it off', icon: ctxSlab('arrow-down-to-line'), title: 'Off the creature it rides on, back on the floor', run: () => takeOff() }
+      : creatures.length > 1 && { label: 'Put it on another creature…', icon: ctxSlab('paperclip'), title: 'Click a spot on another creature: it rides there, wherever that part goes', run: startPickingRide },
+    { label: 'Off stage', icon: ctxDuo('eye-slash'), checked: !!state.offstage || undefined, title: 'Only seen while you edit it, or where it’s scattered over another creature', run: () => setOffstage(creature, !state.offstage) },
+  ];
   if (!id) {
     return openContextMenu(x, y, creatureLabel(world.active), [
       clip?.kind === 'part' && !idle && { label: 'Paste', icon: ctxDuo('paste'), key: keyOf('paste'), run: () => pasteClip({ x, y }) },
       { label: 'Arrange creature', icon: ctxDuo('arrows-up-down-left-right'), sub: gizmoItems(place, placing ? gizmo.mode : null) },
       buttonItem('#drop-floor', ctxSlab('arrow-down-to-line'), 'Creature to floor'),
+      SEP,
+      ...item,
       SEP,
       ...frame,
     ]);
@@ -142,6 +159,7 @@ function viewMenu(x: number, y: number) {
     { label: 'Delete', icon: ctxSlab('trash'), key: keyOf('delete'), danger: true, disabled: root, title: root ? 'The first part holds everything else' : undefined, run: removePart },
     SEP,
     { label: 'Draw shape', icon: ctxSlab('pencil'), key: keyOf('draw'), run: () => enterDraw({ kind: 'bone', boneId: id }) },
+    { label: 'Draw new stuff here', icon: ctxSlab('paperclip'), title: 'Draw something to wear, right on this spot (it goes in My stuff)', run: () => newStuffHere({ x, y }) },
     buttonItem('#reset-shape', ctxDuo('rotate-left')),
     {
       label: 'Grow',
@@ -150,6 +168,7 @@ function viewMenu(x: number, y: number) {
         buttonItem('#rig-bone', ctxDuo('bone')),
         buttonItem('#rig-extend', ctxDuo('arrow-up-right')),
         buttonItem('#rig-split', ctxSlab('scissors')),
+        buttonItem('#rig-pattern', ctxDuo('grid-2-plus')),
         buttonItem('#rig-detach', ctxDuo('link-slash')),
         buttonItem('#rig-mirror', ctxSlab('arrow-right-arrow-left')),
       ].filter((i): i is MenuItem => !!i),
@@ -160,6 +179,8 @@ function viewMenu(x: number, y: number) {
     buttonItem('#reset-pose', ctxDuo('person')),
     !root && { label: 'Part to floor', icon: ctxSlab('arrow-down-to-line'), title: 'Move it straight down until its lowest point touches the floor', run: () => partToFloor(id) },
     buttonItem('#drop-floor', ctxSlab('arrow-down-to-line'), 'Creature to floor'),
+    SEP,
+    ...item,
     SEP,
     ...frame,
   ]);

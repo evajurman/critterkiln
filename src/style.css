@@ -592,6 +592,19 @@ button.primary.slim { width: auto; flex: 1; padding: 8px 10px; font-size: 14px; 
 .thing-card.current { border: 2px solid var(--accent); background: var(--accent-soft); }
 .thing-card.new-card .thumb { display: grid; place-items: center; font-size: 28px; color: var(--muted); border: 2px dashed var(--line); background: var(--card); }
 .editing-head { display: flex; align-items: center; gap: 8px; }
+.stuff-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.stuff-head h3 { margin: 0; }
+.stuff-note { margin: 4px 0 8px; }
+/* a scatter's settings: what it scatters (a row of My stuff), and its choices */
+.scatter-things { grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 6px; }
+.scatter-things .thing-card { padding: 3px; font: inherit; text-align: left; }
+.scatter-things .thing-card .thumb { display: grid; place-items: center; overflow: hidden; }
+.scatter-things .thing-card .thumb img { width: 100%; height: 100%; object-fit: cover; }
+.scatter-things .thing-name { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scatter-things .new-card .thumb { font-size: 20px; }
+.scatter-edit { width: 100%; margin-bottom: 6px; }
+.seg.scatter-seg { flex-wrap: wrap; }
+.seg.scatter-seg button { flex: 1 0 30%; white-space: nowrap; }
 .saved-badge { font-size: 11px; font-weight: var(--w-bold); color: var(--ok-ink); text-transform: none; letter-spacing: 0; }
 .saved-badge.warn { color: var(--warn-ink); }
 /* three icons share a narrow card */
@@ -599,6 +612,11 @@ button.primary.slim { width: auto; flex: 1; padding: 8px 10px; font-size: 14px; 
 .viewport.space-pan, .viewport.space-pan canvas { cursor: var(--cursor-grab); }
 
 /* top middle: Attach stuff can sit in any corner (or the sidebar), so it opens clear of them all */
+.pattern-pop { width: 290px; }
+.pattern-path { width: 100%; margin: 4px 0 6px; }
+.pattern-pop[hidden] { display: none; }
+.pattern-foot { display: flex; justify-content: space-between; align-items: center; margin: 8px 0; }
+.pattern-actions { display: flex; gap: 8px; justify-content: flex-end; }
 .attach-pop { width: 300px; max-height: 70%; overflow-y: auto; left: 0; right: 0; margin-inline: auto; }
 .pop-title { display: flex; justify-content: space-between; align-items: center; }
 
@@ -744,8 +762,18 @@ button.primary.slim { width: auto; flex: 1; padding: 8px 10px; font-size: 14px; 
 .part-row i:not([class]) { width: 10px; height: 10px; border-radius: 50%; display: inline-block; border: 1px solid rgba(0,0,0,.15); flex: none; }
 .part-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .part-mark { flex: none; font-size: 11px; opacity: .75; }
+/* worn stuff, under the part that wears it */
+.stuff-row .part-pick { font-weight: var(--w-regular, 400); font-style: italic; }
+.stuff-row .part-pick i { font-size: 10px; opacity: .7; width: 10px; }
 .creature-row .piece-pick { min-width: 0; }
 .creature-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.creature-tag { margin-left: 6px; font-size: 11px; color: var(--muted); }
+/* a creature off stage: its row a little faded */
+.creature-row.offstage .creature-name { opacity: 0.6; font-style: italic; }
+.creature-row .piece-icon.on { color: var(--accent); }
+body.picking-spot #gl { cursor: crosshair; }
+.attach-creatures-head { grid-column: 1 / -1; margin-top: 6px; }
+.thing-card .creature-swatch { display: grid; place-items: center; font-size: 26px; }
 .part-row .chip-name { flex: 1; min-width: 0; padding: 1px 6px; font-weight: var(--w-bold); font-size: 12px; border: 1.5px solid var(--accent); border-radius: 6px; }
 .creature-row .chip-name { flex: 1; min-width: 0; padding: 4px 8px; font-weight: var(--w-heavy); font-size: 13px; border: 1.5px solid var(--accent); border-radius: 8px; }
 .piece-icon:disabled { opacity: .25; background: none; }
@@ -1061,7 +1089,7 @@ button.keys-btn.on { border-color: var(--accent); background: var(--accent-soft)
 #piece-flat[hidden] { display: none; }
 
 /* ---- Stuff: one row per piece, with redraw and delete on the right ---- */
-#pieces { display: flex; flex-direction: column; gap: 4px; }
+#pieces { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
 .piece-row {
   display: flex; align-items: center; gap: 2px; padding: 2px; border-radius: 10px;
   border: 1px solid var(--line); background: var(--bg);

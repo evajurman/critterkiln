@@ -13,9 +13,10 @@ import { commit, creature, fitShadows, state } from './state';
 import { controls, floorGap, gapBefore, lifted, setGapBefore, setKeepFloor, updateSkeletonVisibility } from './controls';
 import { bakePiece, mirrorTwinLive, piecePivot } from './workbench';
 import { placing, stopPlacing } from './arrange';
-import { syncAttachBar } from './attachPanel';
+import { clearWornPieces, syncAttachBar } from './attachPanel';
 import { renderCreatureStuff } from './carry';
 import { invalidate } from './loop';
+import { captureRide } from './riders';
 
 /**
  * TransformControls whose centre scale cube follows the mouse sideways: left shrinks, right
@@ -89,7 +90,8 @@ export function deselectAttachment() {
   selectedAttachment = '';
   if (!placing) gizmo.detach();
   $('#attach-bar').hidden = true;
-  $('#attach-mat-pop').hidden = true;
+  // (Look goes back to the parts)
+  clearWornPieces();
   // (also called while a world is being swapped, between creatures)
   if (creature) updateSkeletonVisibility();
   renderCreatureStuff();
@@ -112,6 +114,8 @@ export function initAttach() {
     }
     if (placing) {
       creature.capturePlacement();
+      // (one riding on another rides where it's put)
+      captureRide(creature);
       fitShadows();
       return;
     }

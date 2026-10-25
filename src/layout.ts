@@ -6,11 +6,11 @@
  * sidebar, pinned to a corner of the view, or hidden (brought back from the …
  * menu). Arranging a tab drags tools and whole sections anywhere, makes new
  * sections, names them and gives them an icon. How many shaping handles show
- * (Gizmos) belongs to the tab's layout too. Stuff has its own workbench and
- * no layout.
+ * (Gizmos) belongs to the tab's layout too. Making stuff (the workbench, on the
+ * creature) has no layout.
  *
  * People can make tabs of their own (… › New tab from this one): each is one
- * more layout, with a name, icon and color, between Look and Stuff.
+ * more layout, with a name, icon and color, after Animate.
  */
 
 import type { MenuItem } from './contextMenu';
@@ -60,6 +60,7 @@ const TOOLS: Record<string, ToolDef> = {
   bone: { name: 'Bone', icon: duo('bone'), kind: 'button' },
   extend: { name: 'Extend', icon: duo('arrow-up-right'), kind: 'button' },
   split: { name: 'Split', icon: slab('scissors'), kind: 'button' },
+  pattern: { name: 'Pattern', icon: duo('grid-2-plus'), kind: 'button' },
   detach: { name: 'Detach / Reattach', icon: duo('link-slash'), kind: 'button' },
   parent: { name: 'Parent part', icon: duo('sitemap'), kind: 'wide' },
   stand: { name: 'Reset pose', icon: duo('person'), kind: 'button' },
@@ -146,7 +147,7 @@ const SECTIONS: Omit<Sec, 'place'>[] = [
   { id: 'plan', name: 'Body plan', icon: 'hand', color: '#c98f5a', tools: ['plan'] },
   { id: 'parts', name: 'Parts', icon: 'square', color: '#f07a32', tools: ['blend', 'seamless', 'worn'] },
   { id: 'part', name: 'This part', icon: 'pencil', color: '#e5823a', tools: ['name', 'draw', 'thickness', 'width0', 'width1', 'reset-shape'] },
-  { id: 'grow', name: 'Grow', icon: 'scissors', color: '#d0486a', tools: ['bone', 'extend', 'split', 'detach', 'parent'] },
+  { id: 'grow', name: 'Grow', icon: 'scissors', color: '#d0486a', tools: ['bone', 'extend', 'split', 'pattern', 'detach', 'parent'] },
   { id: 'pose', name: 'Pose', icon: 'face-smile', color: '#e9a51f', tools: ['stand', 'floor', 'keep-floor'] },
   { id: 'color', name: 'Color', icon: 'palette', color: '#a66ad6', tools: ['custom-color', 'swatches', 'scene-colors', 'glow', 'color-blend', 'opacity'] },
   { id: 'material', name: 'Material', icon: 'cloud', color: '#5fa0d8', tools: ['materials', 'material-params'] },
@@ -204,11 +205,11 @@ export const STEPS: readonly StepDef[] = [
   { id: 'step-draw', name: 'Draw', gizmos: 'part', side: ['part'], corners: { mirror: 'tl' }, note: 'Pick a part, then Draw shape (or double-click the part) and draw its outline: it puffs up like a balloon.' },
   { id: 'step-face', name: 'Face', gizmos: 'none', side: ['eyes'], note: 'Add eyes: drag them onto the critter, then pick a style and a look.' },
   { id: 'step-color', name: 'Color', gizmos: 'none', side: ['color', 'material', 'markings'], note: 'Click a part (Ctrl-click adds one, Shift-click everything between, Ctrl+A all of them), then pick its colors, material and markings.', touchNote: 'Tap a part (hold one to add it, or use + in the parts list up top), then pick its colors, material and markings.' },
-  { id: 'step-dress', name: 'Dress up', gizmos: 'none', side: ['attach'], move: { worn: 'attach' }, note: 'Pick a part, then Attach stuff to put something from My stuff on it. Or make something new.', action: { label: 'Make new stuff ›', to: 'stuff' } },
+  { id: 'step-dress', name: 'Dress up', gizmos: 'none', side: ['attach', 'markings'], move: { worn: 'attach' }, note: 'Pick a part, then Attach stuff to put something from My stuff on it, or draw something new right on it. To cover it in spikes, scales or flowers, add a Scatter marking.', action: { label: 'Draw new stuff ›', to: 'stuff' } },
   { id: 'step-show', name: 'Show off', gizmos: 'none', side: ['backdrop', 'photo'], note: 'Set the scene, frame your critter and take a photo.' },
 ];
 const stepOf = (t: Tab | null) => STEPS.find((s) => s.id === t);
-/** In Guided, Stuff (the workbench) is part of Dress up: it opens from there and goes back there */
+/** In Guided, making stuff (the workbench, on the creature) is part of Dress up: it opens from there and goes back there */
 export const STUFF_STEP = 'step-dress';
 export const isStep = (t: Tab | null) => !!stepOf(t);
 
@@ -483,11 +484,11 @@ function container(p: Place): HTMLElement {
 // ---------------------------------------------------------------------------
 // drawing the layout
 
-/** The made tabs' buttons on the rail, between Animate and Stuff; and whether the tabs show their names. */
+/** The made tabs' buttons on the rail, after Animate; and whether the tabs show their names. */
 function renderTabs() {
   const modes = $('.modes');
   modes.querySelectorAll('.ck-tab').forEach((b) => b.remove());
-  const stuff = modes.querySelector('[data-mode="stuff"]');
+  const stuff = modes.querySelector('#step-bar');
   for (const t of tabs) {
     const b = el('button', 'ck-tab', `${tabIcon(t)}<span class="lbl"> ${esc(t.name)}</span>`);
     b.dataset.mode = t.id;
@@ -528,11 +529,11 @@ function renderStep() {
   const next = $<HTMLButtonElement>('#step-next');
   renderStepBar(st, making);
   if (making) {
-    $('#step-text').textContent = 'Making stuff for Dress up: draw pieces on the board. The blue cross is where it sits on a part. It’s kept in My stuff as you go.';
+    $('#step-text').textContent = 'Making stuff for Dress up: draw pieces right on your critter, where it goes. It’s kept in My stuff as you go.';
     back.hidden = next.hidden = false;
     back.textContent = '‹ Back to Dress up';
     back.onclick = () => switchTo(STUFF_STEP);
-    next.textContent = 'Put it on ›';
+    next.textContent = 'Done ›';
     next.onclick = putOn;
     return;
   }
@@ -567,8 +568,8 @@ function renderStepBar(st: StepDef | undefined, making: boolean) {
   back.title = making ? 'Back to Dress up' : at > 0 ? `Back: ${STEPS[at - 1].name}` : '';
   back.onclick = () => switchTo(making ? STUFF_STEP : STEPS[at - 1].id);
   next.hidden = !making && at === STEPS.length - 1;
-  next.textContent = making ? 'Put it on \u203a' : 'Next \u203a';
-  next.title = making ? 'Back to Dress up, to put it on' : at < STEPS.length - 1 ? `Next: ${STEPS[at + 1].name}` : '';
+  next.textContent = making ? 'Done \u203a' : 'Next \u203a';
+  next.title = making ? 'Back to Dress up, with it on' : at < STEPS.length - 1 ? `Next: ${STEPS[at + 1].name}` : '';
   next.onclick = making ? putOn : () => switchTo(STEPS[at + 1].id);
 }
 
