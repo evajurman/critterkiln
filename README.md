@@ -10,25 +10,25 @@ Draw a shape and it puffs up into a soft 3D critter. Sculpt it, pose it, give it
 
 Pick a part and draw its outline. It puffs up like a balloon. On a middle part, draw one half and it mirrors to the other side.
 
-![Drawing the outline of a part on the drawing board](docs/draw.jpg)
+![Drawing the outline of a part on the drawing board](docs/draw.png)
 
 ## Grow and pose it
 
 Start from a body plan, then add, extend or split parts. Drag the orange handles to bend joints and the purple ones to slide parts. Joins between parts smooth over on their own.
 
-![Posing a critter with the orange and purple handles](docs/pose.jpg)
+![Posing a critter with the orange and purple handles](docs/pose.png)
 
 ## Dress it up
 
 Choose colors and materials (clay, felt, toy, glass, knitted, stone, metal and more), add markings like spots and stripes, give it eyes, and attach stuff like hats.
 
-![The Look tab: colors and materials](docs/look.jpg)
+![The Look tab: colors and materials](docs/look.png)
 
 ## Make it move
 
 Give any part a looping motion (circle, step, swing, figure 8, breathe) and drag its path right in the view. Export the loop as a GIF.
 
-![The Animate tab: a walking step drawn as a path at the foot](docs/animate.jpg)
+![The Animate tab: a walking step drawn as a path at the foot](docs/animate.png)
 
 ## Two ways to work
 
