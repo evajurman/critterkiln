@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// The right-click menu: on a part, a piece or worn stuff in the view, what you
+// The right-click menu: on a part in the view, what you
 // can do to it (picking it first); on the tools, arranging them, and on a
 // slider its number and its default. A right-drag still pans the view.
 
@@ -12,33 +12,13 @@ import { setOffstage, startPickingRide, takeOff } from './riders';
 import { creatureLabel, pickOtherCreature, pickPart, pointer } from './controls';
 import { frameAll, frameCreature, partToFloor } from './framing';
 import { drawState, enterDraw } from './drawing';
-import {
-  clip,
-  copyPicked,
-  copyPiece,
-  deletePiece,
-  editStuff,
-  finishStuff,
-  focusOnBoard,
-  newStuffHere,
-  pasteClip,
-  pickPiece,
-  piece,
-  pieceMode,
-  renderStuffPanel,
-  selectedPiece,
-  setPieceMirror,
-  setPieceMode,
-  setSelectedPiece,
-  twinOf,
-} from './workbench';
-import { deselectAttachment, gizmo } from './attach';
-import { type PlaceMode, placing, setPlaceMode, startPlacing, stopPlacing } from './arrange';
-import { removeAttachment, syncAttachBar } from './attachPanel';
-import { pickAttachment, pickStuff } from './carry';
-import { flashPart, selectPart } from './partPanel';
+import { clip, copyPicked, pasteClip } from './clipboard';
+import { gizmo } from './gizmo';
+import { resetPlacement } from './arrange';
+import { handleItems } from './gizmoMode';
+import { selectPart } from './partPanel';
 import { renderUI } from './panels';
-import { pickingParent, removePart, rigLock, rootStays, setMirror } from './rigEdit';
+import { growThingHere, pickingParent, removePart, rigLock, rootStays, setMirror } from './rigEdit';
 import { renderSettings, saveSettings, settings, syncSliderNumbers } from './settings';
 import { pickingFocus } from './dof';
 import { scopeMenu } from './scope';
@@ -53,48 +33,9 @@ const keyOf = (id: ShortcutId) => keyLabel(id) || undefined;
 const ctxSlab = (n: string) => `fa-slab-duo fa-regular fa-${n}`;
 const ctxDuo = (n: string) => `fa-duotone fa-regular fa-${n}`;
 
-/** Move, Rotate and Scale, each doing `set` with its gizmo mode; `on` ticks the one in use. */
-function gizmoItems(set: (m: 'translate' | 'rotate' | 'scale') => void, on: string | null, what = ''): MenuItem[] {
-  return ([['translate', 'Move', 'move', 'arrows-up-down-left-right'], ['rotate', 'Rotate', 'rotate', 'arrows-rotate'], ['scale', 'Scale', 'scale', 'expand']] as const).map(
-    ([m, label, key, icon]) => ({ label: label + what, icon: ctxDuo(icon), checked: on === m || undefined, key: keyOf(key), run: () => set(m) }),
-  );
-}
 
 function viewMenu(x: number, y: number) {
-  if (mode === 'stuff') {
-    const id = pickPiece(x, y);
-    if (id) {
-      setSelectedPiece(id);
-      flashPart();
-      renderStuffPanel();
-    }
-    const p = id ? piece() : undefined;
-    if (!p) {
-      return openContextMenu(x, y, 'Workbench', [
-        { label: 'Draw a piece', icon: ctxSlab('pencil'), key: keyOf('draw'), run: () => enterDraw({ kind: 'piece' }) },
-        clip?.kind === 'piece' && { label: 'Paste', icon: ctxDuo('paste'), key: keyOf('paste'), run: () => pasteClip() },
-        SEP,
-        { label: 'Look at it', icon: ctxDuo('crosshairs'), key: keyOf('frame'), run: focusOnBoard },
-        { label: 'Done', icon: ctxDuo('check'), run: finishStuff },
-      ]);
-    }
-    return openContextMenu(x, y, 'Piece', [
-      { label: 'Copy', icon: ctxDuo('copy'), key: keyOf('copy'), run: () => copyPicked() },
-      clip?.kind === 'piece' && { label: 'Paste', icon: ctxDuo('paste'), key: keyOf('paste'), run: () => pasteClip() },
-      { label: 'Duplicate', icon: ctxDuo('clone'), run: () => copyPiece(p.id) },
-      { label: 'Delete', icon: ctxSlab('trash'), key: keyOf('delete'), danger: true, run: () => deletePiece(p.id) },
-      SEP,
-      { label: 'Redraw', icon: ctxSlab('pencil'), run: () => enterDraw({ kind: 'piece', redraw: p.id }) },
-      { label: 'Mirror', icon: ctxSlab('arrow-right-arrow-left'), key: keyOf('mirror'), checked: !!twinOf(p), run: () => setPieceMirror(!twinOf(p)) },
-      SEP,
-      ...gizmoItems(setPieceMode, pieceMode),
-      SEP,
-      { label: 'Look at it', icon: ctxDuo('crosshairs'), key: keyOf('frame'), run: focusOnBoard },
-      { label: 'Done', icon: ctxDuo('check'), run: finishStuff },
-    ]);
-  }
-
-  // the same picking as a click: another creature, worn stuff, then a part
+  // the same picking as a click: another creature, then a part
   const other = pickOtherCreature(x, y);
   if (other) {
     setIdle(false);
@@ -104,30 +45,10 @@ function viewMenu(x: number, y: number) {
     save();
     renderUI();
   }
-  const att = other ? null : pickAttachment(x, y);
-  if (att) {
-    pickStuff(att);
-    return openContextMenu(x, y, 'Worn stuff', [
-      { label: 'Edit it here', icon: ctxSlab('pencil'), title: 'Draw more pieces, or reshape them, right where it is', run: () => editStuff({ kind: 'worn', id: att }) },
-      SEP,
-      ...gizmoItems((m) => {
-        gizmo.setMode(m);
-        syncAttachBar();
-      }, gizmo.mode),
-      SEP,
-      { label: 'Take it off', icon: ctxSlab('trash'), key: keyOf('delete'), danger: true, run: removeAttachment },
-    ]);
-  }
   const id = other?.boneId ?? pickPart(x, y);
   if (id && creature.bones.has(id)) {
-    deselectAttachment();
-    if (placing) stopPlacing();
     selectPart(id, false);
   }
-  const place = (m: PlaceMode) => {
-    if (!placing) startPlacing();
-    setPlaceMode(m);
-  };
   const frame: MenuEntry[] = [
     { label: 'Frame this creature', icon: ctxDuo('crosshairs'), key: keyOf('frame'), run: () => frameCreature() },
     creatures.length > 1 && { label: 'Frame everyone', icon: ctxDuo('users'), key: keyOf('frameAll'), run: frameAll },
@@ -141,9 +62,10 @@ function viewMenu(x: number, y: number) {
   ];
   if (!id) {
     return openContextMenu(x, y, creatureLabel(world.active), [
-      clip?.kind === 'part' && !idle && { label: 'Paste', icon: ctxDuo('paste'), key: keyOf('paste'), run: () => pasteClip({ x, y }) },
-      { label: 'Arrange creature', icon: ctxDuo('arrows-up-down-left-right'), sub: gizmoItems(place, placing ? gizmo.mode : null) },
+      clip && !idle && { label: 'Paste', icon: ctxDuo('paste'), key: keyOf('paste'), run: () => pasteClip({ x, y }) },
+      { label: 'Handles', icon: ctxDuo('arrows-up-down-left-right'), sub: handleItems() },
       buttonItem('#drop-floor', ctxSlab('arrow-down-to-line'), 'Creature to floor'),
+      { label: 'Reset placement', icon: ctxDuo('rotate-left'), title: 'Upright on the floor at its normal size, still facing the same way', run: resetPlacement },
       SEP,
       ...item,
       SEP,
@@ -155,11 +77,11 @@ function viewMenu(x: number, y: number) {
   const root = !b.parent;
   return openContextMenu(x, y, name, [
     { label: 'Copy', icon: ctxDuo('copy'), key: keyOf('copy'), disabled: root, title: root ? 'The first part holds everything else' : undefined, run: () => copyPicked() },
-    clip?.kind === 'part' && { label: 'Paste here', icon: ctxDuo('paste'), key: keyOf('paste'), run: () => pasteClip({ x, y }) },
+    clip && { label: 'Paste here', icon: ctxDuo('paste'), key: keyOf('paste'), run: () => pasteClip({ x, y }) },
     { label: 'Delete', icon: ctxSlab('trash'), key: keyOf('delete'), danger: true, disabled: !!rootStays(), title: rootStays() ?? (root ? 'Just this part: what’s on it stays, hanging off the part that takes its place' : undefined), run: removePart },
     SEP,
     { label: 'Draw shape', icon: ctxSlab('pencil'), key: keyOf('draw'), run: () => enterDraw({ kind: 'bone', boneId: id }) },
-    { label: 'Draw new stuff here', icon: ctxSlab('paperclip'), title: 'Draw something to wear, right on this spot (it goes in My stuff)', run: () => newStuffHere({ x, y }) },
+    { label: 'Add a thing here', icon: ctxSlab('paperclip'), title: 'A new part standing out of this spot, kept apart from the body: a hat, a horn, glasses', run: () => growThingHere({ x, y }) },
     buttonItem('#reset-shape', ctxDuo('rotate-left')),
     {
       label: 'Grow',
@@ -175,10 +97,11 @@ function viewMenu(x: number, y: number) {
     },
     { label: 'Mirror both sides', icon: ctxSlab('arrow-right-arrow-left'), key: keyOf('mirror'), checked: rigLock, run: () => setMirror(!rigLock) },
     SEP,
-    { label: 'Arrange creature', icon: ctxDuo('arrows-up-down-left-right'), sub: gizmoItems(place, placing ? gizmo.mode : null) },
+    { label: 'Handles', icon: ctxDuo('arrows-up-down-left-right'), sub: handleItems() },
     buttonItem('#reset-pose', ctxDuo('person')),
     !root && { label: 'Part to floor', icon: ctxSlab('arrow-down-to-line'), title: 'Move it straight down until its lowest point touches the floor', run: () => partToFloor(id) },
     buttonItem('#drop-floor', ctxSlab('arrow-down-to-line'), 'Creature to floor'),
+    root && { label: 'Reset placement', icon: ctxDuo('rotate-left'), title: 'Upright on the floor at its normal size, still facing the same way', run: resetPlacement },
     SEP,
     ...item,
     SEP,

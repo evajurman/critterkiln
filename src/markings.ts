@@ -210,6 +210,22 @@ export function markingPlace(m: Marking): THREE.Matrix4 {
     new THREE.Vector3(...(m.stretch ?? [1, 1, 1])),
   );
 }
+/**
+ * A marking laid out again after what it's on was moved by `m` (in the rest
+ * pose: moved, turned, sized, even mirrored): it stays where it was on it.
+ * Paint's strokes are kept in the pattern's own space, so they come along.
+ */
+export function movedMarking(mk: Marking, m: THREE.Matrix4): Marking {
+  const place = m.clone().multiply(markingPlace(mk));
+  const p = new THREE.Vector3(), q = new THREE.Quaternion(), k = new THREE.Vector3();
+  place.decompose(p, q, k);
+  const r = (v: number) => Math.round(v * 1e5) / 1e5;
+  const out: Marking = { ...structuredClone(mk), offset: p.toArray().map(r) as [number, number, number], turn: q.toArray().map(r) as [number, number, number, number] };
+  if (Math.abs(k.x - 1) > 1e-5 || Math.abs(k.y - 1) > 1e-5 || Math.abs(k.z - 1) > 1e-5) out.stretch = k.toArray().map(r) as [number, number, number];
+  else delete out.stretch;
+  return out;
+}
+
 /** The same for a part's whole stack of markings (for mesh and grouping keys). */
 export function markingsKey(list: Marking[] | undefined): string {
   return list?.length ? list.map(markingKey).join('+') : '';

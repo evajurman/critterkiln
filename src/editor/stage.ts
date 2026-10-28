@@ -12,7 +12,7 @@ import { bokeh, gtao, scenePass } from './post';
 import { fitShadows } from './state';
 import { controls } from './controls';
 import { renderOverlay } from './drawing';
-import { gizmo } from './attach';
+import { gizmo } from './gizmo';
 import { invalidate } from './loop';
 
 export const viewport = $('#viewport');

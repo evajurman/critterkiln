@@ -114,19 +114,10 @@ export function scopeItems(kinds: ScopeKind[], of: ScopeOf): MenuEntry[] {
   ]);
 }
 
-/** The scope choices for whatever was right-clicked: a section of the creature's, or a group on the piece card. */
+/** The scope choices for whatever was right-clicked: a section of the creature's. */
 export function scopeMenu(at: HTMLElement): MenuEntry[] {
   const sec = at.closest<HTMLElement>('.ck-sec');
-  if (sec) return scopeItems(kindsIn(sec), 'part');
-  const card = $('#piece-card');
-  if (!card.contains(at)) return [];
-  // on the piece card: the group under the last title above what was clicked
-  let k: ScopeKind | undefined;
-  for (const c of card.children) {
-    if (c.classList.contains('scope-title')) k = (c as HTMLElement).dataset.scope as ScopeKind;
-    if (c.contains(at)) break;
-  }
-  return k ? scopeItems([k], 'piece') : [];
+  return sec ? scopeItems(kindsIn(sec), 'part') : [];
 }
 
 /** The kinds a section's tools change, in order */

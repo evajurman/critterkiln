@@ -5,6 +5,7 @@
 // while it's the one being edited. Either way it's still a creature in the
 // scene: clicking it edits it like any other.
 
+import { othersHidden } from './focus';
 import * as THREE from 'three';
 import { Creature, type BoneRT, type CreatureState, type Ride } from '../creature';
 import { uid } from '../stuff';
@@ -71,11 +72,11 @@ export function followRiders() {
     c.root.updateMatrixWorld(true);
   };
   for (const c of creatures) follow(c);
-  // (drawing a part hides the others itself; making stuff shows them all)
-  if (!drawState) for (const c of creatures) c.root.visible = !c.state.offstage || c === creature;
+  // (drawing a part hides the others itself; on the table, or in Solo, only the one being worked on shows)
+  if (!drawState) for (const c of creatures) c.root.visible = c === creature || (!c.state.offstage && !c.state.table && !othersHidden());
 }
 
-/** After the active creature was moved by hand (Arrange): if it rides, it rides where it was put. */
+/** After the active creature was moved by hand (its Move, Rotate or Scale handles): if it rides, it rides where it was put. */
 export function captureRide(c: Creature) {
   const h = hostOf(c.state);
   if (!h) return;
@@ -114,7 +115,7 @@ export function rideAt(rider: Creature, host: Creature, hit: { bone: BoneRT; poi
   followRiders();
   commit();
   renderUI();
-  hint(`${creatureLabel(creatures.indexOf(rider))} rides on ${creatureLabel(creatures.indexOf(host))} now: it goes where that part goes (Arrange sizes it)`, 3000);
+  hint(`${creatureLabel(creatures.indexOf(rider))} rides on ${creatureLabel(creatures.indexOf(host))} now: it goes where that part goes (the Scale handles size it)`, 3000);
 }
 
 /** Where the camera looks at a creature's part: a spot on its surface (or none). */

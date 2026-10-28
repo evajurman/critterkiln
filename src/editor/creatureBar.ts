@@ -4,24 +4,25 @@
 
 import * as THREE from 'three';
 import { Creature, defaultState, type Attachment, type BoneRT, type CreatureState, type PartState, type Placement } from '../creature';
-import { ANIM_KINDS } from '../animate';
-import { duplicateLimb, nextRoot } from '../rigs';
+import { ANIM_KINDS, STUFF_KINDS } from '../animate';
+import { DUPLICATE_OFFSET, duplicateLimb, nextRoot } from '../rigs';
+import { movedMarking } from '../markings';
+import { chooseCopy, kitOf, linkedCopies, linkOf, thingTop, unlink } from './kits';
+import { editInStuff, solo } from './focus';
+import { openContextMenu, SEP } from '../contextMenu';
+import { keyLabel, type ShortcutId } from '../shortcuts';
+import { clip, copyPicked, pasteClip } from './clipboard';
+import { enterDraw, exitDraw } from './drawing';
 import { $, fa, pickHow, type PickHow } from './dom';
-import { activate, commit, creature, creatures, idle, makeCreature, save, selected, setCreature, setIdle, state, world } from './state';
+import { activate, commit, creature, creatures, idle, makeCreature, mode, save, selected, setCreature, setIdle, state, world } from './state';
 import { creatureLabel } from './controls';
-import { frameAll } from './framing';
-import { exitDraw } from './drawing';
-import { placing, startPlacing, stopPlacing } from './arrange';
+import { frameAll, partToFloor } from './framing';
+import { stopPlacing } from './arrange';
 import { partTree, pickedSrcs, selectAllParts, selectPart } from './partPanel';
 import { renderUI } from './panels';
 import { freshRig, partName, removePart, rigEdit, setPartName } from './rigEdit';
 import { hint, hintOnce } from './hints';
 import { creatureId, setOffstage } from './riders';
-import { selectedAttachment } from './attach';
-import { pickStuff } from './carry';
-import { pickAllWornPieces, pickWornPiece, removeAttachment, wornPieces } from './attachPanel';
-import { type Piece } from '../stuff';
-import { editStuff } from './workbench';
 
 /** creatures whose parts are folded away under their row (the > beside it); the rest show theirs, like a tree */
 export const partsShut = new WeakSet<CreatureState>();
@@ -34,6 +35,8 @@ export function renderCreatureBar() {
   $('#view-bar [data-view="selection"]').hidden = world.creatures.length < 2;
   // one row per creature, like the pieces in Stuff: pick (or rename) it, copy it, or remove it
   world.creatures.forEach((s, i) => {
+    // the Stuff tab lists just its bench; the rest, everyone but the bench
+    if (!!s.table !== (mode === 'stuff')) return;
     const row = document.createElement('div');
     row.className = 'piece-row creature-row';
     row.classList.toggle('active', i === world.active && !idle);
@@ -122,100 +125,35 @@ function partRows(i: number): HTMLElement {
   };
   for (const { bone, depth } of partTree(c)) {
     const p = s.parts[bone.src];
-    if (p) list.append(partRow(i, bone, p, depth, picked.has(bone.src), pickIt));
-    // what it wears, under it (on either of a pair)
-    for (const a of s.attachments ?? []) {
-      const on = c.bones.get(a.bone);
-      if (!on || (on !== bone && on.def.mirrorOf !== bone.def.id)) continue;
-      list.append(stuffRow(i, a, depth + 1));
-      if (stuffOpen.has(a.id)) a.thing.pieces.forEach((p, n) => list.append(pieceRow(i, a, p, n, depth + 2)));
-    }
+    // (the Stuff tab's bench stand is hidden: only what's on it is listed)
+    if (p && !p.hidden) list.append(partRow(i, bone, p, depth, picked.has(bone.src), pickIt));
   }
   return list;
 }
 
-/** Worn things whose pieces show under them in the Scene list (by attachment id). */
-const stuffOpen = new Set<string>();
-
-/** Pick a worn thing (on creature `i`), as clicking it in the view does. */
-function pickWorn(i: number, a: Attachment) {
-  if (i !== world.active || idle) {
-    setIdle(false);
-    activate(i);
-  }
-  if (selectedAttachment !== a.id) pickStuff(a.id);
-}
-
-/** A row for a thing a part wears: picking it picks it (as clicking it in the view does); its icons change it where it is, or take it off. */
-function stuffRow(i: number, a: Attachment, depth: number): HTMLElement {
-  const row = document.createElement('div');
-  // (while some of its pieces are picked, shown under it, they're the dark rows)
-  const w = i === world.active && a.id === selectedAttachment ? wornPieces() : null;
-  const some = !!w && w.pieces.length < a.thing.pieces.length && stuffOpen.has(a.id);
-  row.className = 'part-row stuff-row' + (i === world.active && a.id === selectedAttachment && !some ? ' active' : '');
-  row.style.setProperty('--depth', String(depth));
-  // picking it picks all of it: Look (if it's showing) works on every piece
-  const pickIt = () => {
-    pickWorn(i, a);
-    pickAllWornPieces(false);
-  };
-  const btn = document.createElement('button');
-  btn.className = 'part-pick';
-  btn.innerHTML = `${fa('paperclip')}<span class="part-name"></span>`;
-  btn.querySelector('.part-name')!.textContent = a.thing.name || 'Thing';
-  btn.title = `${a.thing.name || 'Thing'}: worn stuff. Click to pick it`;
-  btn.onclick = pickIt;
-  const edit = document.createElement('button');
-  edit.className = 'piece-icon';
-  edit.innerHTML = fa('pencil');
-  edit.title = 'Change it right where it is';
-  edit.onclick = () => {
-    pickIt();
-    editStuff({ kind: 'worn', id: a.id });
-  };
-  const del = document.createElement('button');
-  del.className = 'piece-icon';
-  del.innerHTML = fa('trash');
-  del.title = 'Take it off';
-  del.onclick = () => {
-    pickIt();
-    removeAttachment();
-  };
-  // its pieces, folded away under it
-  if (a.thing.pieces.length > 1 || stuffOpen.has(a.id)) {
-    const open = stuffOpen.has(a.id);
-    const fold = document.createElement('button');
-    fold.className = 'piece-icon stuff-fold' + (open ? ' open' : '');
-    fold.innerHTML = '<i class="fa-duotone fa-regular fa-chevron-down" aria-hidden="true"></i>';
-    fold.title = open ? 'Hide its pieces' : 'Show its pieces: pick one to change its color, material and markings in Look';
-    fold.onclick = () => {
-      if (open) stuffOpen.delete(a.id);
-      else stuffOpen.add(a.id);
-      renderCreatureBar();
-    };
-    row.append(btn, fold, edit, del);
-  } else row.append(btn, edit, del);
-  return row;
-}
-
-/** A row for one piece of a worn thing: picking it (Ctrl: one more, Shift: everything between) puts its colors, material and markings in Look. */
-function pieceRow(i: number, a: Attachment, p: Piece, n: number, depth: number): HTMLElement {
-  const w = i === world.active ? wornPieces() : null;
-  const row = document.createElement('div');
-  row.className = 'part-row piece-of-row' + (w?.a.id === a.id && w.pieces.includes(p) ? ' active' : '');
-  row.style.setProperty('--depth', String(depth));
-  const btn = document.createElement('button');
-  btn.className = 'part-pick';
-  btn.innerHTML = `<i style="background:${p.color}"></i><span class="part-name">Piece ${n + 1}</span>`;
-  if (p.twin) btn.insertAdjacentHTML('beforeend', `<span class="part-mark" title="A mirrored pair">${fa('arrow-right-arrow-left')}</span>`);
-  btn.title = `Piece ${n + 1} of ${a.thing.name || 'Thing'}: its colors, material and markings in Look (a change goes on it everywhere it’s worn) · Ctrl-click to pick one more · Shift-click to pick everything between`;
-  btn.onclick = (e) => {
-    const how = pickHow(e);
-    pickWorn(i, a);
-    pickWornPiece(p.id, how);
-  };
-  row.append(btn);
-  return row;
+/**
+ * The picked part and everything on it, copied just below it: its drawing, looks
+ * and markings (moved with it). `link`: its top joins those linked duplicates;
+ * null: a copy of its own; undefined: as the part is.
+ */
+function duplicateHere(link: string | null | undefined) {
+  rigEdit((rig) => {
+    const copies = duplicateLimb(rig, selected);
+    const by = new THREE.Matrix4().makeTranslation(...DUPLICATE_OFFSET);
+    copies.forEach((c, n) => {
+      const from = state.parts[c.from];
+      if (!from || state.parts[c.to]) return;
+      const p = structuredClone(from);
+      if (p.markings) p.markings = p.markings.map((mk) => movedMarking(mk, by));
+      // (the top is the first copy, and its twin)
+      if (n === 0 || copies[0].to.replace(/[LR]$/, '') === c.to.replace(/[LR]$/, '')) {
+        if (link) p.link = link;
+        else if (link === null) delete p.link;
+      }
+      state.parts[c.to] = p;
+    });
+    return copies;
+  }, true);
 }
 
 function partRow(i: number, b: BoneRT, p: PartState, depth: number, active: boolean, pickIt: (id: string, how?: PickHow) => void): HTMLElement {
@@ -223,7 +161,12 @@ function partRow(i: number, b: BoneRT, p: PartState, depth: number, active: bool
   const c = creatures[i];
   const twin = c.list.find((o) => o.def.mirrorOf === b.def.id);
   const anim = s.anims?.[b.def.id] ?? (twin && s.anims?.[twin.def.id]);
-  const kind = anim && ANIM_KINDS.find((k) => k.kind === anim.kind);
+  // (or a move on the part it hangs off: orbit, spin...)
+  const move = s.moves?.[b.def.id] ?? (twin && s.moves?.[twin.def.id]);
+  const kind = anim ? ANIM_KINDS.find((k) => k.kind === anim.kind) : move && STUFF_KINDS.find((k) => k.kind === move.kind);
+  // the top of a thing (a part kept apart from the body), and whether it's one of linked duplicates
+  const thing = !!p.apart && !(b.parent && s.parts[b.parent.src]?.apart);
+  const linked = thing && !!p.link && linkedCopies(p.link).length > 1;
   const name = b.def.sideSign !== 0 ? b.def.name.replace(/ \((L|R)\)$/, '') : b.def.name;
   const row = document.createElement('div');
   row.className = 'part-row' + (active ? ' active' : '');
@@ -233,6 +176,8 @@ function partRow(i: number, b: BoneRT, p: PartState, depth: number, active: bool
   btn.className = 'part-pick';
   btn.innerHTML =
     `<i style="background:${p.color}"></i><span class="part-name">${name}${twin ? ' ×2' : ''}</span>` +
+    (thing ? `<span class="part-mark" title="A thing: kept apart from the body">${fa('paperclip')}</span>` : '') +
+    (linked ? `<span class="part-mark" title="A linked duplicate: change one and the rest change too (right-click to unlink)">${fa('link')}</span>` : '') +
     (p.outline ? `<span class="part-mark" title="Drawn">${fa('check')}</span>` : '') +
     (kind ? `<span class="part-mark" title="Moves: ${kind.name}"><i class="fa-duotone fa-regular fa-${kind.icon}" aria-hidden="true"></i></span>` : '');
   btn.title = (kind ? `${name}: moves (${kind.name})` : name) + ' · Ctrl-click to pick one more · Shift-click to pick everything between · double-click to rename';
@@ -259,7 +204,13 @@ function partRow(i: number, b: BoneRT, p: PartState, depth: number, active: bool
   dup.disabled = isRoot;
   dup.onclick = () => {
     pickIt(b.def.id);
-    rigEdit((rig) => duplicateLimb(rig, selected), true);
+    const top = thingTop(creature, selected);
+    const picked = creature.bones.get(selected);
+    // a thing kept apart from the body: a linked duplicate, or a copy of its own
+    if (top && (top === picked || creature.twinOf(top) === picked)) {
+      const r = dup.getBoundingClientRect();
+      chooseCopy(r.left, r.bottom + 4, (linked) => duplicateHere(linked ? linkOf(top) : null));
+    } else duplicateHere(undefined);
   };
   const del = document.createElement('button');
   del.className = 'piece-icon';
@@ -281,7 +232,89 @@ function partRow(i: number, b: BoneRT, p: PartState, depth: number, active: bool
     save();
   };
   row.append(add, btn, dup, del);
+  // right-click: what can be done to it, picked first
+  row.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    pickIt(b.def.id);
+    rowMenu(e.clientX, e.clientY, b.def.id);
+  });
   return row;
+}
+
+const ctx = (n: string) => `fa-duotone fa-regular fa-${n}`;
+
+/** A part's row, right-clicked: renaming, drawing, duplicating (linked or its own), unlinking, keeping it in My stuff, deleting. */
+function rowMenu(x: number, y: number, id: string) {
+  const b = creature.bones.get(id);
+  if (!b) return;
+  const p = state.parts[b.src];
+  const name = (b.def.sideSign !== 0 ? b.def.name.replace(/ \((L|R)\)$/, '') : b.def.name) || 'Part';
+  const isRoot = !b.parent;
+  const top = thingTop(creature, id);
+  const isTop = !!top && (top === b || creature.twinOf(top) === b);
+  const copies = isTop && p.link ? linkedCopies(p.link) : [];
+  const here = copies.filter((c) => world.creatures[c.i] === state && c.top !== top!.def.id);
+  const key = (k: ShortcutId) => keyLabel(k) || undefined;
+  openContextMenu(x, y, name, [
+    { label: 'Rename', icon: ctx('pen'), run: () => renamePartRow(id) },
+    { label: 'Draw shape', icon: ctx('pencil'), key: key('draw'), run: () => enterDraw({ kind: 'bone', boneId: id }) },
+    SEP,
+    ...(isTop
+      ? [
+          { label: 'Linked duplicate', icon: ctx('link'), note: 'Change one and every linked copy changes too', run: () => duplicateHere(linkOf(top!)) },
+          { label: 'Unique copy', icon: ctx('clone'), note: 'A copy of its own, to change on its own', run: () => duplicateHere(null) },
+        ]
+      : [{ label: 'Duplicate', icon: ctx('clone'), disabled: isRoot, title: isRoot ? 'The first part holds everything else' : undefined, run: () => duplicateHere(undefined) }]),
+    { label: 'Copy', icon: ctx('copy'), key: key('copy'), disabled: isRoot, run: () => copyPicked() },
+    clip && { label: 'Paste onto it', icon: ctx('paste'), key: key('paste'), run: () => pasteClip(null) },
+    isTop && !state.table && {
+      label: 'Edit in Stuff',
+      icon: ctx('briefcase'),
+      note: 'On its own, on the blueprint: every copy follows',
+      run: () => {
+        const kit = kitOf(top!);
+        if (kit) editInStuff(kit);
+        else hint('Draw it first', 1600, true);
+      },
+    },
+    isTop && { label: 'Solo', icon: ctx('eye'), note: 'Just this thing, where it is: the rest hidden until Done', run: () => solo(id) },
+    copies.length > 1 && { label: 'Unlink', icon: ctx('link-slash'), note: `Its own from now on: the other ${copies.length - 1 === 1 ? 'copy stops' : `${copies.length - 1} copies stop`} following it, and it them`, run: () => unlink(top!) },
+    here.length > 0 && {
+      label: 'Pick its linked copies',
+      icon: ctx('object-group'),
+      title: 'Pick every linked copy on this creature too',
+      run: () => {
+        for (const c of here) selectPart(c.top, false, 'toggle');
+        save();
+      },
+    },
+    SEP,
+    !isRoot && {
+      label: 'Keep apart from the body',
+      icon: ctx('link-slash'),
+      checked: !!p.apart,
+      title: 'Never blends into the parts it touches: worn things like a hat or glasses',
+      run: () => {
+        if (p.apart) delete p.apart;
+        else p.apart = true;
+        creature.sync();
+        commit();
+        renderUI();
+      },
+    },
+    !isRoot && { label: 'Part to floor', icon: ctx('arrow-down-to-line'), title: 'Move it straight down until its lowest point touches the floor', run: () => partToFloor(id) },
+    SEP,
+    {
+      label: 'Delete',
+      icon: 'fa-slab-duo fa-regular fa-trash',
+      key: key('delete'),
+      danger: true,
+      disabled: isRoot && !nextRoot(state.rig, b.def.id),
+      title: isRoot ? 'Just this part: what’s on it stays, hanging off the part that takes its place' : `${name} and everything attached to it`,
+      run: removePart,
+    },
+  ]);
 }
 
 let lastPartClick = { id: '', at: 0 };
@@ -370,7 +403,7 @@ function renderStrip() {
   add.title = 'Add a new creature to the scene';
   add.setAttribute('aria-label', 'Add a creature');
   add.onclick = () => $('#cr-add').click();
-  strip.replaceChildren(unfold, ...dots, add);
+  strip.replaceChildren(unfold, ...dots, ...(mode === 'stuff' ? [] : [add]));
 }
 
 const FOLD_KEY = 'creature-creator/scene-folded';
@@ -457,10 +490,5 @@ export function initCreatureBar() {
     s.placement = freeSpot();
     addCreature(s);
     hintOnce('Added a new creature: click any creature to switch between them', 2600);
-  };
-  $('#cr-place').onclick = () => {
-    if (!placing) return startPlacing();
-    stopPlacing();
-    commit();
   };
 }

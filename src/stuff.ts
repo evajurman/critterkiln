@@ -231,13 +231,70 @@ export function pieceGeometry(p: Piece, step = 0): THREE.BufferGeometry {
 
 /**
  * A creature part built like a flat or turned piece: `depth` is a flat
- * part's thickness; a turned part is solid. Points come about `step` apart
- * all over, so it bends with its bone and blends into its neighbours. A
- * copy: the part's own data (its merge spheres) goes on it.
+ * part's thickness; a turned part is solid, unless it's hollow (then its wall
+ * is a share of its widest radius). Points come about `step` apart all over,
+ * so it bends with its bone and blends into its neighbours. A copy: the part's
+ * own data (its merge spheres) goes on it.
  */
-export function partPieceGeometry(kind: 'flat' | 'turned', outline: Vec2[], depth: number, lowPoly: boolean, step: number): THREE.BufferGeometry {
-  const p: Piece = { id: '', outline, holes: [], kind, thickness: depth, round: 0.7, color: '#ffffff', style: lowPoly ? 'lowpoly' : 'plastic', z: 0 };
+export function partPieceGeometry(kind: 'flat' | 'turned', outline: Vec2[], depth: number, lowPoly: boolean, step: number, more: PartPieceExtras = {}): THREE.BufferGeometry {
+  const b = bounds(outline);
+  const wall = kind === 'turned' ? (more.wall ?? Math.max(0.004, 0.12 * Math.max(Math.abs(b.minX), Math.abs(b.maxX)))) : depth;
+  const p: Piece = {
+    id: '',
+    outline,
+    holes: kind === 'flat' ? (more.holes ?? []) : [],
+    kind,
+    thickness: wall,
+    round: more.round ?? 0.7,
+    color: '#ffffff',
+    style: lowPoly ? 'lowpoly' : 'plastic',
+    z: 0,
+    ...(kind === 'turned' && more.hollow ? { hollow: true, open: !!more.open } : {}),
+  };
   return pieceGeometry(p, step).clone();
+}
+
+/** What else a flat or turned part can be: cut-outs (flat), a hollow shell, open at the top (turned). */
+export interface PartPieceExtras {
+  holes?: Vec2[][];
+  hollow?: boolean;
+  open?: boolean;
+  /** flat: how rounded its edges are, 0..1 (unset: 0.7) */
+  round?: number;
+  /** turned + hollow: wall thickness (unset: a share of its widest radius) */
+  wall?: number;
+}
+
+/**
+ * The space a part curves and wraps in: part -> that space (the curve's
+ * centre line is its x = 0, the dome's middle its origin, the body is along
+ * its -Z), and how far the part reaches from that middle (along X for the
+ * centre line, all round for a dome or a wrap).
+ */
+export interface CurveSpace {
+  m: THREE.Matrix4;
+  reach: number;
+  wrapReach: number;
+}
+
+/** How far a thing reaches from its crosshair: for its bend (along X, or all round for a dome) and for wrapping. */
+export function thingReaches(thing: Thing): { reach: number; wrapReach: number } {
+  return { reach: thingBend({ ...thing, bend: 1 })?.reach ?? 0, wrapReach: thing.pieces.length ? thingReach(thing.pieces) : 0 };
+}
+
+/** A part's mesh curved like a stuff item's bend: along its centre line (a shield) or round its middle (a dome). -1..1, 0 = flat. */
+export function curvedGeometry(src: THREE.BufferGeometry, mode: BendMode, amount: number, space: CurveSpace): THREE.BufferGeometry {
+  if (Math.abs(amount) < 0.005 || space.reach < 1e-4) return src;
+  return bentGeometry(src, { mode, r: space.reach / (amount * (Math.PI / 2)), reach: space.reach }, space.m);
+}
+
+/** A part's mesh pressed onto the body like worn stuff with Wrap on (`surface`: the body's height in the curve space). A new geometry. */
+export function wrappedGeometry(src: THREE.BufferGeometry, surface: WrapSurface, smooth: number, strength: number, space: CurveSpace): THREE.BufferGeometry {
+  const reach = Math.max(space.wrapReach, 1e-3);
+  const step = reach / 36;
+  if (!src.boundingBox) src.computeBoundingBox();
+  const field = wrapField({ surface, smooth, strength }, src.boundingBox!.clone().applyMatrix4(space.m), reach);
+  return reshaped(src, step, space.m, (g) => wrapPoints(g, field, strength, step / 2));
 }
 
 /** Who's wearing (or showing) a thing: their material, for items that inherit it. */

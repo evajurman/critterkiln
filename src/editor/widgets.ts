@@ -8,7 +8,6 @@ import { setSceneColors } from '../layout';
 import { $ } from './dom';
 import { backdrop, floorPrefs } from './floor';
 import { creature, creatures, mode, sceneColorRows, world } from './state';
-import { workbench } from './workbench';
 import { invalidate } from './loop';
 
 export const SWATCHES = [
@@ -34,9 +33,7 @@ function sceneColors(): string[] {
     }
     for (const m of s.markings ?? []) add(m.color);
     if (s.eyes.enabled && (s.eyes.style === 'bead' || s.eyes.style === 'dot' || s.eyes.style === 'button')) add(s.eyes.color);
-    for (const a of s.attachments ?? []) for (const p of a.thing.pieces) add(p.color);
   }
-  for (const p of world.workbench?.pieces ?? []) add(p.color);
   if (floorPrefs.mode === 'material') add(floorPrefs.color);
   add(backdrop);
   return [...used].sort((a, b) => b[1] - a[1]).map(([c]) => c);

@@ -15,6 +15,8 @@ export interface MenuItem {
   disabled?: boolean;
   /** shown greyed, when it can't be done here */
   title?: string;
+  /** a line of small print under it: what choosing it means */
+  note?: string;
   danger?: boolean;
   run?: () => void;
   sub?: MenuItem[];
@@ -89,7 +91,7 @@ function list(items: (MenuItem | typeof SEP)[], title?: string): HTMLElement {
       'button',
       'ctx-item' + (it.danger ? ' danger' : '') + (it.sub ? ' has-sub' : ''),
       `<span class="ctx-ic">${it.checked ? fa('fa-solid fa-check') : it.checked === undefined && it.icon ? fa(it.icon) : ''}</span>` +
-        `<span class="ctx-label">${esc(it.label)}</span>` +
+        `<span class="ctx-label">${esc(it.label)}${it.note ? `<small class="ctx-note">${esc(it.note)}</small>` : ''}</span>` +
         (it.key ? `<kbd class="ctx-key">${esc(it.key)}</kbd>` : '') +
         (it.sub ? `<span class="ctx-more">${fa('fa-solid fa-chevron-right')}</span>` : ''),
     ) as HTMLButtonElement;

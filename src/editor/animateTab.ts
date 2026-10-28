@@ -2,7 +2,7 @@
 // The Animate tab (proof of concept): looping motions on parts, see src/animate.ts.
 
 import * as THREE from 'three';
-import { Creature, type Attachment, type BoneRT } from '../creature';
+import { Creature, type BoneRT } from '../creature';
 import {
   ANIM_KINDS,
   animOffset,
@@ -19,6 +19,7 @@ import {
   orbitOut,
   STUFF_KINDS,
   stuffMove,
+  mirrorMove,
   stuffP,
   type PartAnim,
   type StuffAnim,
@@ -30,7 +31,6 @@ import { renderer, rim, scene, view, viewport } from './stage';
 import { commit, creature, creatures, idle, mode, selected, state, world } from './state';
 import { raycaster } from './controls';
 import { renderCreatureBar } from './creatureBar';
-import { selectPart } from './partPanel';
 import { rigLocked } from './rigEdit';
 import { hint } from './hints';
 import { invalidate } from './loop';
@@ -66,7 +66,7 @@ export const animSecs = () => world.animSecs ?? 1.5;
 export function animOn() {
   return mode === ANIM_TAB;
 }
-export const animMoving = () => animOn() && animPlaying && creatures.some((c) => c.state.anims && Object.keys(c.state.anims).length);
+export const animMoving = () => animOn() && animPlaying && creatures.some((c) => (c.state.anims && Object.keys(c.state.anims).length) || (c.state.moves && Object.keys(c.state.moves).length));
 
 export function tickAnim(now: number) {
   const dt = animLast ? Math.min(100, now - animLast) : 0;
@@ -76,7 +76,7 @@ export function tickAnim(now: number) {
       animKey = '';
       for (const c of creatures) {
         c.setAnim(null);
-        c.setStuffAnim(null);
+        c.setMoves(null);
         c.applyPose();
       }
       animViz.visible = false;
@@ -95,13 +95,15 @@ export function tickAnim(now: number) {
 
 /** Every creature as it is at loop time `t` (only redone when something changed). */
 export function showAnimAt(t: number) {
-  const key = t + JSON.stringify(creatures.map((c) => [c.state.anims ?? null, (c.state.attachments ?? []).map((x) => x.anim ?? null)]));
+  const key = t + JSON.stringify(creatures.map((c) => [c.state.anims ?? null, c.state.moves ?? null]));
   if (key === animKey) return;
   animKey = key;
   for (const c of creatures) {
     c.tickScatter(t * animSecs(), animSecs());
-    const moving = (c.state.attachments ?? []).filter((x) => x.anim);
-    c.setStuffAnim(moving.length ? new Map(moving.map((x) => [x.id, stuffMove(x.anim!, stuffP(x.anim!, t), c.stuffFrame(x.id)?.center)])) : null);
+    // parts moving on the parts they hang off, from where they're placed
+    c.setMoves(null);
+    const moves = Object.entries(c.state.moves ?? {}).filter(([id]) => c.bones.has(id));
+    c.setMoves(moves.length ? new Map(moves.map(([id, m]) => [id, stuffMove(m, stuffP(m, t), c.moveFrame(id)?.center)])) : null);
     const list = Object.entries(c.state.anims ?? {}).filter(([id]) => c.bones.has(id));
     const reach = list.filter(([id, a]) => reaching(c, id, a));
     const swing = list.filter((e) => !reach.includes(e));
@@ -145,37 +147,38 @@ function selAnim(): PartAnim | undefined {
   return state.anims?.[selected];
 }
 
-/** the piece of stuff being animated (picked in the view or from the panel), instead of the part */
-let animStuff = '';
-function selStuff(): Attachment | undefined {
-  return animStuff ? state.attachments?.find((x) => x.id === animStuff) : undefined;
+/** The picked part's move on the part it hangs off (orbit, spin, bob, swing, pulse), if it has one. */
+function selMove(): StuffAnim | undefined {
+  return idle ? undefined : state.moves?.[selected];
 }
-/** The stuff on the picked part (a mirrored item shows on its twin part too). */
-function stuffHere(): Attachment[] {
-  return (state.attachments ?? []).filter((x) => {
-    if (x.bone === selected) return true;
-    const b = creature.bones.get(x.bone);
-    return x.mirror && !!b && creature.mirrorBoneOf(b)?.def.id === selected;
-  });
-}
-export function pickAnimStuff(id: string) {
-  const a = state.attachments?.find((x) => x.id === id);
-  if (!a) return;
-  if (creature.bones.has(a.bone) && (selected !== a.bone || idle)) selectPart(a.bone, false);
-  animStuff = id;
-  renderAnim();
+/** Change the picked part's move (and its twin's, with Mirror on), or take it away. */
+function setMove(m: StuffAnim | null) {
+  const moves = (state.moves ??= {});
+  const b = creature.bones.get(selected);
+  const twin = b && rigLocked() ? creature.twinOf(b) : null;
+  if (m) moves[selected] = m;
+  else delete moves[selected];
+  if (twin && twin !== b) {
+    // hanging off a pair, each side's frame is already a mirror image; off a middle part, mirror it across
+    const mirrored = twin.parent && twin.parent === b!.parent;
+    if (m) moves[twin.def.id] = mirrored ? mirrorMove(m) : m;
+    else delete moves[twin.def.id];
+  }
+  if (!Object.keys(moves).length) delete state.moves;
+  renderCreatureBar();
 }
 
-/** A fresh motion for a piece of stuff: its handles start somewhere that makes sense for the kind. */
-function freshStuffAnim(kind: StuffKind, x: Attachment, keep?: StuffAnim): StuffAnim {
-  const f = creature.stuffFrame(x.id)!;
-  const up = creature.upIn(x.bone);
+/** A fresh move for the picked part: its handles start somewhere that makes sense for the kind. */
+function freshMove(kind: StuffKind, keep?: StuffAnim): StuffAnim {
+  const b = creature.bones.get(selected)!;
+  const f = creature.moveFrame(selected)!;
+  const up = creature.upIn(b.parent!.def.id);
   const v = (w: THREE.Vector3) => w.toArray().map((n) => Math.round(n * 1000) / 1000) as V3;
   const base = { kind, size: kind === 'swing' ? 20 : kind === 'pulse' ? 15 : 25, speed: keep?.speed ?? 1, phase: keep?.phase ?? 0, reverse: keep?.reverse };
   switch (kind) {
     case 'orbit': {
-      // round the nearest other stuff on the same part (stars round a ring), about the way it faces; or round the part
-      const others = (state.attachments ?? []).filter((o) => o.id !== x.id && o.bone === x.bone).map((o) => creature.stuffFrame(o.id)).filter((o) => !!o);
+      // round the nearest other part on the same part (stars round a ring), about the way it stands out; or round the part
+      const others = creature.list.filter((o) => o !== b && o.parent === b.parent).map((o) => creature.moveFrame(o.def.id)).filter((o) => !!o);
       const near = others.sort((p, q) => p.center.distanceTo(f.center) - q.center.distanceTo(f.center))[0];
       return near ? { ...base, center: v(near.center), axis: v(near.normal) } : { ...base, center: v(new THREE.Vector3(0, f.center.y, 0)), axis: [0, 1, 0] };
     }
@@ -190,16 +193,13 @@ function freshStuffAnim(kind: StuffKind, x: Attachment, keep?: StuffAnim): Stuff
   }
 }
 
-/** The motion being edited (the stuff's, or the part's), and a way to change it. */
+/** The motion being edited (the part's move, or its own motion), and a way to change it. */
 function curMotion(): { speed: number; phase: number; size: number } | undefined {
-  return selStuff()?.anim ?? selAnim();
+  return selMove() ?? selAnim();
 }
 function patchMotion(p: Partial<StuffAnim & PartAnim>) {
-  const x = selStuff();
-  if (x) {
-    if (x.anim) x.anim = { ...x.anim, ...p } as StuffAnim;
-    return;
-  }
+  const m = selMove();
+  if (m) return setMove({ ...m, ...p } as StuffAnim);
   const a = selAnim();
   if (a) setAnim({ ...a, ...p } as PartAnim);
 }
@@ -224,27 +224,9 @@ function setAnim(a: PartAnim | null) {
 
 export function renderAnim() {
   const b = idle ? undefined : creature.bones.get(selected);
-  // the stuff on this part, to animate instead of the part
-  const here = b ? stuffHere() : [];
-  if (animStuff && !here.some((x) => x.id === animStuff)) animStuff = '';
-  const chips = $('#anim-stuff');
-  chips.hidden = !here.length;
-  chips.replaceChildren(
-    ...[null, ...here].map((x) => {
-      const btn = document.createElement('button');
-      btn.className = 'anim-chip';
-      btn.classList.toggle('active', (x?.id ?? '') === animStuff);
-      btn.innerHTML = x ? `<i class="fa-slab-duo fa-regular fa-paperclip" aria-hidden="true"></i> ${(x.thing.name || 'Stuff').replace(/[&<>"]/g, '')}${x.anim ? ' •' : ''}` : 'This part';
-      btn.title = x ? 'Animate this piece of stuff' : 'Animate the part itself';
-      btn.onclick = () => {
-        animStuff = x?.id ?? '';
-        renderAnim();
-      };
-      return btn;
-    }),
-  );
-  const stuff = selStuff();
-  if (stuff) return renderStuffAnim(stuff);
+  $('#anim-stuff').hidden = true;
+  const move = selMove();
+  if (b && move) return renderMove(move);
   const a = selAnim();
   // Swing only goes back and forth, and Breathe stays put: neither has a way round
   $('#anim-reverse-row').hidden = !a || !canReverse(a.kind);
@@ -259,6 +241,7 @@ export function renderAnim() {
       btn.onclick = () => {
         // switching motion keeps its size, place and timing
         // a fresh motion on a part that bends a knee: a stride the leg can reach
+        setMove(null);
         const fresh = k.kind ? { ...defaultAnim(k.kind), ...(k.kind !== 'breathe' && reachChain(creature, selected).length ? { size: 14 } : {}) } : null;
         // a motion with no way round drops Reverse, so it can't come back unseen later
         setAnim(k.kind ? (a ? { ...a, kind: k.kind, size: k.kind === 'breathe' || a.kind === 'breathe' ? fresh!.size : a.size, reverse: canReverse(k.kind) ? a.reverse : undefined } : fresh) : null);
@@ -267,6 +250,7 @@ export function renderAnim() {
       };
       return btn;
     }),
+    ...moveButtons(b, undefined),
   );
   $('#anim-opts').hidden = !a || !b;
   if (a) {
@@ -290,27 +274,51 @@ export function renderAnim() {
 function renderLoopBar() {
   iconLabel($('#anim-play'), faClassic(animPlaying ? 'pause' : 'play'), animPlaying ? 'Pause' : 'Play');
   $<HTMLInputElement>('#anim-secs').value = String(animSecs());
-  $<HTMLButtonElement>('#anim-clear').disabled = !creatures.some((c) => (c.state.anims && Object.keys(c.state.anims).length) || c.state.attachments?.some((x) => x.anim));
+  $<HTMLButtonElement>('#anim-clear').disabled = !creatures.some((c) => (c.state.anims && Object.keys(c.state.anims).length) || (c.state.moves && Object.keys(c.state.moves).length));
 }
 
-/** The panel for a piece of stuff's motion. */
-function renderStuffAnim(x: Attachment) {
-  const a = x.anim;
+/**
+ * The moves a part can make on the part it hangs off (worn things: a halo
+ * spinning, stars orbiting, an earring swinging), after its own motions. Swing
+ * is the part's own (it rocks from its base already), so it isn't here twice.
+ */
+function moveButtons(b: BoneRT | undefined, move: StuffAnim | undefined): HTMLButtonElement[] {
+  if (!b?.parent) return [];
+  return STUFF_KINDS.filter((k) => k.kind !== 'swing').map((k) => {
+    const btn = document.createElement('button');
+    btn.innerHTML = `<i class="fa-duotone fa-regular fa-${k.icon}" aria-hidden="true"></i>${k.name}`;
+    btn.title = k.title;
+    btn.classList.toggle('active', move?.kind === k.kind);
+    btn.onclick = () => {
+      if (move?.kind === k.kind) return;
+      setAnim(null);
+      setMove(freshMove(k.kind, move));
+      renderAnim();
+      commit();
+    };
+    return btn;
+  });
+}
+
+/** The panel for a part's move on the part it hangs off. */
+function renderMove(a: StuffAnim) {
+  const b = creature.bones.get(selected);
   $('#anim-kinds').replaceChildren(
-    ...[{ kind: null, name: 'Still', icon: 'pause', title: 'No motion on this piece of stuff' }, ...STUFF_KINDS].map((k) => {
+    ...[{ kind: null, name: 'Still', icon: 'pause', title: 'No motion on this part' }, ...ANIM_KINDS].map((k) => {
       const btn = document.createElement('button');
       btn.innerHTML = `<i class="fa-duotone fa-regular fa-${k.icon}" aria-hidden="true"></i>${k.name}`;
       btn.title = k.title;
-      btn.classList.toggle('active', (a?.kind ?? null) === k.kind);
       btn.onclick = () => {
-        x.anim = k.kind ? freshStuffAnim(k.kind, x, a) : undefined;
+        setMove(null);
+        if (k.kind) setAnim(defaultAnim(k.kind));
         renderAnim();
         commit();
       };
       return btn;
     }),
+    ...moveButtons(b, a),
   );
-  $('#anim-opts').hidden = !a;
+  $('#anim-opts').hidden = false;
   $('#anim-reach-row').hidden = $('#anim-opposite-row').hidden = true;
   if (a) {
     const sized = a.kind === 'swing' || a.kind === 'pulse';
@@ -364,8 +372,8 @@ function tipAt(f: ReturnType<typeof partFrame>, lean: [number, number], flip?: b
 }
 
 function drawAnimPath() {
-  const x = animOn() && !idle ? selStuff() : undefined;
-  if (x) return drawStuffPath(x);
+  const move = animOn() && !idle ? selMove() : undefined;
+  if (move) return drawMovePath(move);
   rimHandle.visible = centerHandle.visible = spokeLine.visible = true;
   const a = selAnim();
   const show = animOn() && !idle && !!a && a.kind !== 'breathe' && creature.bones.has(selected);
@@ -418,10 +426,9 @@ function drawAnimPath() {
  * traces, the blue handle (centre) and the pink one (the line it turns
  * about, or for Bob where it floats to).
  */
-function stuffViz(x: Attachment) {
-  const a = x.anim!;
-  const f = creature.stuffFrame(x.id);
-  const b = creature.bones.get(x.bone);
+function moveViz(a: StuffAnim) {
+  const f = creature.moveFrame(selected);
+  const b = creature.bones.get(selected)?.parent;
   if (!f || !b) return null;
   const c = new THREE.Vector3(...a.center), axis = new THREE.Vector3(...a.axis);
   const unit = axis.lengthSq() > 1e-12 ? axis.clone().normalize() : new THREE.Vector3(0, 1, 0);
@@ -433,9 +440,8 @@ function stuffViz(x: Attachment) {
   return { f, b, c, rim, at: (p: number) => traced.clone().applyMatrix4(stuffMove(a, p, f.center)) };
 }
 
-function drawStuffPath(x: Attachment) {
-  const a = x.anim;
-  const v = a && stuffViz(x);
+function drawMovePath(a: StuffAnim) {
+  const v = moveViz(a);
   if (animViz.visible !== !!v) invalidate(1);
   animViz.visible = !!v;
   if (!a || !v) return;
@@ -467,12 +473,11 @@ function drawStuffPath(x: Attachment) {
   invalidate(1);
 }
 
-/** Dragging a piece of stuff's handles: across the view, through where the handle is. */
-function dragStuff(x: Attachment, ray: THREE.Ray) {
-  const a = x.anim;
-  const v = a && stuffViz(x);
-  if (!a || !v || !animDrag) return;
-  if (animDrag.which === 'radius') return dragOrbitSize(x, a, v, ray);
+/** Dragging a part's move handles: across the view, through where the handle is. */
+function dragMove(a: StuffAnim, ray: THREE.Ray) {
+  const v = moveViz(a);
+  if (!v || !animDrag) return;
+  if (animDrag.which === 'radius') return dragOrbitSize(a, v, ray);
   const handle = (animDrag.which === 'center' ? centerHandle : rimHandle).position;
   const facing = view.getWorldDirection(new THREE.Vector3());
   const den = facing.dot(ray.direction);
@@ -480,11 +485,11 @@ function dragStuff(x: Attachment, ray: THREE.Ray) {
   const hit = ray.origin.clone().addScaledVector(ray.direction, facing.dot(handle.clone().sub(ray.origin)) / den);
   const q = v.b.pivot.worldToLocal(hit);
   const r3 = (w: THREE.Vector3) => w.toArray().map((n) => Math.round(n * 1000) / 1000) as V3;
-  if (animDrag.which === 'center') x.anim = { ...a, center: r3(q) };
-  else if (a.kind === 'bob') x.anim = { ...a, axis: r3(q.sub(v.f.center)) };
+  if (animDrag.which === 'center') setMove({ ...a, center: r3(q) });
+  else if (a.kind === 'bob') setMove({ ...a, axis: r3(q.sub(v.f.center)) });
   else {
     const d = q.sub(v.c);
-    if (d.lengthSq() > 1e-10) x.anim = { ...a, axis: r3(d.normalize()) };
+    if (d.lengthSq() > 1e-10) setMove({ ...a, axis: r3(d.normalize()) });
   }
 }
 
@@ -497,7 +502,7 @@ function setPath(pts: THREE.Vector3[]) {
 }
 
 /** Dragging an Orbit's loop: how far the pointer is from the line it goes round sets how wide it is. */
-function dragOrbitSize(x: Attachment, a: StuffAnim, v: NonNullable<ReturnType<typeof stuffViz>>, ray: THREE.Ray) {
+function dragOrbitSize(a: StuffAnim, v: NonNullable<ReturnType<typeof moveViz>>, ray: THREE.Ray) {
   const pivot = v.b.pivot;
   const o = pivot.worldToLocal(ray.origin.clone());
   const d = pivot.worldToLocal(ray.origin.clone().add(ray.direction)).sub(o).normalize();
@@ -513,7 +518,7 @@ function dragOrbitSize(x: Attachment, a: StuffAnim, v: NonNullable<ReturnType<ty
   const placed = orbitOut(a, v.f.center).length();
   if (placed < 1e-4) return;
   const wide = orbitOut(a, q).length() / placed;
-  x.anim = { ...a, radius: Math.round(Math.min(8, Math.max(0.05, wide)) * 100) / 100 };
+  setMove({ ...a, radius: Math.round(Math.min(8, Math.max(0.05, wide)) * 100) / 100 });
 }
 
 /** A handle being dragged */
@@ -590,7 +595,7 @@ export function initAnimateTab() {
     // every motion in the scene: parts and stuff, every creature (Undo brings them back)
     for (const c of creatures) {
       delete c.state.anims;
-      for (const x of c.state.attachments ?? []) delete x.anim;
+      delete c.state.moves;
     }
     commit();
     renderAnim();
@@ -621,7 +626,7 @@ export function initAnimateTab() {
       if (!animViz.visible || e.button !== 0) return;
       rayAt(e);
       // an Orbit's loop can be grabbed too, to make it wider or narrower
-      const orbiting = selStuff()?.anim?.kind === 'orbit';
+      const orbiting = selMove()?.kind === 'orbit';
       raycaster.params.Line.threshold = rider.scale.x * 1.2;
       const hit = raycaster.intersectObjects([centerHandle, rimHandle, ...(orbiting ? [rider, ...arrows, pathLine] : [])].filter((h) => h.visible))[0];
       if (!hit) return;
@@ -637,10 +642,10 @@ export function initAnimateTab() {
     'pointermove',
     (e) => {
       if (!animDrag || e.pointerId !== animDrag.id) return;
-      const x = selStuff();
-      if (x) {
+      const move = selMove();
+      if (move) {
         e.stopPropagation();
-        return dragStuff(x, rayAt(e));
+        return dragMove(move, rayAt(e));
       }
       const a = selAnim();
       if (!a) return;

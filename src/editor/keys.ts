@@ -1,17 +1,17 @@
 // ---------------------------------------------------------------------------
 // The keyboard: one handler for every shortcut (see src/shortcuts.ts).
 
-import { markGizmoMode, markToolKey } from '../markingPanel';
+import { inSolo, leaveSolo } from './focus';
+import { markGizmoMode, markToolKey, markToolsOut } from '../markingPanel';
 import { customTabs } from '../layout';
 import { captureShortcut, is } from '../shortcuts';
 import { $ } from './dom';
 import { creature, idle, mode, redo, undo } from './state';
 import { focusOnBone, frameAll, frameCreature } from './framing';
 import { drawState, enterDraw, exitDraw, finishDraw, setDrawSide, setDrawTool, setSpacePan, toggleSymmetry } from './drawing';
-import { board, copyPicked, finishStuff, deletePiece, selectAllPieces, focusOnBoard, focusOnPlane, pasteClip, piece, piecePivot, setPieceMirror, setPieceMode } from './workbench';
-import { gizmo, selectedAttachment } from './attach';
-import { placing, setPlaceMode } from './arrange';
-import { removeAttachment, syncAttachBar } from './attachPanel';
+import { copyPicked, pasteClip } from './clipboard';
+import { placing } from './arrange';
+import { setGizmoMode } from './gizmoMode';
 import { setMode } from './panels';
 import { pickingRide, stopPickingRide } from './riders';
 import { patterning, stopPattern } from './pattern';
@@ -51,8 +51,8 @@ export function initKeys() {
       stopPattern();
     } else if (k === 'escape' && drawState) {
       exitDraw();
-    } else if (k === 'escape' && mode === 'stuff') {
-      finishStuff();
+    } else if (k === 'escape' && inSolo()) {
+      leaveSolo();
     } else if (k === 'enter' && drawState) {
       e.preventDefault();
       finishDraw();
@@ -68,26 +68,14 @@ export function initKeys() {
       setSpacePan(true);
     } else if (is(e, 'frame') && drawState) {
       // back to a straight-on view of the drawing
-      if (drawState.target.kind === 'bone') {
-        const b = creature.bones.get(drawState.target.boneId);
-        if (b) focusOnBone(b, drawState.side);
-      } else if (drawState.frame !== board) focusOnPlane(drawState.frame);
-      else focusOnBoard();
-    } else if (is(e, 'draw') && mode === 'stuff') enterDraw({ kind: 'piece' });
-    else if (is(e, 'draw') && !idle) enterDraw();
+      const b = creature.bones.get(drawState.target.boneId);
+      if (b) focusOnBone(b, drawState.side);
+    } else if (is(e, 'draw') && !idle) enterDraw();
     else if (is(e, 'animate')) setMode('animate');
-    else if (is(e, 'mirror') && mode === 'stuff') {
-      if (piece()) setPieceMirror(!piece()!.twin);
-    } else if (is(e, 'mirror')) setMirror(!rigLock);
+    else if (is(e, 'stuff')) setMode('stuff');
+    else if (is(e, 'mirror')) setMirror(!rigLock);
     else if (is(e, 'delete') && !drawState) {
-      // picked stuff goes first: its part is picked too, and mustn't go with it
-      if (selectedAttachment) {
-        e.preventDefault();
-        removeAttachment();
-      } else if (mode === 'stuff' && piece()) {
-        e.preventDefault();
-        deletePiece(piece()!.id);
-      } else if (mode !== 'stuff' && !idle && !placing) {
+      if (!idle && !placing) {
         e.preventDefault();
         removePart();
       }
@@ -97,22 +85,19 @@ export function initKeys() {
       if (pasteClip()) e.preventDefault();
     } else if (is(e, 'selectAll') && !drawState) {
       e.preventDefault();
-      if (mode === 'stuff') selectAllPieces();
-      else selectAllParts();
+      selectAllParts();
+    } else if (is(e, 'pose')) {
+      setGizmoMode('pose');
     } else if (is(e, 'move') || is(e, 'rotate') || is(e, 'scale')) {
       const m = is(e, 'move') ? 'translate' : is(e, 'rotate') ? 'rotate' : 'scale';
-      if (mode === 'stuff' && piecePivot) setPieceMode(m);
-      else if (selectedAttachment) {
-        gizmo.setMode(m);
-        syncAttachBar();
-      } else if (placing) setPlaceMode(m);
-      else markGizmoMode(m);
+      // a marking being placed has its own arrows; otherwise the view's handles switch to these
+      if (markToolsOut()) markGizmoMode(m);
+      else setGizmoMode(m);
     } else if (is(e, 'shape')) setMode('shape');
     else if (is(e, 'look')) setMode('look');
     else if (!e.ctrlKey && !e.metaKey && !e.altKey && k >= '5' && k <= '9' && customTabs()[+k - 5]) setMode(customTabs()[+k - 5].id);
     else if (is(e, 'frame')) {
-      if (mode === 'stuff') focusOnBoard();
-      else frameCreature();
+      frameCreature();
     } else if (is(e, 'frameAll')) frameAll();
   });
 }

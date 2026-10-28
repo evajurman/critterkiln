@@ -14,8 +14,6 @@ import { $ } from './dom';
 import { key, KEY_AT, lightSpin, scene } from './stage';
 import { updateSkeletonVisibility } from './controls';
 import { drawState, exitDraw } from './drawing';
-import { autosaveThing, syncWorkbench, workbench } from './workbench';
-import { deselectAttachment, selectAttachment, selectedAttachment } from './attach';
 import { placing, startPlacing, stopPlacing } from './arrange';
 import { partsShut } from './creatureBar';
 import { queueCreationSave } from './creations';
@@ -25,6 +23,8 @@ import { rehang, rigPrefs, sceneName, sizesIn } from './rigEdit';
 import { hint } from './hints';
 import { invalidate } from './loop';
 import { animSecs } from './animateTab';
+import { convertStuff, hasOldStuff, repairThingMarkings } from './stuffToParts';
+import { keepKits, syncLinked } from './kits';
 
 /**
  * The whole scene: several creatures, one of which is active. `state` and
@@ -34,7 +34,7 @@ import { animSecs } from './animateTab';
 export interface World {
   creatures: CreatureState[];
   active: number;
-  /** the thing on the Stuff workbench (shared by the whole scene) */
+  /** legacy: the thing that was on the Stuff workbench (read, then dropped) */
   workbench?: Thing;
   /** scene name, used for .scene files */
   name?: string;
@@ -89,7 +89,7 @@ export function setIdle(v: typeof idle) {
   idle = v;
 }
 /** Shape, Look, a tab people made (src/layout.ts), or Stuff */
-export type Mode = Tab | 'stuff';
+export type Mode = Tab;
 export let mode: Mode = 'shape';
 export function setModeValue(v: typeof mode) {
   mode = v;
@@ -176,6 +176,8 @@ export function setHIndex(v: typeof hIndex) {
 }
 
 export function commit() {
+  // linked duplicates take on a change to any one of them, in the same step
+  syncLinked();
   invalidate();
   renderSceneColors();
   world.creatures[world.active] = state;
@@ -188,8 +190,7 @@ export function commit() {
   save();
   updateUndo();
   fitShadows();
-  if (mode === 'stuff') autosaveThing();
-  checkScene(world.creatures, world.workbench);
+  checkScene(world.creatures);
 }
 
 function restore(snap: string) {
@@ -219,9 +220,6 @@ function restore(snap: string) {
   });
   world = next;
   activate(world.active);
-  syncWorkbench();
-  if (mode === 'stuff') autosaveThing();
-  if (selectedAttachment) selectAttachment(selectedAttachment);
   save();
   fitShadows();
   renderUI();
@@ -261,6 +259,28 @@ export const parentsChecked = new WeakMap<CreatureState, RigState>();
 export function makeCreature(s: CreatureState): Creature {
   // stone cracks, metal patina and the like used to be material settings: now they're markings
   migrateMarkings(s);
+  // things made parts by an earlier version left their markings behind: back on them (once)
+  if ((s.stuffV ?? 0) < 2) {
+    if (!hasOldStuff(s)) repairThingMarkings(s);
+    s.stuffV = 2;
+  }
+  // stuff from before things were parts: worn things become parts, scattered things creatures kept off stage
+  if (hasOldStuff(s)) {
+    const { offstage, worn } = convertStuff(s);
+    // (what it wore is in My stuff too, linked: a change to one can go on every copy)
+    if (worn.length) keepKits(worn);
+    // (placed exactly where they were: Auto parent leaves them hanging off what wore them)
+    parentsChecked.set(s, structuredClone(s.rig));
+    if (offstage.length) {
+      // joined to the scene once whatever's loading it is done
+      queueMicrotask(() => {
+        for (const o of offstage) {
+          world.creatures.push(o);
+          creatures.push(makeCreature(o));
+        }
+      });
+    }
+  }
   // Auto parent: each part hangs off whatever its base sits on, as you see it (posed)
   if (rigPrefs.autoParent) {
     const before = parentsChecked.get(s);
@@ -268,7 +288,9 @@ export function makeCreature(s: CreatureState): Creature {
     if (!only || only.size) {
       // measured on just the skeleton: the creature itself is only built once
       const probe = new Creature(s, true);
-      const changed = reparentAll(s.rig, sizesIn(probe), only).map((x) => x.id);
+      // (a scene id's part: a right twin shares its left twin's)
+      const apart = (id: string) => !!(s.parts[id] ?? s.parts[id.replace(/R$/, 'L')])?.apart;
+      const changed = reparentAll(s.rig, sizesIn(probe), only, apart).map((x) => x.id);
       rehang(probe, s.rig, changed);
       probe.dispose();
       if (booted && changed.length) {
@@ -304,7 +326,6 @@ export function activate(i: number) {
   world.active = i;
   state = world.creatures[i];
   creature = next;
-  if (switching) deselectAttachment();
   if (switching) alsoPicked.clear();
   if (!creature.bones.has(selected)) selected = creature.list[0].def.id;
   creature.select(selected);
@@ -323,7 +344,6 @@ export function buildCreature() {
   creature.select(selected);
   updateSkeletonVisibility();
   // gizmos pointed at the old creature's objects
-  if (selectedAttachment) selectAttachment(selectedAttachment);
   if (wasPlacing) startPlacing();
 }
 

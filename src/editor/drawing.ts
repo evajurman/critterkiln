@@ -1,12 +1,11 @@
 // ---------------------------------------------------------------------------
-// Drawing: strokes and stamped shapes on a part's outline, or pieces on the
-// stuff workbench, in a flat view of the part (or the board).
+// Drawing: strokes and stamped shapes on a part's outline (holes erased in
+// them), in a flat view of the part from the front or the side.
 
 import * as THREE from 'three';
 import { partShapes, setPartShapes, type BoneRT, type PartShape } from '../creature';
 import { unlock } from '../achievements';
-import { bounds, combineLoops, signedArea, smoothLoop, symmetrize, type Vec2 } from '../inflate';
-import { type Piece } from '../stuff';
+import { bounds, combineLoops, pointInPolygon, signedArea, smoothLoop, symmetrize, type Vec2 } from '../inflate';
 import { keyLabel } from '../shortcuts';
 import { $ } from './dom';
 import { canvas, octx, overlay, view, viewport } from './stage';
@@ -14,14 +13,14 @@ import { buildCreature, commit, creature, creatures, mode, selected, state } fro
 import { refitBone } from '../rigs';
 import { controls, raycaster, setRay, touchScreen, updateSkeletonVisibility } from './controls';
 import { focusOnBone } from './framing';
-import { addPieces, board, focusOnBoard, focusOnPlane, framePiece, holesInside, piece, refreshPieceGizmo, replacePiece, syncWorkbench } from './workbench';
-import { deselectAttachment, gizmo } from './attach';
+import { gizmo } from './gizmo';
 import { renderCreatureBar } from './creatureBar';
 import { flashPart, partLabel } from './partPanel';
+import { dropFreshThing } from './rigEdit';
 import { hint, hintOnce } from './hints';
 
 /** What a stroke is for: a body part's outline, or a piece on the stuff workbench (new, or one being redrawn). */
-type DrawTarget = { kind: 'bone'; boneId: string } | { kind: 'piece'; redraw?: string };
+type DrawTarget = { kind: 'bone'; boneId: string };
 /** What dragging on the drawing does once there's a shape: add to it, cut from it, or move, resize or turn it. */
 type DrawTool = 'draw' | 'erase' | 'move' | 'scale' | 'rotate';
 type ShapeKind = 'square' | 'triangle' | 'circle';
@@ -60,6 +59,8 @@ interface DrawState {
   side: boolean;
   /** a body part's shapes in the other view (front or side), kept while this one is drawn */
   other: Vec2[][];
+  /** and the cut-outs in them */
+  otherHoles: Vec2[][];
   /** a body part: what its two views show of the creature (its own plane, then the one turned a quarter round) */
   views?: [BoneView, BoneView];
   /** symmetry in the turned view (on when that view looks the creature in the face) */
@@ -107,18 +108,18 @@ export let drawState: DrawState | null = null;
 const DRAW_PREFS_KEY = 'creature-creator/draw';
 // symmetry is remembered separately for body parts and for stuff (letters,
 // badges... are rarely symmetric, so stuff starts with it off)
-const drawPrefs: { symmetry: boolean; pieceSymmetry: boolean; smoothing: number } = (() => {
+const drawPrefs: { symmetry: boolean; smoothing: number } = (() => {
   try {
-    return { symmetry: true, pieceSymmetry: false, smoothing: 0.5, ...JSON.parse(localStorage.getItem(DRAW_PREFS_KEY) ?? '{}') };
+    return { symmetry: true, smoothing: 0.5, ...JSON.parse(localStorage.getItem(DRAW_PREFS_KEY) ?? '{}') };
   } catch {
-    return { symmetry: true, pieceSymmetry: false, smoothing: 0.5 };
+    return { symmetry: true, smoothing: 0.5 };
   }
 })();
 /** Is symmetry on for what's being drawn right now? */
 export function symOn(): boolean {
   // the turned view keeps its own setting for this drawing
   if (drawState?.side) return drawState.sideSym;
-  return drawState?.target.kind === 'piece' ? drawPrefs.pieceSymmetry : drawPrefs.symmetry;
+  return drawPrefs.symmetry;
 }
 function saveDrawPrefs() {
   try {
@@ -151,10 +152,6 @@ export function drawHint() {
   // how to look around while the drawing layer is in the way
   const face = keyLabel('frame');
   const nav = touchScreen() ? ' · Two fingers move the view' : ` · Right-drag or Space+drag to pan${face ? `, ${face} to face it again` : ''}`;
-  if (target.kind === 'piece') {
-    hint((symOn() ? 'Draw a piece: across the dashed line = one symmetric shape, to one side = a mirrored pair' : 'Draw a piece as one closed loop. Erase inside it to make holes') + nav, 0);
-    return;
-  }
   if (drawState.side) {
     const from = VIEW_NAMES[drawState.views?.[1].kind ?? 'side'].name.toLowerCase();
     hint((symOn() ? `Draw one half of the ${label} as seen from the ${from}; it mirrors across the dashed line` : `Draw the ${label} as seen from the ${from}`) + nav, 0);
@@ -168,8 +165,7 @@ export function enterDraw(target: DrawTarget = { kind: 'bone', boneId: selected 
   if (drawState) exitDraw();
   controls.autoRotate = false;
   $('#spin').classList.remove('on');
-  deselectAttachment();
-  if (target.kind === 'bone') {
+  {
     const b = creature.bones.get(target.boneId);
     if (!b) return;
     const reach = Math.max(b.length, b.def.width) * 2.5 + 0.5;
@@ -178,6 +174,7 @@ export function enterDraw(target: DrawTarget = { kind: 'bone', boneId: selected 
     const side = !!shapes[0]?.side;
     const views = boneViews(b);
     const inView = shapes.filter((s) => !!s.side === side).map((s) => structuredClone(s.outline));
+    const holesIn = (sideOf: boolean) => shapes.filter((s) => !!s.side === sideOf).flatMap((s) => structuredClone(s.holes ?? []));
     drawState = {
       target,
       frame: boneFrame(b, side),
@@ -188,7 +185,7 @@ export function enterDraw(target: DrawTarget = { kind: 'bone', boneId: selected 
       pen: null,
       active: false,
       pending: inView.length ? inView : null,
-      holes: [],
+      holes: holesIn(side),
       tool: 'draw',
       grab: null,
       stamp: null,
@@ -196,6 +193,7 @@ export function enterDraw(target: DrawTarget = { kind: 'bone', boneId: selected 
       original: structuredClone(shapes),
       side,
       other: shapes.filter((s) => !!s.side !== side).map((s) => structuredClone(s.outline)),
+      otherHoles: holesIn(!side),
       views,
       // symmetric when it looks the creature in the face, not when it's a profile
       sideSym: views[1].mirrored,
@@ -204,28 +202,12 @@ export function enterDraw(target: DrawTarget = { kind: 'bone', boneId: selected 
     // other creatures step aside while you draw on this one
     for (const c of creatures) if (c !== creature) c.root.visible = false;
     focusOnBone(b, side);
-  } else {
-    // a piece lifted off the board is redrawn on its own plane
-    const own = target.redraw ? piece() : undefined;
-    const lifted = own?.place;
-    const frame = lifted ? framePiece(own!) : board;
-    drawState = { target, frame, label: 'piece', axis: [[0, -1.3], [0, 1.3]], pts: [], local: [], pen: null, active: false, pending: null, holes: [], tool: 'draw', grab: null, stamp: null, stampDrag: null, side: false, other: [], sideSym: false };
-    if (target.redraw && own) {
-      // start from the shape as it is: draw to add, erase to cut, or move, size and turn it
-      drawState.pending = [structuredClone(own.outline)];
-      drawState.holes = structuredClone(own.holes);
-    }
-    // pieces are drawn flat: show the thing unbent meanwhile
-    syncWorkbench();
-    if (lifted) focusOnPlane(frame);
-    else focusOnBoard();
   }
   overlay.classList.add('active');
   $('#draw-bar').hidden = false;
   syncDrawBar();
   updateSkeletonVisibility();
   drawHint();
-  refreshPieceGizmo();
 }
 
 /** Drawing from the side: a plane standing in the bone's YZ plane (its X axis is the bone's -Z, its Z the bone's X). */
@@ -252,7 +234,7 @@ export function setDrawSide(side: boolean) {
   const here = ds.pending ?? [];
   ds.pending = ds.other.length ? ds.other : null;
   ds.other = here;
-  ds.holes = [];
+  [ds.holes, ds.otherHoles] = [ds.pending ? ds.otherHoles : [], ds.holes];
   ds.side = side;
   ds.frame = boneFrame(b, side);
   ds.active = false;
@@ -277,10 +259,11 @@ export function exitDraw(keep = false) {
     const b = creature.bones.get(ds.target.boneId);
     if (b) setPartShapes(state.parts[b.src], ds.original ?? []);
     creature.sync();
+    // a thing grown just now and never drawn goes again
+    dropFreshThing(ds.target.boneId);
   }
   sideFrame.removeFromParent();
   creature.setDrawFocus(null);
-  if (ds?.target.kind === 'piece') syncWorkbench();
   for (const c of creatures) c.root.visible = true;
   updateSkeletonVisibility();
   octx.clearRect(0, 0, overlay.width, overlay.height);
@@ -322,7 +305,6 @@ export function syncDrawBar() {
 export function toggleSymmetry() {
   // the turned view's setting lasts for this drawing (it starts from which way the view faces)
   if (drawState?.side) drawState.sideSym = !drawState.sideSym;
-  else if (drawState?.target.kind === 'piece') drawPrefs.pieceSymmetry = !drawPrefs.pieceSymmetry;
   else drawPrefs.symmetry = !drawPrefs.symmetry;
   if (!symOn()) unlock('wonky');
   saveDrawPrefs();
@@ -378,19 +360,6 @@ function boneLoops(raw: Vec2[]): Vec2[][] {
   return [local];
 }
 
-/** A workbench stroke: across the centre line = one symmetric piece, off to one side = a mirrored pair. */
-function pieceLoops(raw: Vec2[]): Vec2[][] {
-  let loops: Vec2[][] = [raw];
-  if (raw.length >= 6 && symOn()) {
-    const crosses = raw.some((p) => p[0] > 0.01) && raw.some((p) => p[0] < -0.01);
-    // a half-outline that starts and ends on the axis also means "one symmetric shape"
-    const tol = Math.max(0.03, bounds(raw).w * 0.15);
-    const half = Math.abs(raw[0][0]) < tol && Math.abs(raw[raw.length - 1][0]) < tol;
-    loops = crosses || half ? [symmetrize(raw)] : [raw, raw.map(([x, y]) => [-x, y] as Vec2).reverse()];
-  }
-  return loops.map((l) => (l.length >= 6 ? smoothLoop(l, drawPrefs.smoothing) : l));
-}
-
 function finishStroke() {
   if (!drawState) return;
   const ds = drawState;
@@ -403,9 +372,8 @@ function finishStroke() {
     combineStroke(ds, raw);
     return;
   }
-  const isPiece = ds.target.kind === 'piece';
-  const loops = isPiece ? pieceLoops(raw) : boneLoops(raw);
-  if (loops.some((l) => (isPiece ? tooSmall(l, 0.0002, 0.02) : tooSmall(l, 0.0015, 0.05)))) {
+  const loops = boneLoops(raw);
+  if (loops.some((l) => tooSmall(l, 0.0015, 0.05))) {
     renderOverlay();
     hint('Too small or too thin: try a bigger loop', 1800, true);
     return;
@@ -507,10 +475,8 @@ function applyLoops(ds: DrawState, loops: Vec2[][], cut: boolean) {
     hint('Erased it all: draw a new shape', 2000);
     return;
   }
-  // a body part can be several shapes, but each one is solid
-  if (ds.target.kind === 'bone' && res.holes.length) hint("A body part can't have holes: draw it as separate shapes instead", 2400);
   ds.pending = res.outers;
-  ds.holes = ds.target.kind === 'bone' ? [] : res.holes;
+  ds.holes = res.holes;
   previewPending();
   drawHint();
 }
@@ -529,18 +495,12 @@ function mergeOverlaps(ds: DrawState) {
   // boxes can overlap without the shapes touching: then leave them be
   if (res.outers.length >= loops.length) return;
   ds.pending = res.outers;
-  ds.holes = ds.target.kind === 'piece' ? res.holes : [];
+  ds.holes = res.holes;
   previewPending();
 }
 
 function pendingShape(ds: DrawState): { outers: Vec2[][]; holes: Vec2[][] } {
   return { outers: ds.pending ?? [], holes: ds.holes };
-}
-
-/** The pending shape as workbench pieces: each outer loop with the holes that fall inside it. */
-export function pendingPieces(ds: DrawState): { outline: Vec2[]; holes: Vec2[][] }[] {
-  const { outers, holes } = pendingShape(ds);
-  return outers.map((outline) => ({ outline, holes: holesInside({ outline } as Piece, holes) }));
 }
 
 /**
@@ -600,8 +560,13 @@ function transformShape(ds: DrawState, p: Vec2, keepProportions: boolean) {
 
 /** A body part's shapes as drawn so far, front and side (the front ones first). */
 function drawnShapes(ds: DrawState): PartShape[] {
-  const here = (ds.pending ?? []).map((outline) => ({ outline, side: ds.side }));
-  const there = ds.other.map((outline) => ({ outline, side: !ds.side }));
+  // each shape with the cut-outs inside it
+  const shape = (outline: Vec2[], side: boolean, holes: Vec2[][]): PartShape => {
+    const own = holes.filter((h) => h.length && pointInPolygon(h[0][0], h[0][1], outline));
+    return { outline, side, ...(own.length ? { holes: own } : {}) };
+  };
+  const here = (ds.pending ?? []).map((outline) => shape(outline, ds.side, ds.holes));
+  const there = ds.other.map((outline) => shape(outline, !ds.side, ds.otherHoles));
   return ds.side ? [...there, ...here] : [...here, ...there];
 }
 
@@ -647,8 +612,6 @@ function previewPending() {
       // the rebuilt part keeps the see-through drawing look
       creature.setDrawFocus(ds.target.boneId, ds.side);
     }
-  } else {
-    syncWorkbench();
   }
   syncDrawBar();
   renderOverlay();
@@ -669,14 +632,6 @@ export function finishDraw() {
   const ds = drawState;
   if (!ds?.pending && !ds?.other.length) return;
   if (!symOn()) unlock('wonky');
-  if (ds.target.kind === 'piece' && ds.target.redraw) {
-    replacePiece(ds.target.redraw, pendingPieces(ds));
-    return;
-  }
-  if (ds.target.kind === 'piece') {
-    addPieces(pendingPieces(ds));
-    return;
-  }
   const b = creature.bones.get(ds.target.boneId)!;
   const shapes = drawnShapes(ds);
   setPartShapes(state.parts[b.src], shapes);

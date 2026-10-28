@@ -9,7 +9,6 @@ import { $ } from './dom';
 import { camera, ORTHO_KEY, sceneOrtho, setOrtho, setSceneOrtho } from './stage';
 import { buildCreature, commit, creature, creatures, mode, selected, state } from './state';
 import { controls, setKeepFloor, settleOnFloor } from './controls';
-import { bench, board, focusOnBoard } from './workbench';
 import { selectPart } from './partPanel';
 import { rigLocked } from './rigEdit';
 import { hint } from './hints';
@@ -33,7 +32,6 @@ export function creatureBox(precise = false): THREE.Box3 {
   // parts count even while hidden: a settled seamless skin hides the parts it
   // replaced, which used to leave an empty box (and camera views did nothing)
   for (const m of creature.meshes()) box.expandByObject(m, precise);
-  for (const m of creature.attachmentMeshes()) if (m.visible) box.expandByObject(m, precise);
   return box;
 }
 
@@ -73,7 +71,7 @@ export function freshView() {
     } catch {
       /* ignore */
     }
-    if (mode !== 'stuff') setOrtho(false);
+    setOrtho(false);
   }
   frameAll(true);
 }
@@ -248,15 +246,14 @@ function initViewCube() {
 
 function viewFrom(name: string) {
   if (name === 'all' || name === 'selection') {
-    if (mode === 'stuff') focusOnBoard();
-    else if (name === 'all') frameAll();
+    if (name === 'all') frameAll();
     else frameCreature();
     return;
   }
   if (VIEWS[name]) lookFrom(VIEWS[name]);
 }
 
-/** Fly round to look from `dir` (from the middle of what's framed): the creature, or the workbench. */
+/** Fly round to look from `dir` (from the middle of the creature). */
 function lookFrom(dir: THREE.Vector3) {
   // straight down (or up): nudged off the pole so the orbit keeps a sensible "up"
   if (!dir.x && !dir.z) dir = dir.clone().setZ(0.002);
@@ -264,20 +261,6 @@ function lookFrom(dir: THREE.Vector3) {
   controls.maxPolarAngle = Math.PI;
   controls.autoRotate = false;
   $('#spin').classList.remove('on');
-  if (mode === 'stuff') {
-    const c = board.getWorldPosition(new THREE.Vector3());
-    let r = 0.7;
-    if (bench) {
-      const box = new THREE.Box3().setFromObject(bench);
-      if (!box.isEmpty()) {
-        box.getCenter(c);
-        r = Math.max(0.5, box.getSize(new THREE.Vector3()).length() * 0.7);
-      }
-    }
-    const dist = Math.max(1.4, r / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
-    flyTo(c.clone().addScaledVector(dir.clone().normalize(), dist), c);
-    return;
-  }
   frameCreature(dir);
 }
 
@@ -371,8 +354,7 @@ export function initFraming() {
   document.querySelectorAll<HTMLButtonElement>('#view-proj [data-proj]').forEach((b) => {
     b.onclick = () => {
       const on = b.dataset.proj === 'ortho';
-      // on the workbench it's just for now; in Shape and Look it's remembered
-      if (mode !== 'stuff') {
+      {
         setSceneOrtho(on);
         try {
           localStorage.setItem(ORTHO_KEY, on ? '1' : '0');

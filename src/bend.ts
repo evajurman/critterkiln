@@ -9,7 +9,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { bounds, getMeshDetail, type Solid, type Vec2 } from './inflate';
 import { MAX_BEND, bendCurve, onCurve, type BendCurve, type ExpandedBone, type V3 } from './rigs';
-import { partPieceGeometry } from './stuff';
+import { partPieceGeometry, type PartPieceExtras } from './stuff';
 import { SIDE_TURN } from './creature';
 export interface Bend {
   len: number;
@@ -247,13 +247,13 @@ function withoutSlivers(src: THREE.BufferGeometry): THREE.BufferGeometry {
  * is (joins are sized by that): half a flat part's depth, a turned part's
  * widest radius.
  */
-export function pieceKindGeometry(kind: 'flat' | 'turned', outline: Vec2[], thickness: number, lowPoly: boolean): THREE.BufferGeometry {
+export function pieceKindGeometry(kind: 'flat' | 'turned', outline: Vec2[], thickness: number, lowPoly: boolean, more: PartPieceExtras = {}): THREE.BufferGeometry {
   const b = bounds(outline);
   const size = Math.max(b.w, b.h, 1e-3);
   // a flat part's depth goes with its width (thickness 1: about a third as deep as it is wide)
   const depth = Math.max(0.004, 0.3 * thickness * b.w);
   const step = Math.max(0.002, size / 48) / Math.sqrt(getMeshDetail());
-  const g = withoutSlivers(partPieceGeometry(kind, outline, depth, lowPoly, step));
+  const g = withoutSlivers(partPieceGeometry(kind, outline, depth, lowPoly, step, more));
   const r = kind === 'flat' ? depth / 2 : Math.max(Math.abs(b.minX), Math.abs(b.maxX));
   g.userData = { ...g.userData, solid: { spheres: new Float32Array([(b.minX + b.maxX) / 2, (b.minY + b.maxY) / 2, r]), thickness: 1 } satisfies Solid };
   return g;

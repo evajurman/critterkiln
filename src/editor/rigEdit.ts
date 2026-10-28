@@ -2,7 +2,9 @@
 // Editing the skeleton: adding, splitting, mirroring and removing parts, which
 // part hangs off which, naming them, and switching body plans.
 
-import { Creature, defaultState, partShapes, setPartShapes, type PartState } from '../creature';
+import { showMyStuff } from './kits';
+import * as THREE from 'three';
+import { Creature, defaultState, partShapes, setPartShapes, type BoneRT, type PartState } from '../creature';
 import { unlock } from '../achievements';
 import { clipLoop, type Vec2 } from '../inflate';
 import {
@@ -28,16 +30,19 @@ import {
   setParent,
   splitBone,
   unlinkPair,
+  uniqueId,
   type BoneDef,
   type PartCopy,
   type PartSizes,
   type RigState,
+  type V3,
 } from '../rigs';
 import { $, fa, faClassic, iconLabel } from './dom';
-import { buildCreature, commit, creature, idle, parentsChecked, selected, setSelected, setState, state } from './state';
-import { pickPart, showEyes } from './controls';
+import { buildCreature, commit, creature, idle, parentsChecked, selected, setIdle, setSelected, setState, state } from './state';
+import { pickPart, raycaster, setRay, showEyes } from './controls';
+import { camera } from './stage';
 import { frameCreature } from './framing';
-import { exitDraw } from './drawing';
+import { enterDraw, exitDraw } from './drawing';
 import { renderCreatureBar } from './creatureBar';
 import { renderRigs, selectPart } from './partPanel';
 import { renderUI } from './panels';
@@ -456,6 +461,97 @@ export function removePart() {
     return [];
   }, false);
   selectPart(creature.bones.has(parent) ? parent : creature.list[0].def.id);
+}
+
+/**
+ * Something new to wear, made as a part: a short bone standing straight out
+ * of the spot under `at` (or the front of the picked part, as the camera sees
+ * it), kept apart from the body, then drawn straight away like any part. With
+ * Mirror on and the spot off the middle, it comes as a pair.
+ */
+/** A thing just grown and not drawn yet: dropping its drawing takes it away again (see dropFreshThing). */
+let freshThing = '';
+
+/** Drawing a just-grown thing was cancelled before anything was drawn: it goes. */
+export function dropFreshThing(id: string) {
+  if (id !== freshThing) return;
+  freshThing = '';
+  const b = creature.bones.get(id);
+  if (!b || state.parts[b.src]?.outline) return;
+  rigEdit((rig) => {
+    for (const d of deleteLimb(rig, id)) for (const k of [d.id, d.id + 'L', d.id + 'R']) delete state.parts[k];
+    return [];
+  }, false);
+  const up = b.parent?.def.id ?? creature.list[0].def.id;
+  // (on the Stuff tab's empty bench there's nothing to pick: its stand is hidden)
+  if (state.parts[creature.bones.get(up)?.src ?? '']?.hidden) {
+    setIdle(true);
+    renderUI();
+    // (what to put on it: My stuff, open)
+    showMyStuff();
+    hint('An empty bench: pick something from My stuff to change, or Draw new', 3000);
+  } else selectPart(up);
+}
+
+export function growThingHere(at?: { x: number; y: number }, ray?: THREE.Ray) {
+  const picked = creature.bones.get(selected);
+  if (!picked) return;
+  let hit = null;
+  if (at) {
+    setRay(at.x, at.y);
+    hit = creature.surfaceAt(raycaster);
+  } else if (ray) {
+    raycaster.set(ray.origin, ray.direction);
+    hit = creature.surfaceAt(raycaster);
+  }
+  if (!hit) hit = creature.surfaceFacing(picked, camera.position);
+  if (!hit) {
+    hint('Right-click the spot to put it there', 2400, true);
+    return;
+  }
+  const on = hit.bone;
+  // where it is on the unposed creature (a part's frame, as surfaceAt gives it, to the skeleton)
+  growThingAt(on, hit.local.clone().applyMatrix4(on.restWorld), hit.localNormal.clone().transformDirection(on.restWorld).normalize());
+}
+
+/** A new thing on part `on`, standing out from `point` along `out` (in the skeleton's coordinates), drawn straight away. */
+export function growThingAt(on: BoneRT, point: THREE.Vector3, out: THREE.Vector3) {
+  const mirror = rigLocked() && Math.abs(point.x) > 0.05;
+  // a pair is defined by its twin on +X
+  if (mirror && point.x < 0) {
+    point.x = -point.x;
+    out.x = -out.x;
+  }
+  const len = Math.max(0.25, Math.min(0.6, on.def.width * 0.7));
+  // sunk in a little, so what's drawn from its base sits on the body
+  const start = point.clone().addScaledVector(out, -0.02);
+  const end = start.clone().addScaledVector(out, len);
+  // drawn from the front it faces the way the creature looks (looking along it: across it)
+  const fwd = new THREE.Vector3(...(state.rig.eyeDir ?? [0, 0, 1])).normalize();
+  let side = new THREE.Vector3().crossVectors(out, fwd);
+  if (side.lengthSq() < 0.04) side = new THREE.Vector3().crossVectors(out, new THREE.Vector3(0, 1, 0));
+  if (side.lengthSq() < 0.04) side.set(1, 0, 0);
+  side.normalize();
+  const r3 = (v: THREE.Vector3) => v.toArray().map((x) => Math.round(x * 1000) / 1000) as V3;
+  const parent = mirror && on.def.sideSign !== 0 ? on.def.baseId : on.def.id;
+  let made = '';
+  rigEdit((rig) => {
+    const id = uniqueId(rig, 'thing');
+    rig.bones.push({ id, name: 'Thing', parent, start: r3(start), end: r3(end), side: r3(side), width: Math.max(0.08, Math.min(0.2, len * 0.45)), mirror });
+    made = mirror ? id + 'L' : id;
+    // its own look: the part's material, a plain color, no markings, never blended in
+    const from = state.parts[on.src];
+    const p: PartState = { ...structuredClone(from), color: '#c9ccd6', apart: true };
+    for (const k of ['markings', 'kind', 'hollow', 'open', 'glow', 'glowFollow', 'opacity', 'hidden', 'link', 'sits', 'curve', 'curveMode', 'wrap', 'thingSpace'] as const) delete p[k];
+    setPartShapes(p, []);
+    state.parts[made] = p;
+    return [{ from: on.src, to: made }];
+  }, false);
+  unlock('limb');
+  if (!creature.bones.has(made)) return;
+  freshThing = made;
+  enterDraw({ kind: 'bone', boneId: made });
+  hint('A new thing, kept apart from the body: draw it (Turned for a hat or cup, Flat for glasses: erase inside for holes)', 3200);
 }
 
 export function initRigEdit() {

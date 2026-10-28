@@ -12,7 +12,7 @@ import { neutralTone, refreshFloorColors, tintForBackdrop } from './floor';
 import { composer } from './post';
 import { creature, creatures } from './state';
 import { handlesVisible } from './controls';
-import { gizmo } from './attach';
+import { gizmo } from './gizmo';
 import { sceneFileName } from './files';
 import { hint } from './hints';
 import { invalidate } from './loop';

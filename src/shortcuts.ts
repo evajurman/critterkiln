@@ -6,11 +6,11 @@
 import { tipOf } from './tooltip';
 
 export type ShortcutId =
-  | 'shape' | 'look' | 'animate'
+  | 'shape' | 'look' | 'animate' | 'stuff'
   | 'undo' | 'redo' | 'copy' | 'paste' | 'selectAll'
   | 'frame' | 'frameAll'
   | 'draw' | 'mirror' | 'delete' | 'help'
-  | 'move' | 'rotate' | 'scale'
+  | 'move' | 'rotate' | 'scale' | 'pose'
   | 'erase' | 'side'
   | 'brushSize';
 
@@ -29,20 +29,22 @@ const SHORTCUTS: Shortcut[] = [
   { id: 'shape', group: 'Getting around', label: 'Shape tab', keys: ['1'] },
   { id: 'look', group: 'Getting around', label: 'Look tab', keys: ['2'] },
   { id: 'animate', group: 'Getting around', label: 'Animate tab', keys: ['3'] },
+  { id: 'stuff', group: 'Getting around', label: 'Stuff tab', note: 'Things on their own, on the blueprint', keys: ['4'] },
   { id: 'frame', group: 'Getting around', label: 'Frame what you’re working on', note: 'While drawing: face the drawing again', keys: ['f'] },
   { id: 'frameAll', group: 'Getting around', label: 'Frame everyone', keys: ['shift+a'] },
   { id: 'help', group: 'Getting around', label: 'Keyboard shortcuts', keys: ['?'] },
   { id: 'undo', group: 'Editing', label: 'Undo', keys: ['ctrl+z'] },
   { id: 'redo', group: 'Editing', label: 'Redo', keys: ['ctrl+shift+z', 'ctrl+y'] },
-  { id: 'copy', group: 'Editing', label: 'Copy', note: 'The picked part and everything on it, or the picked piece', keys: ['ctrl+c'] },
+  { id: 'copy', group: 'Editing', label: 'Copy', note: 'The picked part and everything on it. A thing kept apart from the body asks: a linked duplicate (change one, they all change) or a copy of its own', keys: ['ctrl+c'] },
   { id: 'paste', group: 'Editing', label: 'Paste', note: 'A part hangs off the part it came from, or the picked part when that isn’t here; works in another creature or thing too', keys: ['ctrl+v'] },
   { id: 'selectAll', group: 'Editing', label: 'Pick every part', note: 'Of the creature you’re working on, for its colors, materials and markings; while changing stuff, every piece. Ctrl-click picks one more (or one less); Shift-click picks everything between', keys: ['ctrl+a'] },
-  { id: 'draw', group: 'Editing', label: 'Draw', note: 'A new part, or a stuff piece. While drawing: the Draw tool', keys: ['d'] },
-  { id: 'mirror', group: 'Editing', label: 'Mirror', note: 'Both sides of a pair change together; while drawing, one half is copied across the centre line; on a stuff piece, a mirror image on the other side; while painting, paint both sides', keys: ['m'] },
-  { id: 'delete', group: 'Editing', label: 'Delete', note: 'The picked part, stuff or piece', keys: ['delete', 'backspace'] },
-  { id: 'move', group: 'Move, rotate and scale', label: 'Move', note: 'Pieces, worn stuff, a creature you’re arranging, and a drawing', keys: ['w'] },
-  { id: 'rotate', group: 'Move, rotate and scale', label: 'Rotate', keys: ['e'] },
-  { id: 'scale', group: 'Move, rotate and scale', label: 'Scale', keys: ['r'] },
+  { id: 'draw', group: 'Editing', label: 'Draw', note: 'The picked part’s shape. While drawing: the Draw tool', keys: ['d'] },
+  { id: 'mirror', group: 'Editing', label: 'Mirror', note: 'Both sides of a pair change together; while drawing, one half is copied across the centre line; while painting, paint both sides', keys: ['m'] },
+  { id: 'delete', group: 'Editing', label: 'Delete', note: 'The picked part (and everything on it)', keys: ['delete', 'backspace'] },
+  { id: 'pose', group: 'Handles', label: 'Pose', note: 'The bones’ handles: bend joints, slide parts (or pick handles with the button on the view cube)', keys: ['q'] },
+  { id: 'move', group: 'Handles', label: 'Move', note: 'The picked part and everything on it; with nothing picked, the whole creature. While drawing: move the drawing; placing a marking: move it', keys: ['w'] },
+  { id: 'rotate', group: 'Handles', label: 'Rotate', keys: ['e'] },
+  { id: 'scale', group: 'Handles', label: 'Scale', keys: ['r'] },
   { id: 'erase', group: 'Drawing', label: 'Erase tool', keys: ['x'] },
   { id: 'side', group: 'Drawing', label: 'Front or side view', note: 'Drawing a body part', keys: ['v'] },
   { id: 'brushSize', group: 'Painting', label: 'Brush size', note: 'Then move the pointer out or in, and click (or press it again) to keep the size; Esc puts it back. Only while painting, so its key can do something else the rest of the time', keys: ['f'], while: 'painting' },

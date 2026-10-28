@@ -249,6 +249,17 @@ export function orbitOut(a: StuffAnim, from: THREE.Vector3): THREE.Vector3 {
   return d.addScaledVector(unit, -d.dot(unit));
 }
 
+/**
+ * The same move on the other side of a pair hanging off a middle part: mirrored
+ * across the creature's middle (x = 0 in that part's frame). Turning goes the
+ * other way round, so its line keeps X and flips the rest (an axis turns that way under a mirror).
+ */
+export function mirrorMove(a: StuffAnim): StuffAnim {
+  const [cx, cy, cz] = a.center;
+  const [ax, ay, az] = a.axis;
+  return { ...a, center: [-cx, cy, cz], axis: a.kind === 'bob' ? [-ax, ay, az] : [ax, -ay, -az] };
+}
+
 /** Where in one time round a piece of stuff is at loop time `t`. */
 export function stuffP(a: StuffAnim, t: number): number {
   return (((t * Math.max(1, Math.round(a.speed)) + a.phase) % 1) + 1) % 1;

@@ -256,7 +256,7 @@ function findDef(rig: RigState, sceneId: string) {
   return { ex, def };
 }
 
-function uniqueId(rig: RigState, base: string): string {
+export function uniqueId(rig: RigState, base: string): string {
   const taken = new Set(rig.bones.flatMap((b) => [b.id, b.id + 'L', b.id + 'R']));
   const stem = base.replace(/\d+$/, '');
   for (let n = 2; ; n++) if (!taken.has(stem + n) && !taken.has(stem + n + 'L')) return stem + n;
@@ -1032,18 +1032,21 @@ export function setParent(rig: RigState, sceneId: string, targetId: string): boo
  * it. The part it's deepest inside (for its thickness) wins; the one it
  * hangs off now keeps it unless another is clearly deeper.
  */
-export function nearestParent(rig: RigState, sceneId: string, sizes?: PartSizes): string | null {
+export function nearestParent(rig: RigState, sceneId: string, sizes?: PartSizes, apart: (sceneId: string) => boolean = () => false): string | null {
   const bones = expandRig(rig).bones;
   const byId = new Map(bones.map((b) => [b.id, b]));
   const me = byId.get(sceneId);
   if (!me?.parent) return null;
+  // a piece of a thing (kept apart, hanging off another kept apart) stays with its thing
+  if (apart(me.id) && apart(me.parent)) return me.parent;
   const own = subtreeDefs(rig, sceneId);
   // a pair is weighed from its left twin (the right one is its mirror image)
   const left = me.sideSign === -1 ? byId.get(me.baseId + 'L') ?? me : me;
   const pair = me.sideSign !== 0;
   const base = sizes?.at?.(left.id)?.start ?? left.start;
   const other = (pair && sizes?.at?.(me.baseId + 'R')?.start) || mirrorV(base);
-  const skip = (c: ExpandedBone) => own.has(c.baseId) || (pair && c.sideSign === -1);
+  // (a thing hangs off the body, not off other things; the body never off a thing)
+  const skip = (c: ExpandedBone) => own.has(c.baseId) || (pair && c.sideSign === -1) || apart(c.id);
   // a middle part only holds a pair if both sides sit on it
   // (the other side as it is, or where it'd be as this side's mirror image: hanging off a part bent or
   // posed off to one side throws a pair's sides apart, and that's no reason to keep it there)
@@ -1094,13 +1097,13 @@ export function nearestParent(rig: RigState, sceneId: string, sizes?: PartSizes)
  * part, or just the definitions in `only`. Returns the moves made: scene id
  * (a pair's left twin), and the part it hung off before.
  */
-export function reparentAll(rig: RigState, sizes?: PartSizes, only?: Set<string>): { id: string; from: string }[] {
+export function reparentAll(rig: RigState, sizes?: PartSizes, only?: Set<string>, apart?: (sceneId: string) => boolean): { id: string; from: string }[] {
   const changed: { id: string; from: string }[] = [];
   const done = new Set<string>();
   for (const b of expandRig(rig).bones) {
     if (!b.parent || b.sideSign === -1 || done.has(b.baseId) || (only && !only.has(b.baseId))) continue;
     done.add(b.baseId);
-    const to = nearestParent(rig, b.id, sizes);
+    const to = nearestParent(rig, b.id, sizes, apart);
     const from = b.parent;
     if (to && setParent(rig, b.id, to)) changed.push({ id: b.id, from });
   }
@@ -1175,13 +1178,16 @@ export function moveLimb(rig: RigState, sceneId: string, m: M4) {
 }
 
 /** Copy a bone and everything hanging off it, nudged down so it's visible. */
+/** Where a duplicated part goes from the original (in the skeleton's coordinates): just below it. */
+export const DUPLICATE_OFFSET: V3 = [0, -0.18, 0];
+
 export function duplicateLimb(rig: RigState, sceneId: string): PartCopy[] {
   const f = findDef(rig, sceneId);
   if (!f || !f.def.parent) return [];
   const defs = subtreeDefs(rig, sceneId);
   const idMap = new Map<string, string>();
   const copies: BoneDef[] = [];
-  const offset: V3 = [0, -0.18, 0];
+  const offset: V3 = DUPLICATE_OFFSET;
   for (const d of rig.bones) {
     if (!defs.has(d.id)) continue;
     const nid = uniqueId({ ...rig, bones: [...rig.bones, ...copies] }, d.id);

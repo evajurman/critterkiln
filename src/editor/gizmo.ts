@@ -1,22 +1,17 @@
 // ---------------------------------------------------------------------------
-// Attaching stuff to body parts: the gizmo that moves, turns and resizes worn
-// stuff, and which worn thing is picked.
+// The gizmo that moves, turns and resizes: whole creatures, the picked
+// part (see gizmoMode.ts), and a marking's placement (see src/markingPanel.ts).
 
 import * as THREE from 'three';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
-import { type Attachment } from '../creature';
-import { markGizmoHeld, stopMarkTools } from '../markingPanel';
-import { type V3 } from '../rigs';
-import { $ } from './dom';
+import { markGizmoHeld } from '../markingPanel';
 import { camera, canvas, scene } from './stage';
-import { commit, creature, fitShadows, state } from './state';
-import { controls, floorGap, gapBefore, lifted, setGapBefore, setKeepFloor, updateSkeletonVisibility } from './controls';
-import { bakePiece, mirrorTwinLive, piecePivot } from './workbench';
-import { placing, stopPlacing } from './arrange';
-import { clearWornPieces, syncAttachBar } from './attachPanel';
-import { renderCreatureStuff } from './carry';
+import { commit, creature, fitShadows } from './state';
+import { controls, floorGap, lifted, setGapBefore, setKeepFloor } from './controls';
+import { placing } from './arrange';
 import { invalidate } from './loop';
 import { captureRide } from './riders';
+import { partGizmoChange, partGizmoDown, partGizmoUp } from './gizmoMode';
 
 /**
  * TransformControls whose centre scale cube follows the mouse sideways: left shrinks, right
@@ -66,38 +61,7 @@ class SideScaleControls extends TransformControls {
 
 export let gizmo: SideScaleControls;
 
-export let selectedAttachment = '';
-
-export function currentAttachment(): Attachment | undefined {
-  return state.attachments?.find((a) => a.id === selectedAttachment);
-}
-
-export function selectAttachment(id: string) {
-  const obj = creature.attachmentObject(id);
-  if (!obj) return deselectAttachment();
-  stopPlacing();
-  stopMarkTools();
-  selectedAttachment = id;
-  gizmo.showX = gizmo.showY = gizmo.showZ = true;
-  gizmo.attach(obj);
-  $('#attach-bar').hidden = false;
-  syncAttachBar();
-  updateSkeletonVisibility();
-  renderCreatureStuff();
-}
-
-export function deselectAttachment() {
-  selectedAttachment = '';
-  if (!placing) gizmo.detach();
-  $('#attach-bar').hidden = true;
-  // (Look goes back to the parts)
-  clearWornPieces();
-  // (also called while a world is being swapped, between creatures)
-  if (creature) updateSkeletonVisibility();
-  renderCreatureStuff();
-}
-
-export function initAttach() {
+export function initGizmo() {
   gizmo = new SideScaleControls(camera, canvas);
   gizmo.setSpace('local');
   gizmo.setSize(0.8);
@@ -108,37 +72,23 @@ export function initAttach() {
   gizmo.addEventListener('objectChange', () => {
     invalidate();
     if (markGizmoHeld()) return;
-    if (piecePivot && gizmo.object === piecePivot) {
-      mirrorTwinLive();
-      return;
-    }
+    // a part's arrows (see gizmoMode.ts)
+    if (partGizmoChange()) return;
     if (placing) {
       creature.capturePlacement();
       // (one riding on another rides where it's put)
       captureRide(creature);
       fitShadows();
-      return;
     }
-    const a = currentAttachment();
-    const obj = gizmo.object;
-    if (!a || !obj) return;
-    a.position = obj.position.toArray() as V3;
-    a.quaternion = obj.quaternion.toArray() as [number, number, number, number];
-    a.scale = obj.scale.toArray() as V3;
-    creature.updateTwin(a.id);
   });
   gizmo.addEventListener('mouseDown', () => {
+    if (partGizmoDown()) return;
     if (placing) setGapBefore(floorGap());
   });
   gizmo.addEventListener('mouseUp', () => {
-    if (piecePivot && gizmo.object === piecePivot) {
-      bakePiece();
-      return;
-    }
     // (a marking's gizmo is seen to in src/markingPanel.ts)
     if (markGizmoHeld()) return;
-    // a rescaled felt attachment regrows its fuzz at the new size
-    if (selectedAttachment) creature.syncAttachments();
+    if (partGizmoUp()) return;
     if (placing && gizmo.mode === 'translate' && lifted()) setKeepFloor(false, true);
     commit();
   });

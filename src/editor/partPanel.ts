@@ -4,8 +4,6 @@
 
 import { markingsOf, setPartShapes, type BoneRT, type Creature, type CreatureState, type PartKind, type PartState } from '../creature';
 import { collect, unlock } from '../achievements';
-import { type Piece, type Thing } from '../stuff';
-import { shownMarkings } from '../markings';
 import { STYLE_PARAMS, STYLES, styleSettings, type StyleId } from '../materials';
 import { RIGS, savedRigs } from '../rigs';
 import { $, type PickHow } from './dom';
@@ -13,8 +11,6 @@ import { buildFloorMesh, floorPrefs } from './floor';
 import { alsoPicked, commit, creature, idle, mode, selected, setIdle, setSelected, state } from './state';
 import { touchScreen, updateSkeletonVisibility } from './controls';
 import { enterDraw, exitDraw } from './drawing';
-import { renderStuffPanel, shareThing, syncWorkbench } from './workbench';
-import { wornPieces } from './attachPanel';
 import { renderCreatureBar } from './creatureBar';
 import { glowFollowSeg, glowSlider, sceneColorRow, SWATCHES } from './widgets';
 import { renderEyes } from './eyesPanel';
@@ -31,6 +27,32 @@ export function partLabel(src: string): string {
 
 function sources(): BoneRT[] {
   return creature.list.filter((b) => !b.def.mirrorOf);
+}
+
+/** A hollow turned part's wall when it hasn't one of its own: a share of its widest radius (see partPieceGeometry). */
+function defaultWall(p: PartState): number {
+  const xs = (p.outline ?? []).map((q) => Math.abs(q[0]));
+  return Math.max(0.004, 0.12 * Math.max(0, ...xs));
+}
+
+/** A part slider: the picked part follows as it's dragged, kept on release. */
+function partSlider(sel: string, set: (p: PartState, v: number) => void) {
+  const input = $<HTMLInputElement>(sel);
+  let pending = false;
+  input.oninput = () => {
+    set(selPart(), parseFloat(input.value));
+    if (pending) return;
+    pending = true;
+    requestAnimationFrame(() => {
+      pending = false;
+      creature.sync();
+    });
+  };
+  input.onchange = () => {
+    creature.sync();
+    commit();
+    renderUI();
+  };
 }
 
 function selPart() {
@@ -61,44 +83,9 @@ function partsFor(k: ScopeKind): PartState[] {
   return wholeFor(k) ? Object.values(state.parts) : pickedParts();
 }
 
-// Worn pieces picked (in the Scene list, or Material on the stuff bar): Look's
-// colors, glow and materials go on them as they would on parts, and the thing
-// changes everywhere it is (My stuff, and every creature with it on).
-
-/** A section's changes go on every piece of the worn thing: it's set to Everything, or every piece is picked. */
-function wornWhole(k: ScopeKind): boolean {
-  const w = wornPieces();
-  return !!w && (scopeOf(k) === 'all' || w.pieces.length >= w.thing.pieces.length);
-}
-/** Change the picked worn pieces (each with its mirror image), or on Everything every piece. */
-function changeWorn(k: ScopeKind, fn: (p: Piece) => void, doCommit: boolean) {
-  const w = wornPieces();
-  if (!w) return;
-  const list = wornWhole(k) ? w.thing.pieces : w.pieces;
-  const done = new Set<Piece>();
-  for (const p of list) {
-    const twin = p.twin ? w.thing.pieces.find((q) => q.id === p.twin) : undefined;
-    for (const q of twin ? [p, twin] : [p]) {
-      if (done.has(q)) continue;
-      done.add(q);
-      fn(q);
-    }
-  }
-  creature.sync();
-  if (!doCommit) return;
-  shareThing(w.thing);
-  commit();
-  renderUI();
-}
-/** The material a worn piece shows: its own, or (inheriting) the part's it's on. */
-function wornStyle(): StyleId | undefined {
-  const w = wornPieces();
-  if (!w) return undefined;
-  return w.thing.inherit ? (state.parts[creature.bones.get(w.a.bone)?.src ?? '']?.style ?? state.style) : w.pieces[0].style;
-}
-/** What Look shows the color and glow of: the main worn piece, or the main part. */
+/** What Look shows the color and glow of: the main part. */
 function shownLook(): { color: string; glow?: number } {
-  return wornPieces()?.pieces[0] ?? selPart();
+  return selPart();
 }
 
 /**
@@ -203,6 +190,27 @@ export function renderPartCard() {
   document.querySelectorAll<HTMLButtonElement>('#part-kind button').forEach((b) => b.classList.toggle('active', b.dataset.kind === kind));
   // a turned part is as round as its drawing: nothing to thicken
   $('#thickness-row').hidden = kind === 'turned';
+  $('#part-turned-row').hidden = kind !== 'turned';
+  $<HTMLInputElement>('#part-hollow').checked = !!p.hollow;
+  $<HTMLInputElement>('#part-open').checked = !!p.open;
+  $<HTMLInputElement>('#part-open').disabled = !p.hollow;
+  $<HTMLInputElement>('#part-apart').checked = !!p.apart;
+  $('#part-round-row').hidden = kind !== 'flat';
+  $<HTMLInputElement>('#part-round').value = String(p.round ?? 0.7);
+  $('#part-wall-row').hidden = kind !== 'turned' || !p.hollow;
+  $<HTMLInputElement>('#part-wall').value = String(p.wall ?? defaultWall(p));
+  $<HTMLInputElement>('#part-curve').value = String(p.curve ?? 0);
+  // no curve: just the choice (the slider shows once it curves one way or the other)
+  const curveMode = p.curve ? (p.curveMode ?? 'axis') : 'none';
+  document.querySelectorAll<HTMLButtonElement>('#part-curve-mode button').forEach((b) => b.classList.toggle('active', b.dataset.curve === curveMode));
+  $('#part-curve-row').hidden = curveMode === 'none';
+  // only something kept apart from the body can be pressed onto it
+  const wrapIn = $<HTMLInputElement>('#part-wrap');
+  wrapIn.value = String(p.wrap ?? 0);
+  wrapIn.disabled = !p.apart;
+  $('#part-wrap-row').title = p.apart ? 'Press it onto the body like a decal' : 'Keep it apart from the body first: then it can be pressed onto it';
+  $('#part-wrap-smooth-row').hidden = !p.apart || !p.wrap;
+  $<HTMLInputElement>('#part-wrap-smooth').value = String(p.wrapSmooth ?? 0.3);
   $<HTMLInputElement>('#thickness').value = String(p.thickness);
   $<HTMLInputElement>('#opacity').value = String(p.opacity ?? 1);
   $<HTMLButtonElement>('#reset-shape').disabled = !p.outline;
@@ -231,9 +239,8 @@ export let partGlowFollow: () => void;
 let partSceneColors: () => void;
 
 export function renderStyles() {
-  const w = wornPieces();
-  const whole = !w && wholeFor('material');
-  const current = w ? wornStyle()! : whole ? state.style : (selPart().style ?? state.style);
+  const whole = wholeFor('material');
+  const current = whole ? state.style : (selPart().style ?? state.style);
   const el = $('#styles');
   el.innerHTML = '';
   for (const s of STYLES) {
@@ -245,77 +252,40 @@ export function renderStyles() {
     el.append(btn);
   }
   renderOwnStyles(whole);
-  if (w) {
-    // a worn thing's own material settings (or inheriting the part's)
-    const styles = [...new Set(w.thing.pieces.map((p) => p.style))];
-    renderThingMaterial(w.thing, styles, $('#style-params'), wornStyle()!, () => shareThing(w.thing));
-  } else renderStyleParams(current);
+  if (!whole) renderPartMaterial(selPart(), current);
+  else renderStyleParams(current);
+}
+
+/**
+ * A part's material settings: the creature's for that material, or (Just this
+ * part) its own, starting from how it looks now.
+ */
+function renderPartMaterial(p: PartState, style: StyleId) {
+  const el = $('#style-params');
+  el.innerHTML = '';
+  const row = document.createElement('label');
+  row.className = 'check';
+  row.title = 'On: these settings are this part’s own. Off: it shares the creature’s settings for this material.';
+  const box = document.createElement('input');
+  box.type = 'checkbox';
+  box.checked = !!p.materialSettings?.[style];
+  box.onchange = () => {
+    if (box.checked) p.materialSettings = { ...p.materialSettings, [style]: { ...creature.settingsOf(p, style) } };
+    else if (p.materialSettings) {
+      delete p.materialSettings[style];
+      if (!Object.keys(p.materialSettings).length) delete p.materialSettings;
+    }
+    creature.sync();
+    commit();
+    renderPartMaterial(p, style);
+  };
+  row.append(box, ' Just this part');
+  const sub = document.createElement('div');
+  el.append(row, sub);
+  renderStyleParams(style, sub, p.materialSettings?.[style] ? p : state);
 }
 
 type SettingsOwner = { materialSettings?: CreatureState['materialSettings'] };
-
-/**
- * A stuff item's material controls. "Inherits material" makes it take the
- * material of whatever wears it (type and settings: the body part it's on);
- * otherwise each piece keeps its own material, with sliders just for this item.
- */
-export function renderThingMaterial(thing: Thing, styles: StyleId[], el: HTMLElement, wearerStyle: StyleId, after?: () => void) {
-  el.innerHTML = '';
-  // items from before inheriting meant this shared the creature's settings:
-  // give them their own copy, looking just as they do now
-  if (!thing.inherit && !thing.ownMaterial) {
-    thing.ownMaterial = true;
-    thing.materialSettings ??= {};
-    for (const st of styles) thing.materialSettings[st] ??= { ...creature.settingsFor(st) };
-  }
-  const row = document.createElement('label');
-  row.className = 'check';
-  const box = document.createElement('input');
-  box.type = 'checkbox';
-  box.checked = !!thing.inherit;
-  box.onchange = () => {
-    thing.inherit = box.checked;
-    if (!thing.inherit) {
-      // back to its own pieces' materials, starting from what those look like on the creature
-      thing.ownMaterial = true;
-      thing.materialSettings ??= {};
-      for (const st of styles) thing.materialSettings[st] ??= { ...creature.settingsFor(st) };
-    }
-    creature.sync();
-    syncWorkbench();
-    after?.();
-    commit();
-    if (mode === 'stuff') renderStuffPanel();
-    else renderThingMaterial(thing, styles, el, wearerStyle, after);
-  };
-  row.append(box, ' Inherits material');
-  el.append(row);
-  const styleName = STYLES.find((s) => s.id === wearerStyle)?.name ?? wearerStyle;
-  row.title = thing.inherit
-    ? `Made of ${styleName}, like the ${mode === 'stuff' ? 'creature' : 'part it’s on'}. Change it in Look › Material.`
-    : `Off: its pieces keep their own materials. On: it’s made of whatever the ${mode === 'stuff' ? 'creature' : 'part it’s on'} is made of`;
-  const scaleRow = document.createElement('label');
-  scaleRow.className = 'check';
-  scaleRow.title = 'On: fuzz keeps the same real length when the item is scaled. Off: it grows and shrinks with the item.';
-  const scaleBox = document.createElement('input');
-  scaleBox.type = 'checkbox';
-  scaleBox.checked = thing.scaleMaterial !== false;
-  scaleBox.onchange = () => {
-    thing.scaleMaterial = scaleBox.checked;
-    creature.sync();
-    after?.();
-    commit();
-  };
-  scaleRow.append(scaleBox, ' Re-adjust material on scale');
-  el.append(scaleRow);
-  if (thing.inherit) return;
-  for (const st of styles) {
-    const sub = document.createElement('div');
-    sub.className = 'style-params';
-    el.append(sub);
-    renderStyleParams(st, sub, thing, after);
-  }
-}
 
 /**
  * Sliders for a material. With the default owner (the creature) they apply
@@ -334,7 +304,6 @@ function renderStyleParams(style: StyleId, el: HTMLElement = $('#style-params'),
   reset.onclick = () => {
     if (owner.materialSettings) delete owner.materialSettings[style];
     creature.sync();
-    syncWorkbench();
     after?.();
     commit();
     renderStyleParams(style, el, owner, after);
@@ -368,7 +337,6 @@ function renderStyleParams(style: StyleId, el: HTMLElement = $('#style-params'),
       requestAnimationFrame(() => {
         pending = false;
         creature.sync();
-        syncWorkbench();
         if (owner === state && floorPrefs.mode === 'material' && floorPrefs.style === style) buildFloorMesh();
         // toon's ink width at 0 has no outline for the eyes to share
         if (p.key === 'ink') renderEyes();
@@ -423,7 +391,6 @@ function renderOwnStyles(whole: boolean) {
 }
 
 function setColor(c: string, doCommit: boolean) {
-  if (wornPieces()) return changeWorn('color', (p) => (p.color = c), doCommit);
   for (const p of partsFor('color')) p.color = c;
   if (wholeFor('color') && doCommit && Object.keys(state.parts).length > 1) unlock('paint-all');
   creature.sync();
@@ -437,14 +404,6 @@ function setColor(c: string, doCommit: boolean) {
 
 /** A material on the picked parts; on Everything (or with every part picked), it's the whole creature's (parts added later too), but not the parts with their own. */
 function setStyle(id: StyleId) {
-  const w = wornPieces();
-  if (w) {
-    // picking a material for its pieces: they stop taking the part's
-    w.thing.inherit = false;
-    collect('materials', id);
-    changeWorn('material', (p) => (p.style = id), true);
-    return;
-  }
   if (!wholeFor('material')) {
     for (const p of pickedParts()) p.style = id;
   } else {
@@ -480,19 +439,8 @@ export function initPartPanel() {
   };
   partGlowFollow = glowFollowSeg(
     '#glow-follow',
-    () => {
-      const w = wornPieces();
-      if (w) return { ...w.pieces[0], markings: shownMarkings(w.thing.markings, w.pieces[0].markings, w.pieces[0].id) };
-      return creature.bones.has(selected) ? { ...selPart(), markings: markingsOf(state, selPartId()) } : undefined;
-    },
+    () => (creature.bones.has(selected) ? { ...selPart(), markings: markingsOf(state, selPartId()) } : undefined),
     (f) => {
-      if (wornPieces()) {
-        changeWorn('color', (p) => {
-          if (f) p.glowFollow = f;
-          else delete p.glowFollow;
-        }, true);
-        return;
-      }
       for (const p of partsFor('color')) {
         if (f) p.glowFollow = f;
         else delete p.glowFollow;
@@ -506,14 +454,6 @@ export function initPartPanel() {
   glowSlider(
     '#glow',
     (v) => {
-      if (wornPieces()) {
-        changeWorn('color', (p) => {
-          if (v > 0) p.glow = v;
-          else delete p.glow;
-        }, false);
-        partGlowFollow();
-        return;
-      }
       for (const p of partsFor('color')) {
         if (v > 0) p.glow = v;
         else delete p.glow;
@@ -522,11 +462,7 @@ export function initPartPanel() {
       creature.markMergeDirty();
       partGlowFollow();
     },
-    () => {
-      const w = wornPieces();
-      if (w) shareThing(w.thing);
-      commit();
-    },
+    () => commit(),
   );
   $('#draw').onclick = () => enterDraw({ kind: 'bone', boneId: selected });
   $('#cancel-draw').onclick = () => exitDraw();
@@ -536,6 +472,16 @@ export function initPartPanel() {
     commit();
     renderUI();
   };
+  for (const [sel, key] of [['#part-hollow', 'hollow'], ['#part-open', 'open'], ['#part-apart', 'apart']] as const) {
+    $<HTMLInputElement>(sel).onchange = (e) => {
+      const p = selPart();
+      if ((e.target as HTMLInputElement).checked) p[key] = true;
+      else delete p[key];
+      creature.sync();
+      commit();
+      renderUI();
+    };
+  }
   document.querySelectorAll<HTMLButtonElement>('#part-kind button').forEach((b) => {
     b.onclick = () => {
       const p = selPart();
@@ -543,6 +489,33 @@ export function initPartPanel() {
       if ((p.kind ?? 'puffy') === kind) return;
       if (kind === 'puffy') delete p.kind;
       else p.kind = kind;
+      creature.sync();
+      commit();
+      renderUI();
+    };
+  });
+  partSlider('#part-round', (p, v) => (p.round = v));
+  partSlider('#part-wall', (p, v) => (p.wall = v));
+  partSlider('#part-curve', (p, v) => {
+    if (Math.abs(v) < 0.005) delete p.curve;
+    else p.curve = v;
+  });
+  partSlider('#part-wrap', (p, v) => {
+    if (v < 0.005) delete p.wrap;
+    else p.wrap = v;
+  });
+  partSlider('#part-wrap-smooth', (p, v) => (p.wrapSmooth = v));
+  document.querySelectorAll<HTMLButtonElement>('#part-curve-mode button').forEach((b) => {
+    b.onclick = () => {
+      const p = selPart();
+      if (b.dataset.curve === 'none') {
+        delete p.curve;
+        delete p.curveMode;
+      } else {
+        p.curveMode = b.dataset.curve as 'axis' | 'radial';
+        // picking a way to curve with nothing curved yet starts with a visible curve
+        if (!p.curve) p.curve = 0.4;
+      }
       creature.sync();
       commit();
       renderUI();

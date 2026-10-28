@@ -6,7 +6,6 @@
 // already there, so a trophy is only ever announced once, even with two tabs open.
 
 import type { CreatureState } from './creature';
-import type { Thing } from './stuff';
 
 export type TrophyArea = 'shape' | 'look' | 'stuff' | 'scene' | 'files';
 
@@ -199,12 +198,12 @@ function unlocked(id: string) {
 
 let sceneTimer = 0;
 /** Look over the scene for trophies (after every change; cheap, and batched). */
-export function checkScene(creatures: CreatureState[], workbench?: Thing) {
+export function checkScene(creatures: CreatureState[]) {
   clearTimeout(sceneTimer);
-  sceneTimer = window.setTimeout(() => scanScene(creatures, workbench), 400);
+  sceneTimer = window.setTimeout(() => scanScene(creatures), 400);
 }
 
-function scanScene(creatures: CreatureState[], workbench?: Thing) {
+function scanScene(creatures: CreatureState[]) {
   const when = (id: string, test: () => boolean) => {
     if (!unlocked(id) && test()) unlock(id);
   };
@@ -212,9 +211,6 @@ function scanScene(creatures: CreatureState[], workbench?: Thing) {
   const hour = new Date().getHours();
   when('night', () => hour >= 20 || hour < 2);
   when('early', () => hour >= 6 && hour < 11);
-  // stuff on the workbench, or already worn
-  const things = [...(workbench ? [workbench] : []), ...creatures.flatMap((s) => s.attachments?.map((a) => a.thing) ?? [])];
-  when('turned', () => things.some((t) => t.pieces.some((p) => p.kind === 'turned')));
   for (const s of creatures) {
     const parts = Object.values(s.parts);
     when('alive', () => parts.some((p) => p.outline));
@@ -227,7 +223,9 @@ function scanScene(creatures: CreatureState[], workbench?: Thing) {
     when('mixed', () => new Set(parts.map((p) => p.style ?? s.style)).size >= 3);
     when('rainbow', () => new Set(parts.map((p) => p.color.toLowerCase())).size >= 6);
     when('ghost', () => parts.some((p) => (p.opacity ?? 1) < 0.7));
-    when('attach', () => !!s.attachments?.length);
+    when('turned', () => parts.some((p) => p.kind === 'turned'));
+    // something worn: a part kept apart from the body
+    when('attach', () => parts.some((p) => p.outline && p.apart));
     when('button-eyes', () => s.eyes.enabled && s.eyes.style === 'button');
     when('blend', () => !!s.mergeColors && new Set(parts.map((p) => p.color.toLowerCase())).size >= 2);
     // what a creature is already made of counts as tried (clay, to begin with)

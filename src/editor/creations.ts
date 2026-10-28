@@ -2,6 +2,7 @@
 // My creations: the open scene saves itself into the library (src/library.ts)
 // as you go, and the library lists everything you've made.
 
+import { clearTables, enterBench, leaveSolo } from './focus';
 import * as THREE from 'three';
 import { Creature, type CreatureState } from '../creature';
 import { reach, unlock } from '../achievements';
@@ -35,8 +36,8 @@ import {
 import { drag } from './controls';
 import { frameCreature, freshView } from './framing';
 import { drawState, exitDraw } from './drawing';
-import { saveWorkbenchNow, selectedPiece, setSelectedPiece, snapThumb, thingSaveTimer } from './workbench';
-import { deselectAttachment, gizmo } from './attach';
+import { snapThumb } from './kits';
+import { gizmo } from './gizmo';
 import { stopPlacing } from './arrange';
 import { togglePopover } from './popovers';
 import { applyLook, currentLook, forFile, keepInCollection, type SceneLook } from './files';
@@ -102,7 +103,6 @@ export function flushCreationSave() {
  */
 export function leaveScene() {
   exitDraw();
-  saveWorkbenchNow();
   // My stuff belongs to the scene now: one with stuff in it is worth keeping
   // even if its creatures were never touched (nothing in My stuff is lost)
   if (collection().length) opened.keep = true;
@@ -191,12 +191,11 @@ export function beginCreation(id: string | null, keep: boolean, from?: SavedCrea
  * workbench starts empty. Call leaveScene first to keep the old scene.
  */
 export function replaceWorld(next: World, stuff: Thing[]) {
+  // out of Solo first; a bench saved with the scene doesn't come back (the Stuff tab gets a fresh one)
+  leaveSolo();
+  clearTables(next);
   exitDraw();
-  clearTimeout(thingSaveTimer);
   setCollection(stuff);
-  setSelectedPiece('');
-  $('#thing-saved').textContent = '';
-  deselectAttachment();
   stopPlacing();
   for (const c of creatures) c.dispose();
   creatures.length = 0;
@@ -207,6 +206,7 @@ export function replaceWorld(next: World, stuff: Thing[]) {
   // a new world starts with nothing picked: set before activate draws the handles
   setIdle(true);
   activate(world.active);
+  if (mode === 'stuff') enterBench();
 }
 
 /** A fresh scene with nothing in My stuff. `keepOld` = false: the open one was just deleted. */

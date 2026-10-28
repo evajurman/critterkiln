@@ -25,7 +25,7 @@ import { expandRig, type ExpandedBone, type ExpandedRig, type RigState, type V3 
 import type { PartAnim, StuffAnim } from './animate';
 import { MAX_LAYERS, applyMarkings, markingKey, markingsKey, painted, setPictures, shownMarkings, type Marking } from './markings';
 import { copyMove, scatterCopies, type ScatterBlocker, type ScatterCopy } from './scatter';
-import { buildThing, disposeThing, type Thing, type WrapSurface } from './stuff';
+import { curvedGeometry, wrappedGeometry, type CurveSpace, type Thing, type WrapSurface } from './stuff';
 import {
   type Bend,
   bendChild,
@@ -48,6 +48,8 @@ import { buildEye, varyEyeTexture } from './eyes';
 export interface PartShape {
   outline: Vec2[];
   side?: boolean;
+  /** cut-outs (erased inside it while drawing): flat and puffy parts */
+  holes?: Vec2[][];
 }
 
 export interface PartState {
@@ -55,6 +57,8 @@ export interface PartState {
   outline: Vec2[] | null;
   /** the first shape was drawn from the side */
   side?: boolean;
+  /** cut-outs in the first shape */
+  holes?: Vec2[][];
   /** any further shapes; together they make the one part */
   more?: PartShape[];
   thickness: number;
@@ -74,6 +78,46 @@ export interface PartState {
    * bone, like a part off a lathe (robot limbs, pillars, bottles)
    */
   kind?: PartKind;
+  /** turned: a hollow shell rather than solid (cups, hats, pots) */
+  hollow?: boolean;
+  /** turned + hollow: left open at the tip end */
+  open?: boolean;
+  /**
+   * Kept apart from the body: never blends into the parts it touches (a hat,
+   * glasses). A name instead of true: blends only with the parts kept apart
+   * under the same name (the pieces of one thing).
+   */
+  apart?: boolean | string;
+  /** flat: how rounded its edges are, 0..1 (unset: 0.7) */
+  round?: number;
+  /** not shown, and not there to click or measure (the Stuff tab's bench stands its thing on one) */
+  hidden?: boolean;
+  /** turned + hollow: wall thickness (unset: a share of its widest radius) */
+  wall?: number;
+  /**
+   * the top part of a thing: where the thing sits on the body, in this part's
+   * own frame (a 4x4: origin where it touches, Z out of the surface, Y up).
+   * Unset: it stands straight out along its bone.
+   */
+  sits?: number[];
+  /** the top part of a thing from My stuff: which one (Update everywhere puts a change on every copy) */
+  link?: string;
+  /** curved: -1..1 (0 = flat as drawn); positive curves the edges back */
+  curve?: number;
+  /** along its centre line (a shield, a wing) or round its middle (a dome) */
+  curveMode?: 'axis' | 'radial';
+  /** kept apart: pressed onto the body like a decal, 0..1 (0 / unset = not) */
+  wrap?: number;
+  /** wrapped: how widely the body's surface is evened out first, 0..1 */
+  wrapSmooth?: number;
+  /**
+   * Stuff made before it was parts: the space of the thing it was a piece of,
+   * as this part's frame sees it (a 4x4, column-major), and how far that thing
+   * reached, so it curves and wraps as the whole thing did.
+   */
+  thingSpace?: { m: number[]; reach: number; wrapReach: number };
+  /** its own material settings, instead of the creature's for that material */
+  materialSettings?: Partial<Record<StyleId, StyleSettings>>;
 }
 
 export type PartKind = 'puffy' | 'flat' | 'turned';
@@ -99,10 +143,47 @@ export function scattersOf(s: CreatureState, id: string): Marking[] {
  * different markings stay apart.
  */
 function blendKeys(s: CreatureState, blendColors: boolean): Map<string, string> {
-  const base = (p: PartState) => (p.style ?? s.style) + (blendColors ? '' : p.color.toLowerCase());
+  // (a part with its own material settings only blends with parts with the same ones)
+  const base = (p: PartState) => (p.style ?? s.style) + (blendColors ? '' : p.color.toLowerCase()) + (p.materialSettings?.[p.style ?? s.style] ? JSON.stringify(p.materialSettings[p.style ?? s.style]) : '');
   const marks = new Map<string, Set<string>>();
   for (const [id, p] of Object.entries(s.parts)) for (const m of markingsOf(s, id)) (marks.get(base(p)) ?? marks.set(base(p), new Set()).get(base(p))!).add(markingKey(m));
-  return new Map(Object.entries(s.parts).map(([id, p]) => [id, base(p) + ((marks.get(base(p))?.size ?? 0) > MAX_LAYERS ? markingsKey(markingsOf(s, id)) : '')]));
+  // a part kept apart is a group of its own
+  return new Map(Object.entries(s.parts).map(([id, p]) => [id, base(p) + ((marks.get(base(p))?.size ?? 0) > MAX_LAYERS ? markingsKey(markingsOf(s, id)) : '') + (p.apart === true ? `|apart:${id}` : p.apart ? `|apart=${p.apart}` : '')]));
+}
+
+/** Whether a part is pressed onto the body (only a part kept apart from it can be). */
+function wraps(p: PartState | undefined): boolean {
+  return !!p?.apart && !!p.wrap && p.wrap > 0.005;
+}
+
+/**
+ * Where a part curves and wraps from: the old thing's space for stuff that
+ * became parts, otherwise its own drawing, from the middle of what's drawn
+ * (the centre line is the bone's).
+ */
+function curveSpaceOf(p: PartState, shapes: PartShape[], rightTwin: boolean): CurveSpace {
+  const space = curveSpaceAsDrawn(p, shapes);
+  // a right twin's frame is its left twin's mirror image with Z flipped: flipped back, it curves (and wraps) the mirror image's way
+  if (rightTwin) space.m.multiply(new THREE.Matrix4().makeScale(1, 1, -1));
+  return space;
+}
+export function curveSpaceAsDrawn(p: PartState, shapes: PartShape[]): CurveSpace {
+  if (p.thingSpace) return { m: new THREE.Matrix4().fromArray(p.thingSpace.m), reach: p.thingSpace.reach, wrapReach: p.thingSpace.wrapReach };
+  const pts = shapes.flatMap((sh) => sh.outline);
+  const ys = pts.map((q) => q[1]);
+  const cy = pts.length ? (Math.min(...ys) + Math.max(...ys)) / 2 : 0;
+  let axis = 0, round = 0;
+  for (const [x, y] of pts) {
+    axis = Math.max(axis, Math.abs(x));
+    round = Math.max(round, Math.hypot(x, y - cy));
+  }
+  return { m: new THREE.Matrix4().makeTranslation(0, -cy, 0), reach: (p.curveMode ?? 'axis') === 'axis' ? axis : round, wrapReach: round };
+}
+
+/** A reshaped copy keeps the original's merge data (how thick the part is, for joins). */
+function withSolid(g: THREE.BufferGeometry, from: THREE.BufferGeometry): THREE.BufferGeometry {
+  if (from.userData.solid && !g.userData.solid) g.userData = { ...g.userData, solid: from.userData.solid };
+  return g;
 }
 
 /** The markings one surface over these parts draws (each once, in order), and how much of each a part has (1 or 0: see paintMarks). */
@@ -116,7 +197,7 @@ function surfaceMarkings(s: CreatureState, bones: BoneRT[]): { layers: Marking[]
 /** Every shape a part was drawn as (none if it hasn't been drawn). */
 export function partShapes(p: PartState): PartShape[] {
   if (!p.outline) return [];
-  return [{ outline: p.outline, ...(p.side ? { side: true } : {}) }, ...(p.more ?? [])];
+  return [{ outline: p.outline, ...(p.side ? { side: true } : {}), ...(p.holes?.length ? { holes: p.holes } : {}) }, ...(p.more ?? [])];
 }
 
 /** Store a part's shapes (the first in `outline`, the rest in `more`). */
@@ -124,7 +205,9 @@ export function setPartShapes(p: PartState, shapes: PartShape[]) {
   p.outline = shapes[0]?.outline ?? null;
   if (shapes[0]?.side) p.side = true;
   else delete p.side;
-  if (shapes.length > 1) p.more = shapes.slice(1).map((s) => ({ outline: s.outline, ...(s.side ? { side: true } : {}) }));
+  if (shapes[0]?.holes?.length) p.holes = shapes[0].holes;
+  else delete p.holes;
+  if (shapes.length > 1) p.more = shapes.slice(1).map((s) => ({ outline: s.outline, ...(s.side ? { side: true } : {}), ...(s.holes?.length ? { holes: s.holes } : {}) }));
   else delete p.more;
 }
 
@@ -244,6 +327,8 @@ export interface CreatureState {
   rides?: Ride;
   /** kept off the stage: only seen scattered over others (and while it's the one being edited) */
   offstage?: boolean;
+  /** the table things are made on (see src/editor/focus.ts): there only while it's out */
+  table?: boolean;
   /** the creature's own (editable) skeleton */
   rig: RigState;
   style: StyleId;
@@ -277,12 +362,19 @@ export interface CreatureState {
   keepFloor?: boolean;
   /** looping motions, per part (scene id): see src/animate.ts */
   anims?: Record<string, PartAnim>;
+  /**
+   * looping moves of a whole part on the part it hangs off (scene id): orbit,
+   * spin, bob, swing, pulse, in that part's frame (what worn stuff used to do)
+   */
+  moves?: Record<string, StuffAnim>;
   /** markings on the whole creature (each can be turned off on some parts), under the parts' own */
   markings?: Marking[];
   /** pictures its markings show, by id (each kept once, however many parts show it) */
   pictures?: Record<string, string>;
   /** 1 once patterns that used to be material settings (stone cracks, metal patina...) are parts' markings (see migrateMarkings) */
   markingsV?: number;
+  /** 2 once things' markings are laid out where the things are (see repairThingMarkings) */
+  stuffV?: number;
 }
 
 /** Where a creature rides on another: the other's id, the part, and its place in that part's frame (its floor point there). */
@@ -520,15 +612,8 @@ export class Creature {
     this.dragUnfused = on && unfused;
     if (!on) this.mergeDirty = true;
   }
-  private attached = new Map<string, { key: string; main: THREE.Group; twin: THREE.Group | null; bone: BoneRT; twinBone: BoneRT | null }>();
   /** scattered copies, per part and scatter (bone id | marking id) */
   private scattered = new Map<string, ScatterRec>();
-  /**
-   * Stuff being edited where it is (see the workbench): a worn thing (its
-   * attachment id) or a scatter's first copy (its marking id). Hidden while the
-   * editor shows its own.
-   */
-  editingStuff: string | null = null;
   /** the scatters' motion clock: seconds, and how long one loop is */
   private scatterClock = { t: 0, loop: 1.5 };
 
@@ -721,6 +806,43 @@ export class Creature {
     this.updateRollRing();
   }
 
+  /** Solo: the only parts shown, and the only ones that can be clicked (null: all of them). */
+  solo: Set<string> | null = null;
+
+  /** The parts a click can land on (in Solo, just those shown). */
+  pickable(): THREE.Object3D[] {
+    const only = this.solo;
+    return only ? this.list.flatMap((b) => (b.mesh && only.has(b.def.id) ? [b.mesh] : [])) : this.meshes();
+  }
+
+  /** Show just these parts (no blended skin, no eyes, no other part's handles or scattered copies) while `fn` runs. */
+  withOnly<T>(ids: Set<string>, fn: () => T): T {
+    const hidden: THREE.Object3D[] = [];
+    const hide = (o: THREE.Object3D) => {
+      if (!o.visible) return;
+      o.visible = false;
+      hidden.push(o);
+    };
+    for (const b of this.list) {
+      if (ids.has(b.def.id)) continue;
+      for (const o of [b.mesh, b.tip, b.line, b.startHandle]) if (o) hide(o);
+    }
+    for (const sk of this.skins) hide(sk.mesh);
+    for (const e of this.eyes) hide(e);
+    for (const rec of this.scattered.values()) hide(rec.group);
+    try {
+      return fn();
+    } finally {
+      for (const o of hidden) o.visible = true;
+    }
+  }
+
+  /** A part's settings for a material: its own if it has them, otherwise the creature's. */
+  settingsOf(p: PartState | undefined, style: StyleId): StyleSettings {
+    const own = p?.materialSettings?.[style];
+    return own ? styleSettings(style, { ...this.state.materialSettings?.[style], ...own }) : this.settingsFor(style);
+  }
+
   settingsFor(style: StyleId): StyleSettings {
     return styleSettings(style, this.state.materialSettings?.[style]);
   }
@@ -792,14 +914,19 @@ export class Creature {
       this.glowKey = glowKey;
       this.mergeDirty = true;
     }
-    for (const b of this.list) {
+    const buildPart = (b: BoneRT) => {
       const p = s.parts[b.src];
       const style = p.style ?? s.style;
       const shapes = this.shapesFor(b);
-      const k = this.settingsFor(style);
+      const k = this.settingsOf(p, style);
       const kind = p.kind ?? 'puffy';
+      const curve = p.curve && Math.abs(p.curve) >= 0.005 ? p.curve : 0;
+      const wrap = wraps(p) ? p.wrap! : 0;
       const geoOpts = {
         kind,
+        ...(kind === 'turned' && p.hollow ? { hollow: true, open: !!p.open, ...(p.wall ? { wall: p.wall } : {}) } : {}),
+        ...(kind === 'flat' && p.round !== undefined ? { round: p.round } : {}),
+        ...(curve ? { curve, curveMode: p.curveMode ?? 'axis', thingSpace: p.thingSpace } : {}),
         thickness: p.thickness,
         lowPoly: style === 'lowpoly',
         facetScale: style === 'lowpoly' ? k.facets : undefined,
@@ -808,10 +935,12 @@ export class Creature {
       };
       const geoKey = JSON.stringify([shapes, geoOpts, getMeshDetail()]);
       const marks = markingsOf(s, b.src);
-      const key = geoKey + style + p.color + JSON.stringify(k) + markingsKey(marks) + (p.opacity ?? 1) + bendKey(bendOf(b.def, b.length));
+      // a wrapped part follows the body as it's shaped and posed
+      const wrapKey = wrap ? JSON.stringify([wrap, p.wrapSmooth, s.pose, b.pivot.matrixWorld.elements.map((v) => Math.round(v * 1e4)), this.list.filter((o) => !s.parts[o.src].apart).map((o) => o.meshKey)]) : '';
+      const key = geoKey + style + p.color + JSON.stringify(k) + markingsKey(marks) + (p.opacity ?? 1) + bendKey(bendOf(b.def, b.length)) + wrapKey;
       if (key === b.meshKey) {
         this.glowPart(b);
-        continue;
+        return;
       }
       b.meshKey = key;
       this.mergeDirty = true;
@@ -822,26 +951,47 @@ export class Creature {
           if (o instanceof THREE.LineSegments) o.geometry.dispose();
         });
         (b.mesh.userData.mergeGeo as THREE.BufferGeometry | undefined)?.dispose();
+        (b.mesh.userData.wrappedGeo as THREE.BufferGeometry | undefined)?.dispose();
       }
       const bd = bendOf(b.def, b.length);
+      const space = curve || wrap ? curveSpaceOf(p, shapes, b.def.sideSign === -1) : null;
       const seed = hashString(b.src);
       // each shape puffed up on its own (turned a quarter round if drawn from the side), then bent with the bone
       const straightGeo = (sh: PartShape, i: number, opts: typeof geoOpts) => {
-        const sk = JSON.stringify([sh.outline, opts, getMeshDetail(), i]) + (sh.side ? 'side' : '');
-        const flat = cachedGeometry(sk, () =>
-          opts.kind === 'puffy' ? buildInflatedGeometry(sh.outline, { ...opts, seed: seed + i }) : pieceKindGeometry(opts.kind, sh.outline, opts.thickness, opts.lowPoly),
-        );
+        const sk = JSON.stringify([sh.outline, sh.holes, opts, getMeshDetail(), i]) + (sh.side ? 'side' : '');
+        const flat = cachedGeometry(sk, () => {
+          const g =
+            opts.kind === 'puffy'
+              ? buildInflatedGeometry(sh.outline, { ...opts, seed: seed + i, holes: sh.holes })
+              : pieceKindGeometry(opts.kind, sh.outline, opts.thickness, opts.lowPoly, {
+                  holes: sh.holes,
+                  hollow: 'hollow' in opts && opts.hollow,
+                  open: 'open' in opts && opts.open,
+                  wall: 'wall' in opts ? opts.wall : undefined,
+                  round: 'round' in opts ? opts.round : undefined,
+                });
+          // curved in its own drawing's plane, before it's turned a quarter round or bent with the bone
+          if (!('curve' in opts) || !opts.curve || !space) return g;
+          const c = curvedGeometry(g, opts.curveMode ?? 'axis', opts.curve, space);
+          return c === g ? g : withSolid(c, g);
+        });
         return { sk, geo: sh.side ? cachedGeometry(sk + 'turned', () => turnSideways(flat)) : flat };
       };
       const shapeGeo = (sh: PartShape, i: number, opts: typeof geoOpts) => {
         const { sk, geo: turned } = straightGeo(sh, i, opts);
         return isBent(bd) ? cachedGeometry(sk + bendKey(bd), () => bendGeometry(turned, bd)) : turned;
       };
-      const geo =
+      let geo =
         shapes.length === 1
           ? shapeGeo(shapes[0], 0, geoOpts)
           : cachedGeometry(geoKey + bendKey(bd), () => joinShapes(shapes.map((sh, i) => shapeGeo(sh, i, geoOpts))));
+      let wrappedGeo: THREE.BufferGeometry | null = null;
+      if (wrap && space) {
+        const surface = this.surfaceUnder(b.pivot.matrixWorld.clone().multiply(space.m.clone().invert()), (o) => !!s.parts[o.src].apart);
+        if (surface) geo = wrappedGeo = withSolid(wrappedGeometry(geo, surface, p.wrapSmooth ?? 0.3, wrap, space), geo);
+      }
       const mesh = new THREE.Mesh(geo, makeMaterial(style, p.color, k));
+      if (wrappedGeo) mesh.userData.wrappedGeo = wrappedGeo;
       applyMarkings(mesh.material as THREE.Material, marks);
       mesh.userData.baseGeo = geo;
       // the roll ring is sized to the part as if it were straight (and stretching a tip re-bends it from straight)
@@ -889,22 +1039,31 @@ export class Creature {
         if (k.hairs > 0) mesh.add(makeStrayHairs(geo, p.color, hashString(b.def.id), k.hairs, false, 1, k.fuzz));
       }
       setOpacity(mesh, p.opacity ?? 1);
+      // (a hidden part keeps its place, unseen)
+      if (p.hidden) mesh.visible = false;
       // textures (and fuzz) are laid out in the rest pose and bend with the bones
       setTextureSpace(mesh, b.restGroup);
       b.pivot.add(mesh);
       b.mesh = mesh;
       this.glowPart(b);
+    };
+    // parts pressed onto the body go last, onto the rest as it's posed now
+    const wrapped = this.list.filter((b) => wraps(s.parts[b.src]));
+    for (const b of this.list) if (!wrapped.includes(b)) buildPart(b);
+    if (wrapped.length) {
+      this.applyPose();
+      this.group.updateMatrixWorld(true);
+      for (const b of wrapped) buildPart(b);
     }
     this.applyPose();
     this.syncEyes();
-    this.syncAttachments();
     this.syncScatter();
     this.refreshHighlight();
     this.updateRollRing();
   }
 
   // -------------------------------------------------------------------------
-  // attached stuff
+  // pairs, and the surface under a thing
 
   twinOf(b: BoneRT): BoneRT | null {
     if (b.def.sideSign === 0) return null;
@@ -916,79 +1075,15 @@ export class Creature {
     return b.def.sideSign === 0 ? b : this.twinOf(b);
   }
 
-  syncAttachments() {
-    const list = this.state.attachments ?? [];
-    const alive = new Set<string>();
-    for (const a of list) {
-      const bone = this.bones.get(a.bone);
-      if (!bone) continue;
-      alive.add(a.id);
-      const twinBone = a.mirror ? this.mirrorBoneOf(bone) : null;
-      // an item that inherits its material takes the material of the part it's on
-      const part = this.state.parts[bone.src];
-      const wearer = { style: part?.style ?? this.state.style, settingsFor: (st: StyleId) => this.settingsFor(st) };
-      const styles = a.thing.inherit ? [wearer.style] : a.thing.pieces.map((p) => p.style);
-      // felt fuzz and toon ink are sized for the attachment's scale, so a big
-      // rescale rebuilds them (unless the item opts out, and lets them scale along with it)
-      const sized = a.thing.scaleMaterial !== false && styles.some((s) => s === 'felt' || s === 'toon');
-      const unit = sized ? Math.round(Math.cbrt(Math.abs(a.scale[0] * a.scale[1] * a.scale[2])) * 20) / 20 || 1 : 1;
-      // a wrapped item follows the creature under it: moving, posing or reshaping either reshapes it
-      const wrapKey = a.wrap ? [a.thing.wrapSmooth, a.thing.wrapStrength, a.position, a.quaternion, a.scale, this.state.pose, this.list.map((b) => [b.meshKey, b.mesh?.scale.toArray()])] : 0;
-      const key = JSON.stringify([a.thing.pieces, a.thing.markings, a.thing.pictures, a.thing.ownMaterial, a.thing.inherit, a.thing.materialSettings, a.thing.bend, a.thing.bendMode, a.bone, twinBone?.def.id, this.state.materialSettings, wearer.style, unit, getMeshDetail(), wrapKey]);
-      let rec = this.attached.get(a.id);
-      if (!rec || rec.key !== key) {
-        const settings = wearer;
-        const wrap = wrapKey ? this.wrapSurface(a, bone) : undefined;
-        if (rec && rec.bone === bone && rec.twinBone === twinBone) {
-          // same place: swap the contents but keep the groups (the gizmo may hold one)
-          for (const g of [rec.main, rec.twin]) {
-            if (!g) continue;
-            for (const c of [...g.children]) {
-              c.removeFromParent();
-              disposeThing(c);
-            }
-            g.add(buildThing(a.thing, settings, unit, wrap));
-          }
-          rec.key = key;
-        } else {
-          if (rec) this.dropAttachment(rec);
-          const main = new THREE.Group();
-          main.add(buildThing(a.thing, settings, unit, wrap));
-          bone.pivot.add(main);
-          let twin: THREE.Group | null = null;
-          if (twinBone) {
-            twin = new THREE.Group();
-            twin.add(buildThing(a.thing, settings, unit, wrap));
-            twin.matrixAutoUpdate = false;
-            twinBone.pivot.add(twin);
-          }
-          rec = { key, main, twin, bone, twinBone };
-          this.attached.set(a.id, rec);
-        }
-        for (const g of [rec.main, rec.twin]) g?.traverse((o) => (o.userData.attachmentId = a.id));
-      }
-      this.placeStuff(a, rec.main);
-      rec.main.visible = this.editingStuff !== a.id;
-      this.updateTwin(a.id);
-    }
-    for (const [id, rec] of this.attached) {
-      if (alive.has(id)) continue;
-      this.dropAttachment(rec);
-      this.attached.delete(id);
-    }
-  }
-
   /**
-   * For a shrink-wrapped item: how far along its Z the creature's outer surface
-   * sits at each point of its drawing (in its own units), found by casting a
-   * ray from in front at every part, as posed now; the nearest hit wins, so an
-   * item on the body hugs whatever is in front of it there. Past the creature's
-   * edge, the nearest bit of surface. (The twin shows the same shape: the
-   * other side is this one mirrored.)
+   * The creature's outer surface seen from in front of a space (`thingToWorld`;
+   * its -Z points at the body): how far along its Z the surface sits under
+   * each point (x, y) of it, as posed now. Parts `skip` says to leave out don't count.
    */
-  private wrapSurface(a: Attachment, bone: BoneRT): WrapSurface | undefined {
+  surfaceUnder(thingToWorld: THREE.Matrix4, skip: (b: BoneRT) => boolean = () => false): WrapSurface | undefined {
     this.group.updateMatrixWorld(true);
     const parts = this.list.flatMap((b) => {
+      if (skip(b)) return [];
       const geo = b.mesh?.userData.baseGeo as THREE.BufferGeometry | undefined;
       if (!b.mesh || !geo) return [];
       if (!geo.boundingSphere) geo.computeBoundingSphere();
@@ -996,8 +1091,6 @@ export class Creature {
       return [{ bvh: bvhFor(geo), toWorld, toGeo: toWorld.clone().invert(), sphere: geo.boundingSphere!.clone().applyMatrix4(toWorld) }];
     });
     if (!parts.length) return undefined;
-    const place = new THREE.Matrix4().compose(new THREE.Vector3(...a.position), new THREE.Quaternion(...a.quaternion), new THREE.Vector3(...a.scale));
-    const thingToWorld = bone.pivot.matrixWorld.clone().multiply(place);
     const toThing = thingToWorld.clone().invert();
     const all = new THREE.Sphere();
     new THREE.Box3().setFromPoints(parts.flatMap((q) => [q.sphere.center.clone().addScalar(-q.sphere.radius), q.sphere.center.clone().addScalar(q.sphere.radius)])).getBoundingSphere(all);
@@ -1030,90 +1123,6 @@ export class Creature {
         }
       }
       return near === Infinity ? 0 : best.applyMatrix4(toThing).z;
-    };
-  }
-
-  private dropAttachment(rec: { main: THREE.Group; twin: THREE.Group | null }) {
-    for (const g of [rec.main, rec.twin]) {
-      if (!g) continue;
-      g.removeFromParent();
-      disposeThing(g);
-    }
-  }
-
-  /**
-   * The twin limb's frame is this one mirrored across its local Z, so the
-   * mirrored copy uses M * A with M = diag(1, 1, -1). On a middle part the
-   * copy rides the same part, mirrored across the creature's middle (x = 0 at
-   * rest): R^-1 * diag(-1, 1, 1) * R * A, with R the part's rest frame.
-   */
-  updateTwin(id: string) {
-    const rec = this.attached.get(id);
-    if (!rec?.twin) return;
-    rec.main.updateMatrix();
-    if (rec.twinBone === rec.bone) {
-      const r = rec.bone.restGroup;
-      rec.twin.matrix.copy(r).invert().multiply(new THREE.Matrix4().makeScale(-1, 1, 1)).multiply(r).multiply(rec.main.matrix);
-    } else rec.twin.matrix.makeScale(1, 1, -1).multiply(rec.main.matrix);
-    rec.twin.matrixWorldNeedsUpdate = true;
-  }
-
-  /**
-   * Looping stuff motions (Animate tab): per attachment, a move in its part's
-   * frame applied after its own placement. Never saved into the placement.
-   */
-  private stuffAnim: Map<string, THREE.Matrix4> | null = null;
-  setStuffAnim(m: Map<string, THREE.Matrix4> | null) {
-    if (!m && !this.stuffAnim) return;
-    this.stuffAnim = m;
-    for (const a of this.state.attachments ?? []) {
-      const rec = this.attached.get(a.id);
-      if (!rec) continue;
-      this.placeStuff(a, rec.main);
-      this.updateTwin(a.id);
-    }
-  }
-
-  /** Put an attachment where it's placed (plus its motion, if one's showing). */
-  private placeStuff(a: Attachment, g: THREE.Group) {
-    g.position.set(...a.position);
-    g.quaternion.set(...a.quaternion);
-    g.scale.set(...a.scale);
-    const m = this.stuffAnim?.get(a.id);
-    if (!m) return;
-    g.updateMatrix();
-    new THREE.Matrix4().multiplyMatrices(m, g.matrix).decompose(g.position, g.quaternion, g.scale);
-  }
-
-  /**
-   * An attachment's own frame, as placed (no motion), in its part's frame:
-   * the middle of what it's made of, which way its drawing faces (its Z, out
-   * of the board), its X, and how big it is across.
-   */
-  stuffFrame(id: string): { center: THREE.Vector3; normal: THREE.Vector3; side: THREE.Vector3; size: number; origin: THREE.Vector3 } | null {
-    const a = this.state.attachments?.find((x) => x.id === id);
-    const rec = this.attached.get(id);
-    if (!a || !rec) return null;
-    const place = new THREE.Matrix4().compose(new THREE.Vector3(...a.position), new THREE.Quaternion(...a.quaternion), new THREE.Vector3(...a.scale));
-    // its contents' box in its own (unplaced) frame
-    rec.main.updateMatrixWorld(true);
-    const toMain = rec.main.matrixWorld.clone().invert();
-    const box = new THREE.Box3();
-    rec.main.traverse((o) => {
-      const geo = (o as THREE.Mesh).geometry as THREE.BufferGeometry | undefined;
-      if (!(o instanceof THREE.Mesh) || !geo) return;
-      if (!geo.boundingBox) geo.computeBoundingBox();
-      box.union(geo.boundingBox!.clone().applyMatrix4(toMain.clone().multiply(o.matrixWorld)));
-    });
-    const c = box.isEmpty() ? new THREE.Vector3() : box.getCenter(new THREE.Vector3());
-    const size = box.isEmpty() ? 0.1 : box.getSize(new THREE.Vector3()).applyMatrix4(new THREE.Matrix4().makeScale(...a.scale)).length();
-    const q = new THREE.Quaternion(...a.quaternion);
-    return {
-      center: c.applyMatrix4(place),
-      normal: new THREE.Vector3(0, 0, 1).applyQuaternion(q),
-      side: new THREE.Vector3(1, 0, 0).applyQuaternion(q),
-      size: Math.abs(size),
-      origin: new THREE.Vector3(...a.position),
     };
   }
 
@@ -1165,10 +1174,8 @@ export class Creature {
   }
 
   private buildScatter(b: BoneRT, m: Marking, style: StyleId, blockers: ScatterBlocker[]): ScatterRec {
-    // a thing is built for these copies; a creature lends its own meshes, as they are
-    const built = m.thing ? buildThing(m.thing, { style, settingsFor: (st) => this.settingsFor(st) }) : null;
-    built?.updateMatrixWorld(true);
-    const looks = built ? meshesIn(built) : this.sourceMeshes(m);
+    // the scattered creature lends its own meshes, as they are
+    const looks = this.sourceMeshes(m);
     const box = new THREE.Box3();
     for (const l of looks) {
       if (!l.mesh.geometry.boundingBox) l.mesh.geometry.computeBoundingBox();
@@ -1180,7 +1187,7 @@ export class Creature {
     const copies = scatterCopies(m, { geo, toRest: b.restGroup, up: this.upIn(b.def.id) }, blockers, extent, b.src);
     const group = new THREE.Group();
     b.pivot.add(group);
-    const rec: ScatterRec = { key: '', m, bone: b, group, built, copies, parts: [], look: m.source ? this.sourceLook(m.source) : '' };
+    const rec: ScatterRec = { key: '', m, bone: b, group, copies, parts: [], look: m.source ? this.sourceLook(m.source) : '' };
     this.dressCopies(rec, looks);
     return rec;
   }
@@ -1260,7 +1267,6 @@ export class Creature {
   private dropScatter(rec: ScatterRec) {
     rec.group.removeFromParent();
     for (const p of rec.parts) p.mesh.dispose();
-    if (rec.built) disposeThing(rec.built);
   }
 
   /** The scatter's first copy (the one hidden while it's edited): on the first part with any, in order. */
@@ -1275,13 +1281,10 @@ export class Creature {
   /** Put each copy where it goes, moved (by the clock) if the scatter moves. */
   private placeCopies(rec: ScatterRec) {
     const move = new THREE.Matrix4(), out = new THREE.Matrix4();
-    const hide = this.editingStuff === rec.m.id && this.firstCopies(rec.m.id) === rec;
     rec.copies.forEach((c, i) => {
-      const gone = hide && i === 0;
-      if (gone) out.makeScale(0, 0, 0);
-      else copyMove(rec.m, c.phase, this.scatterClock.t, this.scatterClock.loop, move);
+      copyMove(rec.m, c.phase, this.scatterClock.t, this.scatterClock.loop, move);
       for (const p of rec.parts) {
-        if (!gone) out.multiplyMatrices(c.matrix, move).multiply(p.rel);
+        out.multiplyMatrices(c.matrix, move).multiply(p.rel);
         p.mesh.setMatrixAt(i, out);
       }
     });
@@ -1305,49 +1308,11 @@ export class Creature {
     for (const rec of this.scattered.values()) rec.group.visible = on;
   }
 
-  /** Where a scatter's first copy is (not moving): the part it's on, and its place in that part's frame. */
-  scatterCopyFrame(id: string): { pivot: THREE.Object3D; matrix: THREE.Matrix4 } | null {
-    const rec = this.firstCopies(id);
-    return rec ? { pivot: rec.bone.pivot, matrix: rec.copies[0].matrix.clone() } : null;
-  }
-
-  /** Something's being edited where it is (or nothing now): hide it, and show what was hidden before. */
-  setEditingStuff(id: string | null) {
-    if (id === this.editingStuff) return;
-    this.editingStuff = id;
-    for (const a of this.state.attachments ?? []) {
-      const rec = this.attached.get(a.id);
-      if (rec) rec.main.visible = a.id !== id;
-    }
-    for (const rec of this.scattered.values()) this.placeCopies(rec);
-  }
-
   /** Which way is up (the creature's +Y, at rest) in a part's frame. */
   upIn(boneId: string): THREE.Vector3 {
     const b = this.bones.get(boneId);
     if (!b) return new THREE.Vector3(0, 1, 0);
     return new THREE.Vector3(0, 1, 0).transformDirection(b.restGroup.clone().invert());
-  }
-
-  attachmentObject(id: string): THREE.Group | null {
-    return this.attached.get(id)?.main ?? null;
-  }
-
-  attachmentMeshes(): THREE.Object3D[] {
-    const out: THREE.Object3D[] = [];
-    for (const rec of this.attached.values()) {
-      for (const g of [rec.main, rec.twin]) g?.traverse((o) => o instanceof THREE.Mesh && out.push(o));
-    }
-    return out;
-  }
-
-  /** A reasonable first placement: centred on the part, on its front surface. */
-  attachPoint(boneId: string): V3 {
-    const b = this.bones.get(boneId);
-    const geo = b?.mesh?.userData.baseGeo as THREE.BufferGeometry | undefined;
-    if (!b || !geo?.boundingBox) return [0, 0, 0];
-    const bb = geo.boundingBox;
-    return [(bb.min.x + bb.max.x) / 2, (bb.min.y + bb.max.y) / 2, bb.max.z * 0.9];
   }
 
   /**
@@ -1363,6 +1328,47 @@ export class Creature {
     this.applyPose();
   }
 
+  /** Parts' moves on the parts they hang off, shown on top of the pose (see CreatureState.moves): per bone, in its parent's frame. */
+  private moving: Map<string, THREE.Matrix4> | null = null;
+  /** where each moved part's base was before its move, and where the move put it */
+  private movedFrom = new Map<BoneRT, { base: THREE.Vector3; at: THREE.Vector3 }>();
+  setMoves(m: Map<string, THREE.Matrix4> | null) {
+    if (!m && !this.moving) return;
+    this.moving = m;
+    this.applyPose();
+  }
+
+  /** A part's base, as placed (without a move showing on it). */
+  private basePosition(b: BoneRT): THREE.Vector3 {
+    const was = this.movedFrom.get(b);
+    return was && b.pivot.position.equals(was.at) ? was.base.clone() : b.pivot.position.clone();
+  }
+
+  /**
+   * A part, in the frame of the part it hangs off, as posed but not moving:
+   * its middle, which way it stands out (along its bone) and across (its
+   * side), its size, and its base. What a move goes round, rocks from or grows from.
+   */
+  moveFrame(id: string): { center: THREE.Vector3; normal: THREE.Vector3; side: THREE.Vector3; size: number; origin: THREE.Vector3 } | null {
+    const b = this.bones.get(id);
+    if (!b?.parent || !b.mesh) return null;
+    const q = b.restQuat.clone();
+    const pose = this.state.pose[b.def.id];
+    if (pose) q.multiply(new THREE.Quaternion(...pose));
+    const origin = this.basePosition(b);
+    const local = new THREE.Matrix4().compose(origin, q, new THREE.Vector3(1, 1, 1));
+    const geo = b.mesh.geometry;
+    if (!geo.boundingBox) geo.computeBoundingBox();
+    const box = geo.boundingBox!.clone().applyMatrix4(local);
+    return {
+      center: box.getCenter(new THREE.Vector3()),
+      normal: new THREE.Vector3(0, 1, 0).applyQuaternion(q),
+      side: new THREE.Vector3(1, 0, 0).applyQuaternion(q),
+      size: box.getSize(new THREE.Vector3()).length(),
+      origin,
+    };
+  }
+
   applyPose() {
     this.version++;
     this.baseTouch.clear();
@@ -1372,6 +1378,12 @@ export class Creature {
     const pos = this.group.position.clone();
     for (const m of this.puffed) m.scale.x = m.scale.z = 1;
     this.puffed.clear();
+    // moved parts back where they're placed (unless they've been placed again since)
+    for (const [b, was] of this.movedFrom) {
+      if (b.pivot.position.equals(was.at)) b.pivot.position.copy(was.base);
+      b.pivot.scale.setScalar(1);
+    }
+    this.movedFrom.clear();
     for (const b of this.list) {
       const q = this.state.pose[b.def.id];
       b.pivot.quaternion.copy(b.restQuat);
@@ -1386,6 +1398,16 @@ export class Creature {
         }
       }
     }
+    if (this.moving) {
+      for (const b of this.list) {
+        const m = this.moving.get(b.def.id);
+        if (!m || !b.parent) continue;
+        const base = b.pivot.position.clone();
+        const local = m.clone().multiply(new THREE.Matrix4().compose(base, b.pivot.quaternion, new THREE.Vector3(1, 1, 1)));
+        local.decompose(b.pivot.position, b.pivot.quaternion, b.pivot.scale);
+        this.movedFrom.set(b, { base, at: b.pivot.position.clone() });
+      }
+    }
     if ([...this.puffed].map((m) => m.scale.x).join() !== puffBefore) this.mergeDirty = true;
     this.group.position.set(...this.state.rootOffset);
     if (!this.group.position.equals(pos) || this.list.some((b, i) => !b.pivot.quaternion.equals(before[i]))) this.mergeDirty = true;
@@ -1393,6 +1415,8 @@ export class Creature {
 
   capturePose() {
     const pose: CreatureState['pose'] = {};
+    // (moves on top are left out too)
+    if (this.moving) this.setMoves(null);
     for (const b of this.list) {
       // the looping motion on top is left out
       const a = this.anim?.get(b.def.id);
@@ -1710,7 +1734,7 @@ export class Creature {
       if (joined.length < 2) continue;
       const part = s.parts[joined[0].src];
       const style = part.style ?? s.style;
-      const k = this.settingsFor(style);
+      const k = this.settingsOf(part, style);
       const minR = Math.min(...joined.map(radius));
       const lowPoly = style === 'lowpoly';
       // low-poly keeps its own parts (and fast joins) unless the setting says otherwise
@@ -1856,9 +1880,9 @@ export class Creature {
       [...this.puffed].map((m) => r4(m.scale.x)),
       Object.entries(s.parts).map(([id, p]) => {
         const style = p.style ?? s.style;
-        const k = this.settingsFor(style);
+        const k = this.settingsOf(p, style);
         // clay lumps and low-poly facet size change the shape; with blending off, color changes the groups
-        return [id, partShapes(p), p.thickness, p.kind, style, style === 'clay' ? k.lumps : style === 'stone' ? k.rugged : 0, style === 'lowpoly' ? k.facets : 0, blend ? '' : p.color.toLowerCase()];
+        return [id, partShapes(p), p.thickness, p.kind, p.hollow, p.open, p.round, p.wall, p.curve, p.curveMode, p.thingSpace, style, style === 'clay' ? k.lumps : style === 'stone' ? k.rugged : 0, style === 'lowpoly' ? k.facets : 0, blend ? '' : p.color.toLowerCase()];
       }),
       // which parts blend together (markings split them up): changing a marking they all share only re-dresses the skin
       ((keys) => [...keys.values()].map((k) => [...keys.values()].indexOf(k)))(blendKeys(s, blend)),
@@ -1870,7 +1894,7 @@ export class Creature {
     const s = this.state;
     const part = s.parts[sk.members[0].src];
     const style = part.style ?? s.style;
-    const k = this.settingsFor(style);
+    const k = this.settingsOf(part, style);
     const kc = s.mergeColors ? (s.colorBlend ?? 0.12) : 0;
     // every marking its parts have, each fading out over the parts without it (see paintMarks)
     const marked = surfaceMarkings(s, sk.owners);
@@ -1969,7 +1993,7 @@ export class Creature {
   private shownColor(b: BoneRT): THREE.Color {
     const p = this.state.parts[b.src];
     const style = p.style ?? this.state.style;
-    return surfaceColor(style, p.color, this.settingsFor(style));
+    return surfaceColor(style, p.color, this.settingsOf(p, style));
   }
 
   /**
@@ -2701,10 +2725,6 @@ export class Creature {
     }
     this.updateRollRing();
     for (const g of this.eyes) g.visible = !id;
-    for (const rec of this.attached.values()) {
-      rec.main.visible = !id;
-      if (rec.twin) rec.twin.visible = !id;
-    }
     this.refreshHighlight();
   }
 
@@ -2717,7 +2737,8 @@ export class Creature {
     const sel = this.selected ? this.bones.get(this.selected) : null;
     const only = Creature.handleScope === 'part' && sel ? new Set(this.linked(sel.def.id)) : null;
     for (const b of this.list) {
-      const show = v && (!only || only.has(b));
+      // (a hidden part has no handles either)
+      const show = v && (!only || only.has(b)) && !this.state.parts[b.src]?.hidden;
       b.tip.visible = show;
       b.line.visible = show;
       // the slide and bend grips only on the selected bone (the twin follows by symmetry)
@@ -2830,7 +2851,7 @@ export class Creature {
   }
 
   meshes(): THREE.Object3D[] {
-    return this.list.flatMap((b) => (b.mesh ? [b.mesh] : []));
+    return this.list.flatMap((b) => (b.mesh && !this.state.parts[b.src]?.hidden ? [b.mesh] : []));
   }
 
   /**
@@ -2838,8 +2859,8 @@ export class Creature {
    * surface faces there, in the scene and in the part's own frame. `local` is
    * as the part's definition sees it: on a right twin, mirrored back across Z.
    */
-  surfaceAt(ray: THREE.Raycaster): { bone: BoneRT; point: THREE.Vector3; normal: THREE.Vector3; local: THREE.Vector3; localNormal: THREE.Vector3 } | null {
-    const hit = ray.intersectObjects(this.meshes(), false)[0];
+  surfaceAt(ray: THREE.Raycaster, only?: BoneRT): { bone: BoneRT; point: THREE.Vector3; normal: THREE.Vector3; local: THREE.Vector3; localNormal: THREE.Vector3 } | null {
+    const hit = ray.intersectObjects(only ? (only.mesh ? [only.mesh] : []) : this.pickable(), false)[0];
     const bone = hit?.face && this.bones.get(hit.object.userData.boneId as string);
     if (!hit?.face || !bone) return null;
     const normal = hit.face.normal.clone().applyMatrix3(new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld)).normalize();
@@ -2852,6 +2873,24 @@ export class Creature {
       localNormal.z = -localNormal.z;
     }
     return { bone, point: hit.point.clone(), normal, local, localNormal };
+  }
+
+  /**
+   * The spot on a part that faces `eye` (a ray at its middle, through whatever's
+   * in front of it), or failing that its side facing away from the creature's middle.
+   */
+  surfaceFacing(b: BoneRT, eye: THREE.Vector3): ReturnType<Creature['surfaceAt']> {
+    b.pivot.updateMatrixWorld(true);
+    const mid = b.pivot.localToWorld(new THREE.Vector3(0, b.length / 2, 0));
+    const ray = new THREE.Raycaster(eye.clone(), mid.clone().sub(eye).normalize());
+    const seen = this.surfaceAt(ray, b);
+    if (seen) return seen;
+    const middle = new THREE.Box3().setFromObject(this.group).getCenter(new THREE.Vector3());
+    const out = mid.clone().sub(middle);
+    if (out.lengthSq() < 1e-6) out.copy(eye).sub(mid);
+    out.normalize();
+    ray.set(mid.clone().addScaledVector(out, 10), out.clone().negate());
+    return this.surfaceAt(ray, b);
   }
 
   /**
@@ -3120,8 +3159,6 @@ interface ScatterRec {
   m: Marking;
   bone: BoneRT;
   group: THREE.Group;
-  /** the thing, built once (its meshes' geometry and materials are what the copies draw); none for a creature, whose own meshes are drawn */
-  built: THREE.Group | null;
   /** a scattered creature's look when the copies were dressed (see sourceLook) */
   look: string;
   copies: ScatterCopy[];
@@ -3129,14 +3166,6 @@ interface ScatterRec {
   parts: { mesh: THREE.InstancedMesh; rel: THREE.Matrix4 }[];
 }
 
-/** Every mesh in a group, and where it sits in it. */
-function meshesIn(g: THREE.Object3D): { mesh: THREE.Mesh; rel: THREE.Matrix4 }[] {
-  const out: { mesh: THREE.Mesh; rel: THREE.Matrix4 }[] = [];
-  g.traverse((o) => {
-    if (o instanceof THREE.Mesh) out.push({ mesh: o, rel: o.matrixWorld.clone() });
-  });
-  return out;
-}
 
 function hashString(s: string): number {
   let h = 2166136261;

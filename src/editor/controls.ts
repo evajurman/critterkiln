@@ -34,10 +34,10 @@ import {
 } from './state';
 import { creatureBox } from './framing';
 import { drawState, enterDraw, spacePan } from './drawing';
-import { choosePiece, editStuff, pickPiece, renderStuffPanel, selectedPiece, setSelectedPiece } from './workbench';
-import { deselectAttachment, gizmo, selectedAttachment } from './attach';
+import { gizmo } from './gizmo';
+import { scaleThing, thingTop } from './kits';
+import { applyGizmo, poseGizmos } from './gizmoMode';
 import { placing, stopPlacing } from './arrange';
-import { pickAttachment, pickStuff } from './carry';
 import { queueCreationSave } from './creations';
 import { flashPart, selectPart } from './partPanel';
 import { setEyesFolded } from './eyesPanel';
@@ -46,7 +46,7 @@ import { applyPartCopies, commitBoneEdit, parentAt, pickingParent, rigLocked } f
 import { hint, hintOnce } from './hints';
 import { focusAt, pickingFocus } from './dof';
 import { invalidate } from './loop';
-import { animOn, pickAnimStuff } from './animateTab';
+import { animOn } from './animateTab';
 import { pickingRide, rideClick } from './riders';
 
 export const raycaster = new THREE.Raycaster();
@@ -267,6 +267,9 @@ function widenJoint(id: string, at: 'start' | 'end', step: number) {
   const drawn = (x: { src: string }) => !!state.parts[x.src]?.outline;
   const k = step > 0 ? 1.08 : 1 / 1.08;
   const grow = (w: number) => Math.min(1.2, Math.max(0.02, Math.round(w * k * 1000) / 1000));
+  // a thing (kept apart from the body) grows or shrinks whole, everything on it too
+  const top = thingTop(creature, id);
+  if (top) return scaleThing(top, k);
   // a drawing sets its own widths: either end grows or shrinks the whole part instead, drawing, length and curve alike
   if (drawn(b)) return scaleDrawnPart(id, k);
   const ends: { def: BoneDef; end: 'base' | 'tip' }[] = [];
@@ -520,25 +523,10 @@ function onDoubleClick(x: number, y: number) {
     // a double-click on one just shouldn't start drawing the part underneath
     if (h) return;
   }
-  if (mode === 'stuff') {
-    const id = drawState ? null : pickPiece(x, y);
-    if (id) {
-      setSelectedPiece(id);
-      renderStuffPanel();
-      enterDraw({ kind: 'piece', redraw: id });
-    }
-    return;
-  }
   const other = pickOtherCreature(x, y);
   if (other) activate(other.index);
   // the first click already went to the eye settings
   else if (pickEye(x, y) !== null) return;
-  // worn stuff: change it right where it is
-  const att = other || animOn() ? null : pickAttachment(x, y);
-  if (att) {
-    editStuff({ kind: 'worn', id: att });
-    return;
-  }
   const id = pickPart(x, y);
   if (!id) return;
   selectPart(id);
@@ -552,7 +540,7 @@ export const FLOOR_TILT = Math.PI * 0.53;
 export let viewMoved = false;
 /** The view is kept with the open creation (see SceneLook): save it there once it's settled. */
 export function viewChanged() {
-  if (opened.keep && mode !== 'stuff') queueCreationSave();
+  if (opened.keep) queueCreationSave();
 }
 
 export function setRay(clientX: number, clientY: number) {
@@ -568,7 +556,7 @@ export function pickOtherCreature(x: number, y: number): { index: number; boneId
   if (creatures.length < 2) return null;
   setRay(x, y);
   // (not one off stage: it isn't there to click)
-  const targets = creatures.filter((c) => c.root.visible).flatMap((c) => [...c.meshes(), ...c.attachmentMeshes()]);
+  const targets = creatures.filter((c) => c.root.visible).flatMap((c) => c.meshes());
   const hit = raycaster.intersectObjects(targets, false)[0];
   if (!hit) return null;
   let o: THREE.Object3D | null = hit.object;
@@ -584,14 +572,14 @@ export function creatureLabel(i: number): string {
 
 export function pickPart(x: number, y: number): string | null {
   setRay(x, y);
-  const hit = raycaster.intersectObjects(creature.meshes(), false)[0];
+  const hit = raycaster.intersectObjects(creature.pickable(), false)[0];
   return hit ? (hit.object.userData.boneId as string) : null;
 }
 
 /** The eye under the pointer, if it's in front of every part there: its pair, and which of the two it is. */
 function pickEyeHit(x: number, y: number): { pair: number; sgn: number } | null {
   setRay(x, y);
-  const part = raycaster.intersectObjects(creature.meshes(), false)[0];
+  const part = raycaster.intersectObjects(creature.pickable(), false)[0];
   const eye = creature.pickEye(raycaster.ray);
   return eye && (!part || eye.distance <= part.distance) ? eye : null;
 }
@@ -659,7 +647,6 @@ export function moveEyesTo(index: number, sgn: number, x: number, y: number): bo
 
 /** Picks the part these eyes are on, with its eye settings open at this pair. */
 export function showEyes(pair: number) {
-  deselectAttachment();
   setEyePair(pair);
   setEyesFolded(false);
   const on = creature.eyeBones(state.eyes.pairs[pair])[0];
@@ -751,23 +738,22 @@ function pickHandle(x: number, y: number): THREE.Object3D | null {
 }
 
 export function handlesVisible() {
-  // Arrange has its own handles at the creature's feet, picked stuff its own arrows, and a marking being placed its own
-  return !idle && !drawState && !placing && !selectedAttachment && !markToolsOut() && mode !== 'stuff' && gizmos() !== 'none';
+  // the whole creature's arrows (see gizmoMode.ts), and a marking being placed, have their own
+  return !idle && !drawState && !placing && !markToolsOut() && poseGizmos() !== 'none';
 }
 
 /** Back to nothing picked: clicking empty space in Shape. */
 function deselectAll() {
   setIdle(true);
   stopPlacing();
-  deselectAttachment();
   creature.flash(null, 0);
   updateSkeletonVisibility();
   renderUI();
 }
 
-/** The sidebar's part editor and the on-screen Arrange/Mirror pills only make sense with something picked. */
+/** The sidebar's part editor and the on-screen pills only make sense with something picked. */
 export function syncIdle() {
-  $('.panel').classList.toggle('idle', idle && mode !== 'stuff');
+  $('.panel').classList.toggle('idle', idle);
   setLayoutIdle(idle);
   // the handles follow the same idle state, so they can't outlive the selection
   updateSkeletonVisibility();
@@ -775,10 +761,12 @@ export function syncIdle() {
 
 export function updateSkeletonVisibility() {
   // the tab's Gizmos: every part's handles, or just the picked part's
-  Creature.handleScope = gizmos() === 'part' ? 'part' : 'all';
+  Creature.handleScope = poseGizmos() === 'part' ? 'part' : 'all';
   creature.setSkeletonVisible(handlesVisible());
   // the key to the handles shows with them
   if (!handlesVisible()) $('#handle-tip').hidden = true;
+  // (and Move, Rotate or Scale's arrows go where the picking says)
+  applyGizmo();
 }
 
 export function initControls() {
@@ -789,7 +777,7 @@ export function initControls() {
     pointer.touch = e.pointerType !== 'mouse';
     pointer.held = false;
     clearTimeout(holdTimer);
-    if (pointer.touch && e.isPrimary && mode !== 'stuff' && !drawState && !idle) {
+    if (pointer.touch && e.isPrimary && !drawState && !idle) {
       const x = e.clientX;
       const y = e.clientY;
       holdTimer = window.setTimeout(() => {
@@ -806,7 +794,7 @@ export function initControls() {
     if (e.button !== 0 || pickingFocus || pickingParent || spacePan) return;
     // pressing on an eye: dragging slides the pair over the surface (a click still opens its settings)
     const onHandle = (handlesVisible() && pickHandle(e.clientX, e.clientY)) || gizmo.dragging || gizmo.axis !== null;
-    const eye = !onHandle && mode !== 'stuff' && !drawState && !idle ? pickEyeHit(e.clientX, e.clientY) : null;
+    const eye = !onHandle && !drawState && !idle ? pickEyeHit(e.clientX, e.clientY) : null;
     if (eye) {
       eyeDrag = { pair: eye.pair, sgn: eye.sgn };
       controls.enabled = false;
@@ -1084,16 +1072,6 @@ export function initControls() {
       parentAt(e.clientX, e.clientY);
       return;
     }
-    if (mode === 'stuff') {
-      const id = pickPiece(e.clientX, e.clientY);
-      if (id) {
-        // Ctrl: one more piece picked (or one less); Shift: every piece from the main pick to this one
-        choosePiece(id, pickHow(e));
-        flashPart();
-        renderStuffPanel();
-      }
-      return;
-    }
     // clicking a different creature makes it the one being edited
     const other = pickOtherCreature(e.clientX, e.clientY);
     if (other) {
@@ -1117,11 +1095,8 @@ export function initControls() {
       showEyes(eye);
       return;
     }
-    const att = pickAttachment(e.clientX, e.clientY);
-    if (att) return animOn() ? pickAnimStuff(att) : pickStuff(att);
     const id = pickPart(e.clientX, e.clientY);
     if (id) {
-      deselectAttachment();
       // Ctrl: one more part picked (or one less); Shift: every part in the Scene list from the main pick to this one
       selectPart(id, true, pickHow(e));
     } else if (gizmos() !== 'none' && !idle) deselectAll();

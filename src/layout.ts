@@ -18,7 +18,7 @@ import type { MenuItem } from './contextMenu';
 /** 'shape', 'look', or a made tab's id */
 export type Tab = string;
 /** what a tab started from: its defaults, for Reset */
-type Base = 'shape' | 'look' | 'animate';
+type Base = 'shape' | 'look' | 'animate' | 'stuff';
 interface TabDef {
   id: string;
   name: string;
@@ -50,10 +50,12 @@ const TOOLS: Record<string, ToolDef> = {
   blend: { name: 'Blend shape', icon: duo('sliders'), kind: 'wide' },
   opacity: { name: 'Opacity', icon: duo('sliders'), kind: 'wide' },
   seamless: { name: 'Seamless joins', icon: slab('wand-magic-sparkles'), kind: 'wide' },
-  worn: { name: 'Stuff on this creature', icon: slab('paperclip'), kind: 'wide' },
   name: { name: 'Part name', icon: duo('tag'), kind: 'wide' },
   draw: { name: 'Draw shape', icon: slab('pencil'), kind: 'wide' },
   thickness: { name: 'Thickness', icon: duo('sliders'), kind: 'wide' },
+  apart: { name: 'Keep apart', icon: duo('link-slash'), kind: 'wide' },
+  curve: { name: 'Curve', icon: duo('umbrella'), kind: 'wide' },
+  wrap: { name: 'Wrap onto the body', icon: duo('sliders'), kind: 'wide' },
   width0: { name: 'Base width', icon: duo('sliders'), kind: 'wide' },
   width1: { name: 'Tip width', icon: duo('sliders'), kind: 'wide' },
   'reset-shape': { name: 'Reset shape', icon: duo('rotate-left'), kind: 'button' },
@@ -75,11 +77,10 @@ const TOOLS: Record<string, ToolDef> = {
   'material-params': { name: 'Material settings', icon: duo('sliders'), kind: 'wide' },
   markings: { name: 'Markings', icon: slab('circle'), kind: 'wide' },
   'marking-params': { name: 'Marking settings', icon: duo('sliders'), kind: 'wide' },
-  arrange: { name: 'Arrange', icon: duo('arrows-up-down-left-right'), kind: 'pill' },
   pull: { name: 'Pull limbs', icon: duo('hand-back-fist'), kind: 'pill', gizmo: true },
   mirror: { name: 'Mirror', icon: slab('arrow-right-arrow-left'), kind: 'pill' },
   eyes: { name: 'Eyes', icon: slab('eye'), kind: 'own' },
-  attach: { name: 'Attach stuff', icon: slab('paperclip'), kind: 'pill' },
+  attach: { name: 'My stuff', icon: slab('paperclip'), kind: 'pill' },
   // the scene, not a part: out whether or not anything's picked
   'backdrop-color': { name: 'Backdrop color', icon: slab('image'), kind: 'wide', always: true },
   ground: { name: 'Floor (backdrop)', icon: slab('arrow-down-to-line'), kind: 'wide', always: true },
@@ -145,14 +146,14 @@ const pick = <T>(a: T[]) => a[Math.floor(Math.random() * a.length)];
 
 const SECTIONS: Omit<Sec, 'place'>[] = [
   { id: 'plan', name: 'Body plan', icon: 'hand', color: '#c98f5a', tools: ['plan'] },
-  { id: 'parts', name: 'Parts', icon: 'square', color: '#f07a32', tools: ['blend', 'seamless', 'worn'] },
-  { id: 'part', name: 'This part', icon: 'pencil', color: '#e5823a', tools: ['name', 'draw', 'thickness', 'width0', 'width1', 'reset-shape'] },
+  { id: 'parts', name: 'Parts', icon: 'square', color: '#f07a32', tools: ['blend', 'seamless'] },
+  { id: 'part', name: 'This part', icon: 'pencil', color: '#e5823a', tools: ['name', 'draw', 'thickness', 'curve', 'apart', 'wrap', 'width0', 'width1', 'reset-shape'] },
   { id: 'grow', name: 'Grow', icon: 'scissors', color: '#d0486a', tools: ['bone', 'extend', 'split', 'pattern', 'detach', 'parent'] },
   { id: 'pose', name: 'Pose', icon: 'face-smile', color: '#e9a51f', tools: ['stand', 'floor', 'keep-floor'] },
   { id: 'color', name: 'Color', icon: 'palette', color: '#a66ad6', tools: ['custom-color', 'swatches', 'scene-colors', 'glow', 'color-blend', 'opacity'] },
   { id: 'material', name: 'Material', icon: 'cloud', color: '#5fa0d8', tools: ['materials', 'material-params'] },
   { id: 'markings', name: 'Markings', icon: 'circle', color: '#d0486a', tools: ['markings', 'marking-params'] },
-  { id: 'quick', name: 'Arrange', icon: 'expand', color: '#3b82f6', tools: ['arrange', 'pull'] },
+  { id: 'quick', name: 'Pull limbs', icon: 'expand', color: '#3b82f6', tools: ['pull'] },
   { id: 'mirror', name: 'Mirror', icon: 'arrow-right-arrow-left', color: '#14a596', tools: ['mirror'] },
   { id: 'eyes', name: 'Eyes', icon: 'eye', color: '#5b6170', tools: ['eyes'] },
   { id: 'attach', name: 'Attach', icon: 'paperclip', color: '#8a8f99', tools: ['attach'] },
@@ -175,8 +176,13 @@ const DEFAULT_PLACES: Record<Base, Record<string, Place>> = {
     plan: 'hidden', parts: 'side', part: 'hidden', grow: 'hidden', pose: 'hidden', color: 'hidden', material: 'hidden', markings: 'hidden',
     quick: 'hidden', mirror: 'tl', eyes: 'hidden', attach: 'hidden', backdrop: 'tr', photo: 'tr', anim: 'side', loop: 'side',
   },
+  // the blueprint bench: one thing on its own, with the part tools and My stuff
+  stuff: {
+    plan: 'hidden', parts: 'hidden', part: 'side', grow: 'side', pose: 'hidden', color: 'side', material: 'side', markings: 'side',
+    quick: 'hidden', mirror: 'tl', eyes: 'hidden', attach: 'tl', backdrop: 'hidden', photo: 'hidden', anim: 'hidden', loop: 'hidden',
+  },
 };
-const DEFAULT_GIZMOS: Record<Base, Gizmos> = { shape: 'full', look: 'none', animate: 'none' };
+const DEFAULT_GIZMOS: Record<Base, Gizmos> = { shape: 'full', look: 'none', animate: 'none', stuff: 'full' };
 
 /**
  * Guided: the modes become steps, one after another down the rail, each a
@@ -197,7 +203,7 @@ interface StepDef {
   /** tools taken out of their own section into another one: tool -> section */
   move?: Record<string, string>;
   /** a button under the note that takes you somewhere (Dress up: to Stuff, to make something) */
-  action?: { label: string; to: Tab };
+  action?: { label: string };
 }
 export const STEPS: readonly StepDef[] = [
   { id: 'step-plan', name: 'Body plan', gizmos: 'none', side: ['plan'], note: 'Pick a starting skeleton. You can add, cut and redraw every part later.' },
@@ -205,12 +211,10 @@ export const STEPS: readonly StepDef[] = [
   { id: 'step-draw', name: 'Draw', gizmos: 'part', side: ['part'], corners: { mirror: 'tl' }, note: 'Pick a part, then Draw shape (or double-click the part) and draw its outline: it puffs up like a balloon.' },
   { id: 'step-face', name: 'Face', gizmos: 'none', side: ['eyes'], note: 'Add eyes: drag them onto the critter, then pick a style and a look.' },
   { id: 'step-color', name: 'Color', gizmos: 'none', side: ['color', 'material', 'markings'], note: 'Click a part (Ctrl-click adds one, Shift-click everything between, Ctrl+A all of them), then pick its colors, material and markings.', touchNote: 'Tap a part (hold one to add it, or use + in the parts list up top), then pick its colors, material and markings.' },
-  { id: 'step-dress', name: 'Dress up', gizmos: 'none', side: ['attach', 'markings'], move: { worn: 'attach' }, note: 'Pick a part, then Attach stuff to put something from My stuff on it, or draw something new right on it. To cover it in spikes, scales or flowers, add a Scatter marking.', action: { label: 'Draw new stuff ›', to: 'stuff' } },
+  { id: 'step-dress', name: 'Dress up', gizmos: 'part', side: ['part', 'color', 'attach', 'markings'], note: 'Pick a part, then Add a thing: a new part standing out of it, kept apart from the body. Draw it like any part (Turned for a hat or cup, Flat for glasses). Attach puts on something from My stuff; a Scatter marking covers a part in spikes, scales or flowers.', action: { label: 'Add a thing ›' } },
   { id: 'step-show', name: 'Show off', gizmos: 'none', side: ['backdrop', 'photo'], note: 'Set the scene, frame your critter and take a photo.' },
 ];
 const stepOf = (t: Tab | null) => STEPS.find((s) => s.id === t);
-/** In Guided, making stuff (the workbench, on the creature) is part of Dress up: it opens from there and goes back there */
-export const STUFF_STEP = 'step-dress';
 export const isStep = (t: Tab | null) => !!stepOf(t);
 
 function stepLayout(st: StepDef): Layout {
@@ -231,9 +235,9 @@ const PLACE_NAMES: [Place, string][] = [
   ['side', 'Sidebar'], ['tl', 'Top left'], ['tr', 'Top right'], ['bl', 'Bottom left'], ['br', 'Bottom right'], ['hidden', 'Hidden'],
 ];
 const made = (t: Tab) => tabs.find((o) => o.id === t);
-const BASES: readonly Base[] = ['shape', 'look', 'animate'];
+const BASES: readonly Base[] = ['shape', 'look', 'animate', 'stuff'];
 const isBase = (t: unknown): t is Base => BASES.includes(t as Base);
-const tabName = (t: Tab) => (t === 'shape' ? 'Shape' : t === 'look' ? 'Look' : t === 'animate' ? 'Animate' : (made(t)?.name ?? stepOf(t)?.name ?? 'Tab'));
+const tabName = (t: Tab) => (t === 'shape' ? 'Shape' : t === 'look' ? 'Look' : t === 'animate' ? 'Animate' : t === 'stuff' ? 'Stuff' : (made(t)?.name ?? stepOf(t)?.name ?? 'Tab'));
 const baseOf = (t: Tab): Base => (isBase(t) ? t : (made(t)?.base ?? 'shape'));
 
 function defaults(t: Tab): Layout {
@@ -305,7 +309,7 @@ const tabs: TabDef[] = (Array.isArray(saved.tabs) ? (saved.tabs as Partial<TabDe
 /** Off: the tabs down the rail are just their icons (Shape, Look, Animate and Stuff too) */
 let showTabNames = saved.showTabNames !== false;
 const toolIds = (raw: unknown) => (Array.isArray(raw) ? (raw as unknown[]).filter((id): id is string => typeof id === 'string' && !!TOOLS[id]) : []);
-const layouts: Record<Tab, Layout> = { shape: repair(saved.shape, 'shape'), look: repair(saved.look, 'look'), animate: repair(saved.animate, 'animate') };
+const layouts: Record<Tab, Layout> = { shape: repair(saved.shape, 'shape'), look: repair(saved.look, 'look'), animate: repair(saved.animate, 'animate'), stuff: repair(saved.stuff, 'stuff') };
 for (const t of tabs) layouts[t.id] = repair(saved[t.id], t.id);
 for (const st of STEPS) layouts[st.id] = stepLayout(st);
 /** options the notice was told never to mention again */
@@ -333,7 +337,7 @@ let onGizmos = () => {};
 let onTabs = () => {};
 let switchTo = (_t: Tab) => {};
 /** back to Dress up from Stuff, with the list of things to put on open */
-let putOn = () => {};
+let addThing = () => {};
 /** after the sections are drawn or one is opened: the editor puts its own bits on their titles */
 let onSections = () => {};
 
@@ -417,11 +421,11 @@ export function setLayoutIdle(v: boolean) {
   sync();
 }
 
-export function initLayout(opts: { onGizmos: () => void; onTabs: () => void; switchTo: (t: Tab) => void; putOn: () => void; onSections: () => void }) {
+export function initLayout(opts: { onGizmos: () => void; onTabs: () => void; switchTo: (t: Tab) => void; addThing: () => void; onSections: () => void }) {
   onGizmos = opts.onGizmos;
   onTabs = opts.onTabs;
   switchTo = opts.switchTo;
-  putOn = opts.putOn;
+  addThing = opts.addThing;
   onSections = opts.onSections;
   renderTabs();
   for (const w of document.querySelectorAll<HTMLElement>('.ck-tool')) {
@@ -514,29 +518,18 @@ const tabIcon = (t: Pick<TabDef, 'icon' | 'color'>) => `<i class="${slab(t.icon)
 /** In a step: what to do, at the top of the inspector, and Back / Next at the bottom. */
 function renderStep() {
   const st = stepOf(tab);
-  // Stuff from Guided: making something for Dress up
-  const making = !tab && guided.on;
   const note = $('#step-note');
   const foot = $('#step-foot');
-  note.hidden = foot.hidden = !st && !making;
+  note.hidden = foot.hidden = !st;
   const action = $<HTMLButtonElement>('#step-action');
   action.hidden = !st?.action;
   if (st?.action) {
     action.textContent = st.action.label;
-    action.onclick = () => switchTo(st.action!.to);
+    action.onclick = () => addThing();
   }
   const back = $<HTMLButtonElement>('#step-back');
   const next = $<HTMLButtonElement>('#step-next');
-  renderStepBar(st, making);
-  if (making) {
-    $('#step-text').textContent = 'Making stuff for Dress up: draw pieces right on your critter, where it goes. It’s kept in My stuff as you go.';
-    back.hidden = next.hidden = false;
-    back.textContent = '‹ Back to Dress up';
-    back.onclick = () => switchTo(STUFF_STEP);
-    next.textContent = 'Done ›';
-    next.onclick = putOn;
-    return;
-  }
+  renderStepBar(st);
   if (!st) return;
   $('#step-text').textContent = (touch.matches && st.touchNote) || st.note;
   const i = STEPS.indexOf(st);
@@ -553,24 +546,24 @@ function renderStep() {
 }
 
 /** Guided on a phone: the rail along the bottom is one step at a time, with dots for where you are. */
-function renderStepBar(st: StepDef | undefined, making: boolean) {
-  const at = making ? STEPS.findIndex((o) => o.id === STUFF_STEP) : st ? STEPS.indexOf(st) : -1;
+function renderStepBar(st: StepDef | undefined) {
+  const at = st ? STEPS.indexOf(st) : -1;
   if (at < 0) return;
   const back = $<HTMLButtonElement>('#sb-back');
   const next = $<HTMLButtonElement>('#sb-next');
-  $('#sb-label').textContent = making ? 'Dress up · making stuff' : `Step ${at + 1} of ${STEPS.length} · ${STEPS[at].name}`;
+  $('#sb-label').textContent = `Step ${at + 1} of ${STEPS.length} · ${STEPS[at].name}`;
   $('#sb-dots').replaceChildren(...STEPS.map((o, i) => {
     const d = el('span', i === at ? 'on' : i < at ? 'done' : '');
     d.title = o.name;
     return d;
   }));
-  back.disabled = !making && at === 0;
-  back.title = making ? 'Back to Dress up' : at > 0 ? `Back: ${STEPS[at - 1].name}` : '';
-  back.onclick = () => switchTo(making ? STUFF_STEP : STEPS[at - 1].id);
-  next.hidden = !making && at === STEPS.length - 1;
-  next.textContent = making ? 'Done \u203a' : 'Next \u203a';
-  next.title = making ? 'Back to Dress up, with it on' : at < STEPS.length - 1 ? `Next: ${STEPS[at + 1].name}` : '';
-  next.onclick = making ? putOn : () => switchTo(STEPS[at + 1].id);
+  back.disabled = at === 0;
+  back.title = at > 0 ? `Back: ${STEPS[at - 1].name}` : '';
+  back.onclick = () => switchTo(STEPS[at - 1].id);
+  next.hidden = at === STEPS.length - 1;
+  next.textContent = 'Next \u203a';
+  next.title = at < STEPS.length - 1 ? `Next: ${STEPS[at + 1].name}` : '';
+  next.onclick = () => switchTo(STEPS[at + 1].id);
 }
 
 function render() {

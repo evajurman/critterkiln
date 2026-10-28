@@ -22,11 +22,11 @@ import {
 import { controls, initControls, viewMoved } from './editor/controls';
 import { flyTo, initFraming } from './editor/framing';
 import { drawState, initDrawing, localToOverlay, partPlane, screenToLocal } from './editor/drawing';
-import { initWorkbench } from './editor/workbench';
-import { gizmo, initAttach, selectAttachment } from './editor/attach';
-import { initArrange } from './editor/arrange';
+import { gizmo, initGizmo } from './editor/gizmo';
+import { clearTables, initFocus } from './editor/focus';
+import { initGizmoMode } from './editor/gizmoMode';
 import { initCreatureBar } from './editor/creatureBar';
-import { initAttachPanel } from './editor/attachPanel';
+import { initMyStuff } from './editor/kits';
 import { initCarry } from './editor/carry';
 import { initFiles, openFile, putView } from './editor/files';
 import { type CreationData, initCreations } from './editor/creations';
@@ -61,13 +61,13 @@ initPost();
 initState();
 initControls();
 initDrawing();
-initWorkbench();
-initAttach();
-initArrange();
+initGizmo();
+initFocus();
+initGizmoMode();
 initCreatureBar();
 initRiders();
 initPattern();
-initAttachPanel();
+initMyStuff();
 initCarry();
 initFiles();
 initCreations();
@@ -97,6 +97,8 @@ initAnimGif();
 // boot
 
 $<HTMLInputElement>('#ao').checked = gtao.enabled;
+// (a table left out by a reload goes first)
+clearTables(world);
 world.creatures.forEach((s, i) => (creatures[i] = makeCreature(s)));
 setBooted(true);
 
@@ -140,4 +142,4 @@ requestAnimationFrame(() => requestAnimationFrame(() => document.documentElement
 if (import.meta.env.PROD && 'serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
 
 // handy for poking at the scene from the dev-tools console
-if (import.meta.env.DEV) Object.assign(window, { __cc: { scene, camera, renderer, composer, controls, flyTo, renderNow: () => { controls.update(); composer.render(); }, screenToLocal, localToOverlay, partPlane, get creature() { return creature; }, get drawState() { return drawState; }, openFile, selectAttachment, gizmo } });
+if (import.meta.env.DEV) Object.assign(window, { __cc: { scene, camera, renderer, composer, controls, flyTo, renderNow: () => { controls.update(); composer.render(); }, screenToLocal, localToOverlay, partPlane, get creature() { return creature; }, get drawState() { return drawState; }, openFile, gizmo } });

@@ -49,7 +49,8 @@ export function installScrollbars() {
     return height - size(height);
   };
   const place = () => {
-    if (!box || !box.isConnected || box.scrollHeight <= box.clientHeight + 1) {
+    // (a box that's gone, or been hidden, like a popover closed by a click, takes its thumb with it)
+    if (!box || !box.isConnected || !box.getClientRects().length || box.scrollHeight <= box.clientHeight + 1) {
       box = null;
       thumb.hidden = true;
       return;
@@ -75,6 +76,8 @@ export function installScrollbars() {
     place();
   });
   document.addEventListener('scroll', place, true);
+  // a click or a key may close what was scrolling (the pointer hasn't moved): look again once it's done
+  for (const type of ['click', 'keydown'] as const) document.addEventListener(type, () => requestAnimationFrame(place), true);
   window.addEventListener('resize', place);
 
   thumb.addEventListener('pointerdown', (e) => {

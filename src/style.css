@@ -138,6 +138,7 @@ html.booting #app { opacity: 0; transition: none; }
 .scene-strip button { flex: none; width: 36px; height: 36px; border-radius: 50%; padding: 0; cursor: var(--cursor-click); }
 .scene-strip .strip-creature { border: 3px solid transparent; outline: 1px solid rgba(0,0,0,.12); outline-offset: -1px; }
 .scene-strip .strip-creature.active { border-color: var(--ink); }
+.creature-new[hidden] { display: none; }
 .scene-strip .strip-add { border: 2px dashed var(--line); background: transparent; color: var(--muted); }
 .scene-strip .strip-unfold { width: 34px; height: 30px; border-radius: 9px; border: 1px solid var(--line); background: var(--card); color: var(--ink); }
 .creature-foot .scene-fold { margin-right: -4px; }
@@ -617,7 +618,37 @@ button.primary.slim { width: auto; flex: 1; padding: 8px 10px; font-size: 14px; 
 .pattern-pop[hidden] { display: none; }
 .pattern-foot { display: flex; justify-content: space-between; align-items: center; margin: 8px 0; }
 .pattern-actions { display: flex; gap: 8px; justify-content: flex-end; }
-.attach-pop { width: 300px; max-height: 70%; overflow-y: auto; left: 0; right: 0; margin-inline: auto; }
+.attach-pop { width: 380px; max-width: calc(100% - 32px); max-height: 70%; overflow-y: auto; left: 0; right: 0; margin-inline: auto; }
+/* My stuff: something new up top, then the things, three across */
+.stuff-actions { display: flex; gap: 8px; margin: 8px 0 4px; }
+.stuff-new {
+  flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 10px;
+  border: 1.5px dashed var(--line); border-radius: 10px; background: var(--card); color: var(--ink);
+  font: inherit; font-weight: var(--w-bold); cursor: var(--cursor-click);
+}
+.stuff-new:hover { border-color: var(--accent); color: var(--accent); }
+.stuff-hint { margin: 4px 0 8px; }
+.stuff-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.stuff-card { display: flex; flex-direction: column; gap: 4px; min-width: 0; cursor: var(--cursor-click); outline: none; }
+.stuff-thumb {
+  position: relative; aspect-ratio: 1; border-radius: 10px; overflow: hidden; background: var(--bg);
+  border: 1px solid var(--line); display: grid; place-items: center; font-size: 24px; color: var(--muted);
+}
+.stuff-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.stuff-card:hover .stuff-thumb, .stuff-card:focus-visible .stuff-thumb { border-color: var(--accent); }
+.stuff-name { font-size: 12px; font-weight: var(--w-bold); text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stuff-empty { margin: 6px 0 2px; }
+/* a card's own buttons sit over its picture, showing on hover (always, on touch) */
+.stuff-tools { position: absolute; top: 4px; right: 4px; display: flex; flex-direction: column; gap: 3px; opacity: 0; transition: opacity .12s; }
+.stuff-card:hover .stuff-tools, .stuff-card:focus-within .stuff-tools { opacity: 1; }
+@media (hover: none) { .stuff-tools { opacity: 1; } }
+.stuff-tool {
+  width: 22px; height: 22px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%;
+  background: color-mix(in srgb, var(--panel) 88%, transparent); color: var(--ink); font-size: 11px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.18); cursor: var(--cursor-click);
+}
+.stuff-tool:hover { color: var(--accent); }
+.stuff-tool.danger:hover { color: var(--warn-ink); }
 .pop-title { display: flex; justify-content: space-between; align-items: center; }
 
 .attach-bar .seg-btn {
@@ -695,6 +726,9 @@ button.primary.slim { width: auto; flex: 1; padding: 8px 10px; font-size: 14px; 
 }
 .cube-wrap > button:hover { background: var(--panel); color: var(--accent); }
 .cube-home { left: 2px; top: 2px; width: 26px; height: 26px; font-size: 12px; }
+/* top right: which handles the view shows (Pose, Move, Rotate, Scale or none) */
+.cube-gizmo { right: 2px; top: 2px; width: 26px; height: 26px; font-size: 12px; }
+.cube-wrap > .cube-gizmo.on { color: var(--accent); }
 .cube-step { width: 20px; height: 20px; font-size: 13px; opacity: 0; pointer-events: none; transition: opacity .15s; }
 .cube-wrap.face-on .cube-step { opacity: 1; pointer-events: auto; }
 .cube-step[data-step="up"] { top: 4px; left: calc(50% - 10px); }
@@ -1641,6 +1675,8 @@ html.theme-color[data-mode="custom"] {
 .ctx-item.danger:hover:not(:disabled) { color: #d0486a; }
 .ctx-ic { width: 16px; text-align: center; flex: none; }
 .ctx-label { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* small print under a choice: what it means */
+.ctx-note { display: block; max-width: 230px; margin-top: 2px; white-space: normal; font-size: 11px; line-height: 1.3; opacity: .7; }
 .ctx-key { font: inherit; font-size: 11px; color: var(--muted); text-transform: uppercase; }
 .ctx-more { font-size: 10px; color: var(--muted); }
 .ctx-sep { height: 1px; margin: 4px 6px; background: var(--line); }

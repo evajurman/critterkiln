@@ -11,7 +11,6 @@ import { key, quality, type Quality, QUALITY, renderer, setQualityValue } from '
 import { composer, gtao, setAO } from './post';
 import { activate, creature, creatures, fitShadows, makeCreature, setCreature, world } from './state';
 import { drawHint, exitDraw, syncDrawBar } from './drawing';
-import { benchKey, setBenchKey, syncWorkbench } from './workbench';
 import { stopPlacing } from './arrange';
 import { closeAttachPops, closeTopPopovers, togglePopover } from './popovers';
 import { renderUI } from './panels';
@@ -287,8 +286,6 @@ function setQuality(q: Quality) {
   }
   setCreature(undefined as unknown as Creature); // replaced wholesale
   activate(world.active);
-  setBenchKey('');
-  syncWorkbench();
   fitShadows();
   saveSettings();
   renderSettings();

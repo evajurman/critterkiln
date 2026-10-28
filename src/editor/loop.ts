@@ -13,9 +13,9 @@ import { creature, creatures, mode, selected } from './state';
 import { controls, drag, viewChanged, viewMoved } from './controls';
 import { frameCreature, setTween, syncViewCube, tween } from './framing';
 import { drawState, renderOverlay } from './drawing';
-import { flashPiece, followBoard } from './workbench';
 import { followRiders } from './riders';
-import { gizmo } from './attach';
+import { gizmo } from './gizmo';
+import { soloIds } from './focus';
 import { flashStart, pickedBones } from './partPanel';
 import { hint } from './hints';
 import { settings, syncSliderNumbers } from './settings';
@@ -38,7 +38,7 @@ function reframeIfReshaped() {
   if (!framedAspect) framedAspect = camera.aspect;
   if (Math.abs(Math.log(camera.aspect / framedAspect)) <= Math.log(1.25)) return;
   framedAspect = camera.aspect;
-  if (!viewMoved && !drawState && mode !== 'stuff') frameCreature();
+  if (!viewMoved && !drawState) frameCreature();
 }
 /**
  * A saved view was put back: it was framed for a view `aspect` wide. Older saves don't say; they were
@@ -105,7 +105,7 @@ let settleShown = 0;
 const settleRing = document.querySelector<SVGCircleElement>('#settle-badge .settle-ring .fill')!;
 function settleWhenIdle(now: number) {
   // a playing loop changes the shape every frame: skins wait till it's paused
-  const busy = !!drawState || !!drag || gizmo.dragging || mode === 'stuff' || animMoving() || !!animRendering;
+  const busy = !!drawState || !!drag || gizmo.dragging || animMoving() || !!animRendering;
   let building = false;
   for (const c of creatures) {
     if (c.skinState === 'building') building = true;
@@ -167,8 +167,7 @@ export function loop(now: number) {
   const f = 1 - (now - flashStart) / 700;
   // one extra frame after the flash ends clears the glow
   if (f > -0.1) invalidate(1);
-  if (mode === 'stuff') flashPiece(drawState ? 0 : Math.max(0, f));
-  else creature.flash(drawState ? null : pickedBones(), Math.max(0, f));
+  creature.flash(drawState ? null : pickedBones(), Math.max(0, f));
   if (creature.tickBoing(now)) invalidate(1);
   tickAnim(now);
   // scattered copies that move (in Animate they keep to its timeline: see showAnimAt)
@@ -190,15 +189,18 @@ export function loop(now: number) {
   updateFocus(now);
   if (renderFrames <= 0) return;
   renderFrames--;
-  // the marking gizmo stays on its part as it's posed (and the workbench on the stuff it's editing)
+  // the marking gizmo stays on its part as it's posed
   followMarkTools();
   // creatures riding on others go where those parts are now
   followRiders();
-  followBoard();
   // sliders moved by code (undo, switching parts...) keep their numbers in step
   if (settings.numbers) syncSliderNumbers();
   if (shadowsChanged()) renderer.shadowMap.needsUpdate = true;
-  composer.render();
+  // Solo: just the thing it's on is drawn
+  const solo = soloIds();
+  creature.solo = solo;
+  if (solo) creature.withOnly(solo, () => composer.render());
+  else composer.render();
   watchSpeed(now);
 }
 

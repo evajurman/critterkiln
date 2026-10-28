@@ -8,7 +8,6 @@ import { camera, scene } from './stage';
 import { bokeh } from './post';
 import { creatures, mode } from './state';
 import { controls, raycaster, setRay } from './controls';
-import { board } from './workbench';
 import { hint } from './hints';
 
 const DOF_KEY = 'creature-creator/dof';
@@ -44,7 +43,7 @@ function focusDistance() {
 
 export function applyDof() {
   // the workbench is always sharp; the photo blur comes back with the scene
-  bokeh.enabled = dof.enabled && mode !== 'stuff';
+  bokeh.enabled = dof.enabled;
   // blur 0..1 maps onto the lens aperture; maxblur caps the spread
   const u = bokeh.uniforms as Record<string, THREE.IUniform>;
   u.aperture.value = 0.0004 + Math.pow(dof.blur, 2) * 0.03;
@@ -78,7 +77,7 @@ export function updateFocus(now: number) {
 /** Click-to-focus: put the focus plane on whatever is under the pointer. */
 export function focusAt(x: number, y: number) {
   setRay(x, y);
-  const targets = mode === 'stuff' ? [board] : creatures.map((c) => c.root);
+  const targets = creatures.map((c) => c.root);
   const hit = raycaster.intersectObjects(targets, true).find((h) => h.object instanceof THREE.Mesh && h.object.visible);
   const point = hit?.point ?? raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), new THREE.Vector3());
   if (!point) return;

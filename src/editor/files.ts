@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import { type CreatureState } from '../creature';
 import { unlock } from '../achievements';
-import { collection, downloadText, envelope, parseEnvelope, putThing, safeFileName, type Thing } from '../stuff';
+import { downloadText, envelope, parseEnvelope, safeFileName, type Thing } from '../stuff';
 import { saveRig, savedRigs, type RigState, type V3 } from '../rigs';
 import { $, fa, faClassic } from './dom';
 import { applyLighting, camera, LIGHT_KEY, lightTurn, ORTHO_KEY, sceneOrtho, setLightTurn, setOrtho, setSceneOrtho } from './stage';
@@ -14,8 +14,7 @@ import { activate, commit, creatures, makeCreature, migrate, mode, opened, state
 import { controls, creatureLabel } from './controls';
 import { flyTo, frameAll, freshView, setTween, tween } from './framing';
 import { exitDraw } from './drawing';
-import { renderCollection } from './workbench';
-import { deselectAttachment } from './attach';
+import { keepKits, kits, renderMyStuff, type Kit } from './kits';
 import { stopPlacing } from './arrange';
 import { freeSpot, renderCreatureBar } from './creatureBar';
 import { POPOVERS, togglePopover } from './popovers';
@@ -58,15 +57,16 @@ interface Bundle {
   name?: string;
   active?: number;
   creatures: CreatureState[];
-  stuff: Thing[];
+  /** My stuff: kits (things from before stuff was parts, too) */
+  stuff: (Thing | Kit)[];
   rigs: RigState[];
   look?: SceneLook;
 }
 
 export function currentLook(): SceneLook {
   const look: SceneLook = { backdrop, floor: { ...floorPrefs }, light: lightTurn, dof: { ...dof } };
-  // (the workbench has a view of its own; mid-flight, where it's flying to)
-  if (mode !== 'stuff') {
+  // (mid-flight, where it's flying to)
+  {
     const r4 = (v: THREE.Vector3) => v.toArray().map((x) => Math.round(x * 1e4) / 1e4) as V3;
     look.camera = { pos: r4(tween?.p1 ?? camera.position), target: r4(tween?.t1v ?? controls.target), ortho: sceneOrtho, aspect: Math.round(camera.aspect * 100) / 100 };
   }
@@ -88,7 +88,7 @@ function bundleFrom(text: string): Bundle {
       name: d.name as string | undefined,
       active: d.active as number | undefined,
       creatures: creaturesOf(d.creatures),
-      stuff: ((d.stuff as Thing[] | undefined) ?? []).filter((t) => Array.isArray(t?.pieces)),
+      stuff: ((d.stuff as (Thing | Kit)[] | undefined) ?? []).filter((t) => Array.isArray((t as Thing)?.pieces) || Array.isArray((t as Kit)?.bones)),
       rigs: (d.rigs as RigState[] | undefined) ?? [],
       look: d.look as SceneLook | undefined,
     };
@@ -96,8 +96,8 @@ function bundleFrom(text: string): Bundle {
   if (env.kind === 'creature') return { creatures: creaturesOf([d]), stuff: [], rigs: [] };
   if (env.kind === 'scene') return { name: d.name as string | undefined, active: d.active as number | undefined, creatures: creaturesOf((d.creatures as unknown[]) ?? []), stuff: [], rigs: [] };
   if (env.kind === 'stuff') {
-    if (!Array.isArray(d.pieces)) throw new Error('The stuff in this file could not be read.');
-    return { creatures: [], stuff: [d as unknown as Thing], rigs: [] };
+    if (!Array.isArray(d.pieces) && !Array.isArray(d.bones)) throw new Error('The stuff in this file could not be read.');
+    return { creatures: [], stuff: [d as unknown as Thing | Kit], rigs: [] };
   }
   return { creatures: [], stuff: (d.things as Thing[] | undefined) ?? [], rigs: (d.rigs as RigState[] | undefined) ?? [] };
 }
@@ -129,13 +129,8 @@ interface LoadChoice {
 
 /** Bring the chosen parts of a bundle in: alongside what's here, or in place of the scene. */
 /** Stuff these creatures are wearing (and any other things) joins My stuff, so it can be moved or worn again. */
-export function keepInCollection(creatures: CreatureState[], things: Thing[] = []) {
-  const have = new Set(collection().map((t) => t.id));
-  for (const t of [...creatures.flatMap((s) => (s.attachments ?? []).map((a) => a.thing)), ...things]) {
-    if (have.has(t.id)) continue;
-    putThing(t);
-    have.add(t.id);
-  }
+export function keepInCollection(creatures: CreatureState[], things: (Thing | Kit)[] = []) {
+  keepKits([...creatures.flatMap((s) => (s.attachments ?? []).map((a) => a.thing)), ...things]);
 }
 
 export function loadBundle(b: Bundle, pick: LoadChoice, replace: boolean) {
@@ -143,7 +138,6 @@ export function loadBundle(b: Bundle, pick: LoadChoice, replace: boolean) {
   const things = b.stuff.filter((_, i) => pick.stuff[i]);
   const rigs = b.rigs.filter((_, i) => pick.rigs[i]);
   exitDraw();
-  deselectAttachment();
   stopPlacing();
   for (const r of rigs) saveRig(r, r.name);
 
@@ -172,9 +166,9 @@ export function loadBundle(b: Bundle, pick: LoadChoice, replace: boolean) {
   }
   commit();
   renderUI();
-  renderCollection();
+  renderMyStuff();
   renderRigs();
-  if (incoming.length && mode !== 'stuff' && !viewed) {
+  if (incoming.length && !viewed) {
     if (replace) freshView();
     else frameAll();
   }
@@ -218,7 +212,7 @@ export function putView(v: NonNullable<SceneLook['camera']>, fly: boolean) {
   } catch {
     /* ignore */
   }
-  if (mode !== 'stuff') setOrtho(sceneOrtho);
+  setOrtho(sceneOrtho);
   const pos = new THREE.Vector3(...v.pos), target = new THREE.Vector3(...v.target);
   if (fly) flyTo(pos, target);
   else {
@@ -347,7 +341,7 @@ export function initFiles() {
     // its card in My creations shows it's saved
     flushCreationSave();
     saveBundle(
-      { active: world.active, creatures: world.creatures.map(forFile), stuff: collection(), rigs: savedRigs(), look: currentLook() },
+      { active: world.active, creatures: world.creatures.map(forFile), stuff: kits(), rigs: savedRigs(), look: currentLook() },
       sceneFileName(),
     );
     if (opened.id) noteSaved([opened.id], 'file');
