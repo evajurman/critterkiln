@@ -5,7 +5,7 @@
 // while it's the one being edited. Either way it's still a creature in the
 // scene: clicking it edits it like any other.
 
-import { othersHidden } from './focus';
+import { checkScattered, othersHidden } from './focus';
 import * as THREE from 'three';
 import { Creature, type BoneRT, type CreatureState, type Ride } from '../creature';
 import { uid } from '../stuff';
@@ -58,6 +58,7 @@ const place = new THREE.Matrix4();
  * being edited. Before every frame drawn.
  */
 export function followRiders() {
+  checkScattered();
   const done = new Set<Creature>();
   const follow = (c: Creature, depth = 0) => {
     if (done.has(c) || depth > 8) return;
@@ -206,7 +207,7 @@ export function editCreature(id: string) {
   followRiders();
   renderUI();
   frameCreature();
-  hint(`Editing ${creatureLabel(i)}: its copies change with it. Click your critter to go back`, 3000);
+  hint(`Editing ${creatureLabel(i)}: its copies change with it. Done (or Esc) goes back`, 3000);
 }
 
 export function initRiders() {

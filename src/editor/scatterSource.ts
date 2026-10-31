@@ -9,10 +9,12 @@ import { unlock } from '../achievements';
 import { type RigState } from '../rigs';
 import { uid } from '../stuff';
 import { fa, faClassic } from './dom';
-import { creatures, makeCreature, world } from './state';
+import { commit, creatures, makeCreature, world } from './state';
 import { creatureLabel } from './controls';
-import { creatureId, editCreature, setOffstage } from './riders';
+import { creatureId, setOffstage } from './riders';
+import { editScattered } from './focus';
 import { enterDraw } from './drawing';
+import { renderUI } from './panels';
 import { kits, type Kit } from './kits';
 
 /** A small creature of its own, kept off stage (only seen where it's scattered, and while it's edited). */
@@ -32,17 +34,39 @@ function addToScene(s: CreatureState) {
 function kitCreature(k: Kit): CreatureState {
   const bones = structuredClone(k.bones);
   delete bones[0].parent;
-  return offstageCreature(k.name, { base: 'custom', name: k.name, headId: bones[0].id, bones }, k.parts);
+  return { ...offstageCreature(k.name, { base: 'custom', name: k.name, headId: bones[0].id, bones }, k.parts), kit: k.id };
+}
+
+/** Does any scatter scatter this creature? */
+function scattered(id: string): boolean {
+  return world.creatures.some((s) => [...(s.markings ?? []), ...Object.values(s.parts).flatMap((p) => p.markings ?? [])].some((m) => m.type === 'scatter' && m.source === id));
+}
+
+/** Scatter `id` instead: the copy of a kit scattered before goes, if nothing scatters it now (picking the kit again makes it again). */
+function scatterThis(m: Marking, set: (patch: Partial<Marking>) => void, id: string) {
+  const was = m.source;
+  set({ source: id, thing: undefined });
+  unlock('scatter');
+  const i = was ? world.creatures.findIndex((s) => s.id === was) : -1;
+  const s = world.creatures[i];
+  if (s?.kit && s.offstage && i !== world.active && !scattered(s.id!) && !world.creatures.some((o) => o.rides?.on === s.id)) {
+    creatures[i].dispose();
+    creatures.splice(i, 1);
+    world.creatures.splice(i, 1);
+    if (world.active > i) world.active--;
+    commit();
+  }
+  // (the scene list too: the creature scattered is there)
+  renderUI();
 }
 
 /** Something new to scatter: one small part standing up from the surface, drawn straight away. */
-function drawNew(set: (patch: Partial<Marking>) => void) {
+function drawNew(m: Marking, set: (patch: Partial<Marking>) => void) {
   const rig: RigState = { base: 'custom', name: 'Thing', headId: 'thing', bones: [{ id: 'thing', name: 'Thing', start: [0, 0, 0], end: [0, 0, 0.3], side: [1, 0, 0], width: 0.12 }] };
   const s = offstageCreature('Thing', rig);
   addToScene(s);
-  set({ source: s.id, thing: undefined });
-  unlock('scatter');
-  editCreature(s.id!);
+  scatterThis(m, set, s.id!);
+  editScattered(s.id!);
   enterDraw({ kind: 'bone', boneId: 'thing' });
 }
 
@@ -63,22 +87,25 @@ export function renderScatterSource(el: HTMLElement, m: Marking, set: (patch: Pa
     list.append(c);
     return c;
   };
-  card('Draw new', faClassic('pencil'), 'Draw something new to scatter: a spike, a scale, a flower. Every copy follows as you draw', false, () => drawNew(set)).classList.add('new-card');
+  card('Draw new', faClassic('pencil'), 'Draw something new to scatter: a spike, a scale, a flower. Every copy follows as you draw', false, () => drawNew(m, set)).classList.add('new-card');
+  const current = m.source ? world.creatures.find((s) => s.id === m.source) : undefined;
+  const kitIds = new Set<string>();
   for (const k of kits()) {
-    card(k.name, k.thumb ? `<img src="${k.thumb}" alt="" />` : fa('box'), `Scatter ${k.name} (a copy of it, kept off stage)`, false, () => {
-      const s = kitCreature(k);
-      addToScene(s);
-      set({ source: s.id, thing: undefined });
-      unlock('scatter');
+    kitIds.add(k.id);
+    card(k.name, k.thumb ? `<img src="${k.thumb}" alt="" />` : fa('box'), `Scatter ${k.name} (a copy of it, kept off stage)`, current?.kit === k.id, () => {
+      if (current?.kit === k.id) return;
+      // the copy already out (another scatter's, or one let go of): not another one
+      let s = world.creatures.find((o) => o.kit === k.id && o.offstage);
+      if (!s) addToScene((s = kitCreature(k)));
+      scatterThis(m, set, s.id!);
     });
   }
-  // or a creature in the scene: little critters all over this one
+  // or a creature in the scene: little critters all over this one (a kit's copy is its card above)
   world.creatures.forEach((s, i) => {
-    if (i === world.active) return;
+    if (i === world.active || s.table || (s.kit && s.offstage && kitIds.has(s.kit))) return;
     const id = creatureId(s);
     const c = card(creatureLabel(i), fa('paw'), `Scatter copies of ${creatureLabel(i)}: change it, and they change too`, m.source === id, () => {
-      set({ source: id, thing: undefined });
-      unlock('scatter');
+      if (m.source !== id) scatterThis(m, set, id);
     });
     const thumb = c.querySelector<HTMLElement>('.thumb')!;
     thumb.classList.add('creature-swatch');
@@ -90,8 +117,8 @@ export function renderScatterSource(el: HTMLElement, m: Marking, set: (patch: Pa
   const edit = document.createElement('button');
   edit.className = 'ghost scatter-edit';
   edit.innerHTML = `${fa('pencil')} Change ${creatureLabel(source)}`;
-  edit.title = 'Edit it: every copy follows (click your critter to come back)';
-  edit.onclick = () => editCreature(m.source!);
+  edit.title = 'Edit it: every copy follows (Done, or Esc, comes back)';
+  edit.onclick = () => editScattered(m.source!);
   el.append(edit);
   if (!world.creatures[source].offstage) {
     const off = document.createElement('button');

@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // The keyboard: one handler for every shortcut (see src/shortcuts.ts).
 
-import { inSolo, leaveSolo } from './focus';
+import { inScattered, inSolo, leaveScattered, leaveSolo } from './focus';
 import { markGizmoMode, markToolKey, markToolsOut } from '../markingPanel';
 import { customTabs } from '../layout';
 import { captureShortcut, is } from '../shortcuts';
@@ -53,6 +53,8 @@ export function initKeys() {
       exitDraw();
     } else if (k === 'escape' && inSolo()) {
       leaveSolo();
+    } else if (k === 'escape' && inScattered()) {
+      leaveScattered();
     } else if (k === 'enter' && drawState) {
       e.preventDefault();
       finishDraw();

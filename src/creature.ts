@@ -327,6 +327,8 @@ export interface CreatureState {
   rides?: Ride;
   /** kept off the stage: only seen scattered over others (and while it's the one being edited) */
   offstage?: boolean;
+  /** made from this My stuff kit to be scattered (picking the kit again finds it, instead of making another) */
+  kit?: string;
   /** the table things are made on (see src/editor/focus.ts): there only while it's out */
   table?: boolean;
   /** the creature's own (editable) skeleton */

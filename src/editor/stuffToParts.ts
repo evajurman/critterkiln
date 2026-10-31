@@ -285,6 +285,7 @@ export function thingCreature(thing: Thing): CreatureState {
     id: uid(),
     name: thing.name.trim() || 'Thing',
     offstage: true,
+    kit: thing.id,
     keepFloor: false,
     eyes: { ...c.eyes, enabled: false, pairs: [] },
     ...(thing.pictures ? { pictures: structuredClone(thing.pictures) } : {}),
